@@ -6,11 +6,49 @@ body,
 }
 
 .pane-root {
-  height: 100vh;
+  height: calc(100vh - 36px);
   width: 100vw;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.toolbar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.toolbar-title {
+  font-weight: 600;
+  color: #c9d1d9;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar button {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: #30363d;
+  border-color: #388bfd;
 }
 
 .pane-split {

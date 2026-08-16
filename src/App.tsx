@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { PaneSplit } from "./components/PaneSplit";
+import { Toolbar } from "./components/Toolbar";
 import { useTerminalStore } from "./store/terminalStore";
 import "./App.css";
 
@@ -77,7 +78,12 @@ function App() {
   // sessionless placeholder leaf before the restore would spawn a throwaway
   // shell that loadLayout then replaces (an orphaned pty).
   if (!ready) return null;
-  return <PaneSplit />;
+  return (
+    <>
+      <Toolbar />
+      <PaneSplit />
+    </>
+  );
 }
 
 export default App;
