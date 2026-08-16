@@ -2404,6 +2404,7 @@ dependencies = [
 name = "oppa"
 version = "0.1.0"
 dependencies = [
+ "parking_lot",
  "portable-pty",
  "serde",
  "serde_json",
