@@ -9,6 +9,7 @@ import { TerminalPane } from "./TerminalPane";
 export function SessionLeaf({ id }: { id: string }) {
   const session = useTerminalStore((s) => s.sessions[id]);
   const spawnSession = useTerminalStore((s) => s.spawnSession);
+  const substituteSessionId = useTerminalStore((s) => s.substituteSessionId);
   const nodeRef = useRef<HTMLDivElement>(null);
   // StrictMode double-invokes effects in dev; the swap is idempotent (the
   // placeholder id is already gone after the first pass) but the spawn itself
@@ -23,16 +24,14 @@ export function SessionLeaf({ id }: { id: string }) {
       // the node (React also nulls the ref); StrictMode's dev-only effect
       // replay does not, so the swap survives the double-invoked mount.
       if (!nodeRef.current?.isConnected) return;
-      useTerminalStore.setState((state) => ({
-        // Only swap when the leaf is still the placeholder — the layout may
-        // have changed (split/close) while the spawn was in flight.
-        layout:
-          state.layout.type === "leaf" && state.layout.id === id
-            ? { type: "leaf", id: realId }
-            : state.layout,
-      }));
+      // Substitute the resolved id for the placeholder wherever it still
+      // occurs in the tree: a split/close during the in-flight spawn can
+      // wrap the placeholder as a child (or clone it), so the swap cannot
+      // assume the placeholder is still the root. When the placeholder is
+      // already gone (e.g. the leaf was closed), this is a no-op.
+      substituteSessionId(id, realId);
     });
-  }, [id, session, spawnSession]);
+  }, [id, session, spawnSession, substituteSessionId]);
 
   if (session) return <TerminalPane id={session.id} />;
 

@@ -17,6 +17,15 @@ export function TerminalPane({ id }: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(id);
   const parsedRef = useRef(0);
+  // Subscribe to the STATUS string, not the session object: resizeSession
+  // writes a fresh session object into the store on every ResizeObserver
+  // callback, and a RO fires immediately on observe(). Depending on the
+  // session object would make that resize write re-run the effect
+  // (cleanup + new Terminal + new RO -> initial fire -> resize -> ...),
+  // disposing the xterm and wiping output forever. The status primitive
+  // (missing -> running -> error) still drives attach/teardown, while
+  // resize writes leave it unchanged.
+  const status = useTerminalStore((s) => s.sessions[id]?.status);
   const session = useTerminalStore((s) => s.sessions[id]);
   const ackSession = useTerminalStore((s) => s.ackSession);
   const resizeSession = useTerminalStore((s) => s.resizeSession);
@@ -24,7 +33,7 @@ export function TerminalPane({ id }: { id: string }) {
   useEffect(() => {
     // Missing session: SessionLeaf is still spawning (or the leaf is a stale
     // placeholder) — nothing to attach to yet.
-    if (!session || session.status !== "running") return;
+    if (!status || status !== "running") return;
 
     // Rebuild the terminal when the id changes; the previous one is disposed.
     idRef.current = id;
@@ -95,7 +104,7 @@ export function TerminalPane({ id }: { id: string }) {
       unsubs.forEach((u) => u());
       term.dispose();
     };
-  }, [id, session, ackSession, resizeSession]);
+  }, [id, status, ackSession, resizeSession]);
 
   if (!session) {
     // Session id not in the store yet — an empty container; SessionLeaf's

@@ -213,6 +213,92 @@ describe("terminalStore", () => {
     expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
   });
 
+  it("closePane deletes the removed leaf's session from the store", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+        b: { id: "b", title: "b", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      focusedPath: [0],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).toHaveBeenCalledWith("a");
+    const sessions = useTerminalStore.getState().sessions;
+    expect(sessions["a"]).toBeUndefined(); // pruned leaf id is gone from the tree
+    expect(sessions["b"]).toBeDefined();
+  });
+
+  it("closePane deletes the last session when the final pane is closed", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "a" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).toHaveBeenCalledWith("a");
+    expect(useTerminalStore.getState().sessions).toEqual({});
+  });
+
+  it("closePane re-focuses the depth-first leftmost remaining leaf via firstLeafPath", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+        b: { id: "b", title: "b", status: "running", cols: 80, rows: 24 },
+        c: { id: "c", title: "c", status: "running", cols: 80, rows: 24 },
+        d: { id: "d", title: "d", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+        b: {
+          type: "split",
+          dir: "v",
+          ratio: 0.5,
+          a: { type: "leaf", id: "c" },
+          b: { type: "leaf", id: "d" },
+        },
+      },
+      focusedPath: [1, 1], // close the deep right-bottom leaf
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).toHaveBeenCalledWith("d");
+    const { layout, focusedPath } = useTerminalStore.getState();
+    expect(layout).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      b: { type: "leaf", id: "c" },
+    });
+    expect(focusedPath).toEqual([0, 0]); // leftmost leaf at depth, via firstLeafPath
+  });
+
   it("focusPane sets the focused path", () => {
     useTerminalStore.getState().focusPane([0, 1]);
     expect(useTerminalStore.getState().focusedPath).toEqual([0, 1]);

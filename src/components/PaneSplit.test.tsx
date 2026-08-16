@@ -142,12 +142,16 @@ describe("PaneSplit", () => {
       y: 0,
       toJSON: () => ({}),
     });
+    const capture = vi.spyOn(divider, "setPointerCapture");
+    const release = vi.spyOn(divider, "releasePointerCapture");
 
     // Divider is 100px wide: dragging 25px to the right moves a's share to
     // (50 + 25) / 100 = 0.75.
-    fireEvent.mouseDown(divider, { clientX: 50, buttons: 1 });
-    fireEvent.mouseMove(window, { clientX: 75 });
-    fireEvent.mouseUp(window);
+    fireEvent.pointerDown(divider, { pointerId: 1, clientX: 50, buttons: 1 });
+    expect(capture).toHaveBeenCalledWith(1);
+    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 75 });
+    fireEvent.pointerUp(divider, { pointerId: 1, clientX: 75 });
+    expect(release).toHaveBeenCalledWith(1);
 
     const ratio = useTerminalStore.getState().layout;
     if (ratio.type !== "split") throw new Error("expected split root");
@@ -169,16 +173,48 @@ describe("PaneSplit", () => {
 
     const { container } = render(<PaneSplit />);
     const divider = container.querySelector(".pane-divider")!;
-    fireEvent.mouseDown(divider, { clientX: 50, buttons: 1 });
-    fireEvent.mouseMove(window, { clientX: 75 });
-    fireEvent.mouseUp(window);
+    fireEvent.pointerDown(divider, { pointerId: 1, clientX: 50, buttons: 1 });
+    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 75 });
+    fireEvent.pointerUp(divider, { pointerId: 1, clientX: 75 });
 
     const after = useTerminalStore.getState().layout;
     if (after.type !== "split") throw new Error("expected split root");
-    fireEvent.mouseMove(window, { clientX: 0 });
+    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 0 });
     const final = useTerminalStore.getState().layout;
     if (final.type !== "split") throw new Error("expected split root");
     expect(final.ratio).toBe(after.ratio);
+  });
+
+  it("cleans up drag listeners when the window blurs mid-drag (no leak)", () => {
+    setSessions(["a", "b"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+    });
+
+    const { container } = render(<PaneSplit />);
+    const divider = container.querySelector(".pane-divider")!;
+    const release = vi.spyOn(divider, "releasePointerCapture");
+
+    // Start a drag, then the window loses focus before any mouseup (e.g. the
+    // user alt-tabs). Releasing outside the window must not leak listeners:
+    // a later pointermove must not keep mutating the ratio.
+    fireEvent.pointerDown(divider, { pointerId: 1, clientX: 50, buttons: 1 });
+    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 75 });
+    fireEvent.blur(window);
+    expect(release).toHaveBeenCalledWith(1);
+
+    const afterBlur = useTerminalStore.getState().layout;
+    if (afterBlur.type !== "split") throw new Error("expected split root");
+    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 0 });
+    const afterMove = useTerminalStore.getState().layout;
+    if (afterMove.type !== "split") throw new Error("expected split root");
+    expect(afterMove.ratio).toBe(afterBlur.ratio);
   });
 
   it("clicking a leaf focuses its path", () => {

@@ -156,6 +156,25 @@ describe("TerminalPane", () => {
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
   });
 
+  it("does not recreate the terminal when a ResizeObserver callback fires (no resize feedback loop)", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    expect(xtermState.instances.length).toBe(1);
+
+    // A RO callback (as if observe() fired immediately) writes a FRESH
+    // session object into the store via resizeSession. The effect must NOT
+    // re-run on that: status stays "running", so no new Terminal is created
+    // and the current one is not disposed. With the session object in the
+    // effect deps this loops forever (mount -> resize -> store write ->
+    // cleanup+re-run -> new RO fires -> resize -> ...).
+    fireResize();
+    fireResize();
+    await vi.waitFor(() => expect(ptyResizeMock).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(xtermState.instances.length).toBe(1);
+    expect(xtermState.instances[0]!.dispose).not.toHaveBeenCalled();
+  });
+
   it("renders the one-line error state when the store session is an error", () => {
     useTerminalStore.setState({
       sessions: {

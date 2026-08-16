@@ -10,6 +10,7 @@ import {
   remove,
   focus,
   firstLeafPath,
+  substituteLeafId,
 } from "../lib/pane-manager/layout";
 import type { Layout, Path } from "../lib/pane-manager/layout";
 
@@ -50,6 +51,7 @@ interface TerminalState {
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
+  substituteSessionId: (from: string, to: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
   splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
@@ -151,6 +153,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
+  // Replace every occurrence of leaf id `from` with `to` in the layout tree.
+  // SessionLeaf uses this to bind a resolved spawn id to its placeholder
+  // after the layout may have changed (split/close) while the spawn was in
+  // flight. A no-op when `from` no longer occurs.
+  substituteSessionId: (from, to) => {
+    set((state) => {
+      const layout = substituteLeafId(state.layout, from, to);
+      return layout === state.layout ? state : { layout };
+    });
+  },
+
   setLayout: (layout) => set({ layout }),
 
   // The drag divider in PaneSplit: set the ratio of the split at `path`.
@@ -204,11 +217,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (get().sessions[removedId]) {
       await get().killSession(removedId);
     }
+    // The removed leaf id is gone from the tree: drop its session too so
+    // killed sessions do not accumulate in the store forever.
+    const sessions = { ...get().sessions };
+    delete sessions[removedId];
     if (next === null) {
-      set({ layout: { type: "leaf", id: "" }, focusedPath: [] });
+      set({ sessions, layout: { type: "leaf", id: "" }, focusedPath: [] });
       return;
     }
-    set({ layout: next, focusedPath: firstLeafPath(next) });
+    set({ sessions, layout: next, focusedPath: firstLeafPath(next) });
   },
 
   focusPane: (path) => set({ focusedPath: path }),

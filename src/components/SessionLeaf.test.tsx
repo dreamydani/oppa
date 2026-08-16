@@ -27,12 +27,23 @@ function running(id: string) {
   return { id, title: id, status: "running" as const, cols: 80, rows: 24 };
 }
 
-// Mirrors how PaneSplit feeds SessionLeaf: the leaf id comes from the layout
-// tree, so a spawn-swap re-renders the leaf with the real session id.
+// Mirrors how PaneSplit feeds SessionLeaf: every leaf id in the layout tree
+// gets a SessionLeaf, so a spawn-swap re-renders the leaf with the real
+// session id and a placeholder stays mounted even when a split wraps it.
 function LeafHarness() {
   const layout = useTerminalStore((s) => s.layout);
-  if (layout.type !== "leaf") return null;
-  return <SessionLeaf id={layout.id} />;
+  const renderNode = (node: ReturnType<typeof useTerminalStore.getState>["layout"], path: number[]): React.ReactNode => {
+    if (node.type === "leaf") {
+      return <SessionLeaf key={path.join(".")} id={node.id} />;
+    }
+    return (
+      <div key={path.join(".")}>
+        {renderNode(node.a, [...path, 0])}
+        {renderNode(node.b, [...path, 1])}
+      </div>
+    );
+  };
+  return <div>{renderNode(layout, [])}</div>;
 }
 
 describe("SessionLeaf", () => {
@@ -155,5 +166,50 @@ describe("SessionLeaf", () => {
       expect(useTerminalStore.getState().sessions["late"]).toBeDefined(),
     );
     expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
+  });
+
+  it("substitutes the placeholder id everywhere when the user splits before the spawn resolves", async () => {
+    let resolveSpawn!: (id: string) => void;
+    ptySpawnMock.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveSpawn = resolve;
+      }),
+    );
+
+    // Root placeholder leaf (fresh start) begins spawning.
+    useTerminalStore.setState({ layout: { type: "leaf", id: "" } });
+    const { container } = render(<LeafHarness />);
+    expect(ptySpawnMock).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".session-leaf-loading")).not.toBeNull();
+
+    // The user splits before the spawn resolves: splitPane spawns a real
+    // session for the new leaf and wraps the placeholder as a child.
+    ptySpawnMock.mockResolvedValueOnce("other");
+    await useTerminalStore.getState().splitPane("h");
+    expect(useTerminalStore.getState().layout).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: { type: "leaf", id: "" },
+      b: { type: "leaf", id: "other" },
+    });
+
+    // The original spawn now resolves: the placeholder id must be replaced
+    // wherever it still occurs in the tree — no placeholder may remain and
+    // the real session must be referenced by the tree.
+    resolveSpawn("s1");
+    await waitFor(() =>
+      expect(useTerminalStore.getState().layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s1" },
+        b: { type: "leaf", id: "other" },
+      }),
+    );
+    const layout = useTerminalStore.getState().layout;
+    expect(JSON.stringify(layout)).not.toContain('"id":""');
+    expect(useTerminalStore.getState().sessions["s1"]).toBeDefined();
+    expect(useTerminalStore.getState().sessions["other"]).toBeDefined();
   });
 });

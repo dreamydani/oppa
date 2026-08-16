@@ -33,6 +33,11 @@ body,
   min-height: 0;
 }
 
+.pane-leaf.focused {
+  outline: 1px solid #388bfd;
+  outline-offset: -1px;
+}
+
 .pane-divider {
   flex: 0 0 auto;
   background: #21262d;

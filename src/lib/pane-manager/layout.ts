@@ -58,15 +58,22 @@ export function focus(tree: Layout, path: Path): string {
   return focus(child, rest);
 }
 
-// Number of leaves in the tree.
-export function leafCount(tree: Layout): number {
-  if (tree.type === "leaf") return 1;
-  return leafCount(tree.a) + leafCount(tree.b);
-}
-
-// Id of the depth-first leftmost leaf (used to re-focus after a close).
-export function firstLeaf(tree: Layout): string {
-  return focus(tree, firstLeafPath(tree));
+// Replace every leaf with id `from` by a leaf with id `to`. Used to bind a
+// resolved spawn id to its placeholder leaf. Pure: returns the SAME tree
+// reference when `from` does not occur anywhere, so callers can treat
+// "placeholder still present" as a cheap identity check.
+export function substituteLeafId(
+  tree: Layout,
+  from: string,
+  to: string,
+): Layout {
+  if (tree.type === "leaf") {
+    return tree.id === from ? { type: "leaf", id: to } : tree;
+  }
+  const a = substituteLeafId(tree.a, from, to);
+  const b = substituteLeafId(tree.b, from, to);
+  if (a === tree.a && b === tree.b) return tree;
+  return { type: "split", dir: tree.dir, ratio: tree.ratio, a, b };
 }
 
 // Path of the depth-first leftmost leaf (the root leaf has path `[]`).

@@ -3,9 +3,7 @@ import {
   split,
   remove,
   focus,
-  leafCount,
-  firstLeaf,
-  firstLeafPath,
+  substituteLeafId,
 } from "./layout";
 import type { Layout } from "./layout";
 
@@ -45,7 +43,7 @@ describe("layout", () => {
       const original = JSON.stringify(tree);
       split("v", tree, [0], "c");
       expect(JSON.stringify(tree)).toBe(original);
-      expect(leafCount(tree)).toBe(2);
+      expect(substituteLeafId(tree, "x", "y")).toBe(tree); // no placeholder: untouched
     });
 
     it("no-ops when the path descends into a leaf", () => {
@@ -69,7 +67,7 @@ describe("layout", () => {
       );
       const next = remove(tree, [0, 0]);
       expect(next).toEqual(splitTree("h", leaf("b"), leaf("c")));
-      expect(leafCount(next!)).toBe(2);
+      expect(substituteLeafId(next!, "z", "w")).toBe(next); // no placeholder: untouched
     });
 
     it("collapses the inner split when the last of its leaves is removed", () => {
@@ -109,27 +107,52 @@ describe("layout", () => {
     });
   });
 
-  describe("helpers", () => {
-    it("leafCount counts every leaf", () => {
-      const tree = splitTree(
-        "h",
-        splitTree("v", leaf("a"), leaf("b")),
-        leaf("c"),
-      );
-      expect(leafCount(tree)).toBe(3);
-      expect(leafCount(leaf("a"))).toBe(1);
+  describe("substituteLeafId", () => {
+    it("replaces the id of a root placeholder leaf", () => {
+      expect(substituteLeafId(leaf("old"), "old", "new")).toEqual(leaf("new"));
     });
 
-    it("firstLeaf returns the depth-first leftmost leaf and its path", () => {
+    it("substitutes the placeholder id wherever it occurs in a nested tree", () => {
       const tree = splitTree(
         "h",
-        splitTree("v", leaf("a"), leaf("b")),
-        leaf("c"),
+        splitTree("v", leaf("old"), leaf("a")),
+        splitTree("v", leaf("b"), leaf("old")),
       );
-      expect(firstLeaf(tree)).toBe("a");
-      expect(firstLeafPath(tree)).toEqual([0, 0]);
-      expect(firstLeaf(leaf("z"))).toBe("z");
-      expect(firstLeafPath(leaf("z"))).toEqual([]);
+      expect(substituteLeafId(tree, "old", "new")).toEqual(
+        splitTree(
+          "h",
+          splitTree("v", leaf("new"), leaf("a")),
+          splitTree("v", leaf("b"), leaf("new")),
+        ),
+      );
+    });
+
+    it("returns the same tree when the placeholder id is absent", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(substituteLeafId(tree, "nope", "new")).toBe(tree);
+    });
+
+    it("substitutes a placeholder that was wrapped as a child by a split", () => {
+      // splitPane wraps the placeholder as `a` of a new split while its
+      // spawn is still in flight; the resolved session id must replace it
+      // at depth, not just at the root.
+      const tree = splitTree(
+        "h",
+        leaf("placeholder"),
+        splitTree("v", leaf("b"), leaf("c")),
+      );
+      const next = substituteLeafId(tree, "placeholder", "s1");
+      expect(next).toEqual(
+        splitTree("h", leaf("s1"), splitTree("v", leaf("b"), leaf("c"))),
+      );
+      expect(JSON.stringify(next)).not.toContain("placeholder");
+    });
+
+    it("keeps every non-matching leaf untouched", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(substituteLeafId(tree, "a", "a1")).toEqual(
+        splitTree("h", leaf("a1"), leaf("b")),
+      );
     });
   });
 });

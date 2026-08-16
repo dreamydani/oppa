@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Layout, Path } from "../store/terminalStore";
 import { SessionLeaf } from "./SessionLeaf";
@@ -91,12 +91,16 @@ function SplitDivider({
     startRef.current.ratio = ratio;
   }, [ratio]);
 
-  const onMouseDown = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
+      // currentTarget is only valid during dispatch; the window-level
+      // handlers below need the divider and pointer id captured.
+      const divider = e.currentTarget;
+      const pointerId = e.pointerId;
       // The divider spans the whole cross axis; use the pane's main axis for
       // the drag distance.
-      const element = (e.currentTarget.parentElement as HTMLElement | null)?.parentElement;
+      const element = (divider.parentElement as HTMLElement | null)?.parentElement;
       const length = element ? element.getBoundingClientRect()[dir === "h" ? "width" : "height"] : 1;
       startRef.current = {
         start: dir === "h" ? e.clientX : e.clientY,
@@ -104,18 +108,37 @@ function SplitDivider({
         ratio,
       };
 
-      const onMove = (ev: MouseEvent) => {
+      // Pointer capture keeps the drag alive even when the cursor leaves the
+      // window, and guarantees a pointerup is delivered wherever the button
+      // is released — no window-level listeners that could leak.
+      divider.setPointerCapture(pointerId);
+
+      const onMove = (ev: PointerEvent) => {
         const delta =
           (dir === "h" ? ev.clientX : ev.clientY) - startRef.current.start;
         const next = startRef.current.ratio + delta / startRef.current.length;
         setRatio(path, Math.min(1, Math.max(0, next)));
       };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+      const endDrag = () => {
+        // Release capture first. Browsers implicitly release capture when
+        // the window blurs, so releasing again can throw — ignore. Real
+        // browsers also fire a synthetic pointerup on release that re-enters
+        // endDrag; it is idempotent (guarded release + removeEventListener).
+        try {
+          divider.releasePointerCapture(pointerId);
+        } catch {
+          // capture already lost — nothing to release
+        }
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", endDrag);
+        window.removeEventListener("blur", endDrag);
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", endDrag);
+      // Releasing the button outside the window (or alt-tabbing away) may
+      // never deliver a pointerup; the window blur is the last resort that
+      // cleans the listeners up instead of leaking them.
+      window.addEventListener("blur", endDrag);
     },
     [dir, path, ratio, setRatio],
   );
@@ -123,7 +146,7 @@ function SplitDivider({
   return (
     <div
       className={`pane-divider dir-${dir}`}
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
     />
   );
 }
