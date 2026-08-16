@@ -7,5 +7,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     setupFiles: ["./src/test/setup.ts"],
+    // RTL requires React's development build (React.act); vitest inherits
+    // NODE_ENV from the shell, which may be "production" on Windows.
+    env: { NODE_ENV: "development" },
   },
 });
