@@ -3,9 +3,21 @@ mod layout;
 mod pty;
 
 use pty::manager::PtyManager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Close-save handshake: the renderer saves the layout via an async
+    // `invoke`, which `window.beforeunload` cannot await (the webview is torn
+    // down as the window closes, so the save never lands). Intercept the exit
+    // instead: tell the renderer to save, wait for its `app:save-complete`
+    // signal, then exit. Falls back to exiting after a short timeout so a
+    // hung renderer cannot trap the app.
+    let save_done = Arc::new(AtomicBool::new(false));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
@@ -18,7 +30,42 @@ pub fn run() {
             pty::commands::pty_list,
             layout::save_layout,
             layout::load_layout,
+            confirm_save_complete,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .setup(move |app| {
+            let save_done = Arc::clone(&save_done);
+            // The renderer signals that it finished the save via a command.
+            // (confirm_save_complete below sets the flag.)
+            app.manage(save_done);
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+                // Ask the renderer to flush its save, then wait briefly.
+                let _ = app_handle.emit("app:before-close", ());
+                let deadline = Instant::now() + Duration::from_millis(1500);
+                let flag = app_handle.state::<Arc<AtomicBool>>();
+                while Instant::now() < deadline {
+                    if flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                // Reset the flag so a subsequent exit (user closes again) also
+                // waits for a save.
+                flag.store(false, Ordering::SeqCst);
+                app_handle.exit(0);
+            }
+        });
+}
+
+/// The renderer calls this after it finishes flushing the layout save during
+/// the close handshake, so the exit wait loop can stop early.
+#[tauri::command]
+fn confirm_save_complete(app: tauri::AppHandle) {
+    let flag = app.state::<Arc<AtomicBool>>();
+    flag.store(true, Ordering::SeqCst);
 }

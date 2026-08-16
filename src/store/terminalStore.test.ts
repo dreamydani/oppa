@@ -400,6 +400,43 @@ describe("terminalStore", () => {
     expect(useTerminalStore.getState().focusedPath).toEqual([]);
   });
 
+  describe("save-on-mutation", () => {
+    // The store persists the layout on every structural change so the saved
+    // file is always current even if the app is killed without the close
+    // handshake running.
+    beforeEach(() => {
+      useTerminalStore.setState({ ready: true });
+    });
+
+    it("splitPane persists the new arrangement", async () => {
+      ptySpawnMock.mockResolvedValue("s1");
+      await useTerminalStore.getState().splitPane("h");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("closePane persists the arrangement", async () => {
+      ptySpawnMock.mockResolvedValue("s1");
+      await useTerminalStore.getState().splitPane("h");
+      saveLayoutMock.mockClear();
+      await useTerminalStore.getState().closePane();
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("setRatio persists the new ratio", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      useTerminalStore.getState().setRatio([], 0.75);
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+  });
+
   describe("setRatio", () => {
     it("updates the ratio of the split at the given path", () => {
       useTerminalStore.setState({

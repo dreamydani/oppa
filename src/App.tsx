@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { PaneSplit } from "./components/PaneSplit";
 import { Toolbar } from "./components/Toolbar";
 import { useTerminalStore } from "./store/terminalStore";
+import { confirmSaveComplete } from "./lib/pty/transport";
 import "./App.css";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
@@ -38,6 +40,31 @@ function App() {
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saveLayout]);
+
+  // Close handshake: Rust intercepts the window close and emits
+  // `app:before-close`; flush the save, signal completion, and let Rust exit.
+  // This is what makes restore reliable — `beforeunload` cannot await the
+  // async save invoke, so the exit path must wait for it on the Rust side.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen("app:before-close", async () => {
+      try {
+        await saveLayout();
+        await confirmSaveComplete();
+      } catch {
+        // A failed save must not trap the app: Rust exits after its timeout
+        // anyway.
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [saveLayout]);
 
   useEffect(() => {

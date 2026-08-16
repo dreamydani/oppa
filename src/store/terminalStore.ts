@@ -220,7 +220,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         b: head === 1 ? nextChild : node.b,
       };
     };
-    set({ layout: rebuild(tree, path) });
+    const next = rebuild(tree, path);
+    if (next === tree) return;
+    set({ layout: next });
+    void get().saveLayout().catch(() => {});
   },
 
   // Split the pane at `path` (defaults to the focused pane): spawn a new
@@ -232,6 +235,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       layout: split(dir, get().layout, target, id),
       focusedPath: [...target, 1],
     });
+    // Persist immediately so a crash/close never loses the arrangement.
+    void get().saveLayout().catch(() => {});
   },
 
   // Close the pane at `path` (defaults to the focused pane): kill its session
@@ -252,9 +257,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     delete sessions[removedId];
     if (next === null) {
       set({ sessions, layout: { type: "leaf", id: "" }, focusedPath: [] });
-      return;
+    } else {
+      set({ sessions, layout: next, focusedPath: firstLeafPath(next) });
     }
-    set({ sessions, layout: next, focusedPath: firstLeafPath(next) });
+    // Persist immediately so the arrangement is never stale on close.
+    void get().saveLayout().catch(() => {});
   },
 
   focusPane: (path) => set({ focusedPath: path }),

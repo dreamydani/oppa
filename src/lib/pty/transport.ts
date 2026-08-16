@@ -45,6 +45,11 @@ export function saveLayout(layoutJson: string): Promise<void> {
 export function loadLayout(): Promise<string | null> {
   return invoke("load_layout");
 }
+// Signals the Rust close handshake that the layout save has flushed, so the
+// app can exit instead of waiting out the full timeout.
+export function confirmSaveComplete(): Promise<void> {
+  return invoke("confirm_save_complete");
+}
 export async function onPtyData(cb: (p: PtyDataPayload) => void) {
   return listen<PtyDataPayload>("pty:data", (e) => cb(e.payload));
 }
