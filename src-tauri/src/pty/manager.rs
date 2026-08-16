@@ -37,8 +37,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[derive(Default)]
 pub struct PtyManager {
     sessions: Arc<Mutex<HashMap<String, PtySession>>>,
-    out_rx: Mutex<HashMap<String, Receiver<Vec<u8>>>>,
-    exit_rx: Mutex<HashMap<String, Receiver<Option<i32>>>>,
+    /// Arc so the watchdog thread can drop a session's entry when its child
+    /// exits (the shipping build never calls `take_output`).
+    out_rx: Arc<Mutex<HashMap<String, Receiver<Vec<u8>>>>>,
+    /// Arc so the watchdog thread can drop a session's entry when its child
+    /// exits (the shipping build never calls `take_exit`).
+    exit_rx: Arc<Mutex<HashMap<String, Receiver<Option<i32>>>>>,
     next_id: AtomicU64,
 }
 
@@ -46,8 +50,8 @@ impl PtyManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            out_rx: Mutex::new(HashMap::new()),
-            exit_rx: Mutex::new(HashMap::new()),
+            out_rx: Arc::new(Mutex::new(HashMap::new())),
+            exit_rx: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(0),
         }
     }
@@ -86,17 +90,30 @@ impl PtyManager {
             })
             .map_err(|e| format!("failed to open pty: {e}"))?;
 
-        let id = (self.next_id.fetch_add(1, Ordering::SeqCst) + 1).to_string();
-
+        // Allocate the id and insert the session registry entries under one
+        // lock, so id allocation + registration are atomic (no two spawns can
+        // race to claim the same id).
         let (out_tx, out_rx) = channel::<Vec<u8>>();
         let (exit_tx, exit_rx) = channel::<Option<i32>>();
-        self.out_rx.lock().insert(id.clone(), out_rx);
-        self.exit_rx.lock().insert(id.clone(), exit_rx);
+        let id = {
+            let mut sessions = self.sessions.lock();
+            let id = (self.next_id.fetch_add(1, Ordering::SeqCst) + 1).to_string();
+            self.out_rx.lock().insert(id.clone(), out_rx);
+            self.exit_rx.lock().insert(id.clone(), exit_rx);
 
-        let session = PtySession::new(id.clone(), pair, &shell, &args, cwd.as_deref(), cols, rows)
-            .map_err(|e| format!("failed to spawn pty session: {e}"))?;
-        self.start_read_loop(&session, out_tx, exit_tx, on_data, on_exit);
-        self.sessions.lock().insert(id.clone(), session);
+            let session = PtySession::new(id.clone(), pair, &shell, &args, cwd.as_deref(), cols, rows)
+                .map_err(|e| {
+                    // Registration happened before the session was built; roll
+                    // it back so a failed spawn leaves no registry entries.
+                    self.out_rx.lock().remove(&id);
+                    self.exit_rx.lock().remove(&id);
+                    format!("failed to spawn pty session: {e}")
+                })?;
+
+            self.start_read_loop(&session, out_tx, exit_tx, on_data, on_exit);
+            sessions.insert(id.clone(), session);
+            id
+        };
 
         Ok(id)
     }
@@ -124,13 +141,19 @@ impl PtyManager {
         let child = Arc::clone(&session.child);
 
         // The watchdog thread gets its own copies of the id, the exit sender,
-        // and the master/child handles.
+        // the registry handles, and the master/child handles.
         let id_watch = id.clone();
         let exit_tx_watch = exit_tx.clone();
         let master_watch = Arc::clone(&master);
         let child_watch = Arc::clone(&child);
+        let out_rx_watch = Arc::clone(&self.out_rx);
+        let exit_rx_watch = Arc::clone(&self.exit_rx);
+        let sessions_watch = Arc::clone(&self.sessions);
 
-        // Reader thread: pump pty output into the session channel.
+        // Reader thread: pump pty output into the session channel. It sends
+        // nothing on the exit channel: the watchdog is the authoritative exit
+        // source (it observes the child's real exit code), so exit fires
+        // exactly once.
         std::thread::spawn(move || {
             let mut buf = [0u8; READ_CHUNK_SIZE];
             loop {
@@ -160,7 +183,6 @@ impl PtyManager {
                     Err(_) => break,
                 }
             }
-            let _ = exit_tx.send(None);
         });
 
         // Watchdog thread: on Windows ConPTY the output pipe does not EOF
@@ -181,6 +203,14 @@ impl PtyManager {
                         on_exit(&id_watch, Some(code));
                     }
                     let _ = exit_tx_watch.send(Some(code));
+                    // The session is over: remove its registry entries so a
+                    // finished session leaks neither its channel entries nor
+                    // its session object (the shipping build only reaches
+                    // this via the watchdog — `take_output`/`take_exit` are
+                    // test-only).
+                    out_rx_watch.lock().remove(&id_watch);
+                    exit_rx_watch.lock().remove(&id_watch);
+                    sessions_watch.lock().remove(&id_watch);
                     break;
                 }
                 std::thread::sleep(POLL_INTERVAL);
@@ -223,10 +253,13 @@ impl PtyManager {
 
     /// Acknowledge that the consumer processed `chars` bytes, releasing
     /// backpressure once pending output drops below the resume watermark.
-    pub fn ack(&self, id: &str, chars: usize) {
+    ///
+    /// Returns `Err` when no session with `id` exists, matching the behavior
+    /// of `write`/`resize`/`kill` for unknown ids.
+    pub fn ack(&self, id: &str, chars: usize) -> Result<(), String> {
         let sessions = self.sessions.lock();
         let Some(session) = sessions.get(id) else {
-            return;
+            return Err(format!("no session with id {id}"));
         };
         let pending = session
             .pending_bytes
@@ -237,6 +270,7 @@ impl PtyManager {
         if pending.saturating_sub(chars) < RESUME_WATERMARK {
             session.paused.store(false, Ordering::SeqCst);
         }
+        Ok(())
     }
 
     /// Whether the session's child process has exited. Test observation API.
@@ -257,8 +291,8 @@ impl PtyManager {
     }
 
     /// Take the session's exit receiver (carries `Some(exit_code)` when the
-    /// watchdog observes the child's exit, `None` on reader EOF). Test
-    /// observation API.
+    /// watchdog observes the child's exit; the reader sends nothing, so exit
+    /// fires exactly once). Test observation API.
     #[cfg(test)]
     pub fn take_exit(&self, id: &str) -> Option<Receiver<Option<i32>>> {
         self.exit_rx.lock().remove(id)
@@ -395,13 +429,25 @@ mod tests {
 
         // ack with no pending bytes: fetch_sub saturates at 0, paused stays
         // false; no panic.
-        manager.ack(&id, 1024);
+        manager.ack(&id, 1024).expect("ack should succeed");
         {
             let sessions = manager.sessions().lock();
             let session = sessions.get(&id).unwrap();
             assert_eq!(session.pending_bytes.load(Ordering::SeqCst), 0);
             assert!(!session.paused.load(Ordering::SeqCst));
         }
+    }
+
+    #[test]
+    fn ack_unknown_id_errors() {
+        let manager = PtyManager::new();
+        let err = manager.ack("no-such-session", 42).expect_err(
+            "ack on an unknown id should return Err, matching write/resize/kill",
+        );
+        assert!(
+            err.contains("no-such-session"),
+            "expected the error to name the missing id, got: {err:?}"
+        );
     }
 
     #[test]
@@ -458,6 +504,69 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         panic!("child should be gone after kill");
+    }
+
+    #[test]
+    fn spawned_shell_sees_term_env() {
+        let sh = sh_path();
+        let manager = PtyManager::new();
+        let id = manager
+            .spawn(
+                Some(sh),
+                None,
+                80,
+                24,
+                vec![
+                    "-c".to_string(),
+                    "echo $TERM $COLORTERM $TERM_PROGRAM".to_string(),
+                ],
+                None,
+                None,
+            )
+            .expect("spawn should succeed");
+
+        let rx = manager.take_output(&id).expect("session has an output channel");
+        let out = drain_until(rx, "oppa", Duration::from_secs(5));
+        let out = String::from_utf8_lossy(&out);
+        assert!(
+            out.contains("xterm-256color") && out.contains("truecolor") && out.contains("oppa"),
+            "expected the spawned shell to see TERM=xterm-256color COLORTERM=truecolor \
+             TERM_PROGRAM=oppa, got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn registry_cleaned_up_after_exit() {
+        let sh = sh_path();
+        let manager = PtyManager::new();
+        let id = manager
+            .spawn(
+                Some(sh),
+                None,
+                80,
+                24,
+                vec!["-c".to_string(), "sleep 0.2".to_string()],
+                None,
+                None,
+            )
+            .expect("spawn should succeed");
+
+        // Both channel entries must exist while the session is alive...
+        assert!(manager.out_rx.lock().contains_key(&id));
+        assert!(manager.exit_rx.lock().contains_key(&id));
+
+        // ...and the watchdog must drop them once the child exits, even when
+        // nothing ever called take_output/take_exit (the shipping build).
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if !manager.out_rx.lock().contains_key(&id)
+                && !manager.exit_rx.lock().contains_key(&id)
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("expected out_rx/exit_rx entries to be removed after child exit");
     }
 
     #[test]

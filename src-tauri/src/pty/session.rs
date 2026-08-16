@@ -68,6 +68,12 @@ impl PtySession {
     ) -> std::io::Result<Self> {
         let mut cmd = CommandBuilder::new(shell);
         cmd.args(args.iter().map(String::as_str));
+        // The spawned shell must run with terminal-identification variables
+        // set, regardless of the parent's environment. CommandBuilder inherits
+        // the app env by default, so only the overrides below are needed.
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "oppa");
         if let Some(cwd) = cwd {
             cmd.cwd(cwd);
         }

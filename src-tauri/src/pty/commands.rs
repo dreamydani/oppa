@@ -95,8 +95,7 @@ pub fn pty_ack(
     id: String,
     chars: usize,
 ) -> Result<(), String> {
-    manager.ack(&id, chars);
-    Ok(())
+    manager.ack(&id, chars)
 }
 
 #[tauri::command]
