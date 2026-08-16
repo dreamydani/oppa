@@ -3,5 +3,5 @@ use tauri::State;
 
 #[tauri::command]
 pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<String> {
-    manager.sessions().keys().cloned().collect()
+    manager.sessions().lock().keys().cloned().collect()
 }
