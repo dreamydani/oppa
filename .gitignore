@@ -25,3 +25,6 @@ dist-ssr
 
 # Superpowers scratch (git-ignored by design — history lives in git)
 .superpowers/
+
+# Git worktrees (isolated workspace)
+.worktrees/
