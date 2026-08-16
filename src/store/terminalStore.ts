@@ -51,6 +51,7 @@ interface TerminalState {
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   setLayout: (layout: Layout) => void;
+  setRatio: (path: Path, ratio: number) => void;
   splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
   closePane: (path?: Path) => Promise<void>;
   focusPane: (path: Path) => void;
@@ -151,6 +152,34 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   setLayout: (layout) => set({ layout }),
+
+  // The drag divider in PaneSplit: set the ratio of the split at `path`.
+  // The tree is immutable, so walk down rebuilding the spine; a path into a
+  // leaf (or past the end of the tree) leaves the tree untouched.
+  setRatio: (path, ratio) => {
+    const tree = get().layout;
+    const clamped = Math.min(1, Math.max(0, ratio));
+    const rebuild = (node: Layout, steps: Path): Layout => {
+      if (node.type === "leaf") return node;
+      if (steps.length === 0) {
+        // This split is the target: update its ratio and stop descending.
+        return node.ratio === clamped ? node : { ...node, ratio: clamped };
+      }
+      const [head, ...rest] = steps;
+      if (head !== 0 && head !== 1) return node;
+      const child = head === 0 ? node.a : node.b;
+      const nextChild = rebuild(child, rest);
+      if (nextChild === child) return node;
+      return {
+        type: "split",
+        dir: node.dir,
+        ratio: node.ratio,
+        a: head === 0 ? nextChild : node.a,
+        b: head === 1 ? nextChild : node.b,
+      };
+    };
+    set({ layout: rebuild(tree, path) });
+  },
 
   // Split the pane at `path` (defaults to the focused pane): spawn a new
   // session for the fresh leaf, rebuild the tree, and focus the new leaf.

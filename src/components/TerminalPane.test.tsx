@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import { useTerminalStore } from "../store/terminalStore";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
 
 // xterm's Terminal is mocked so the test asserts the wiring contract
-// (spawn -> write -> ack -> resize -> kill) without a real terminal buffer.
+// (store session -> write -> ack -> resize -> kill) without a real buffer.
 const xtermState = vi.hoisted(() => ({
   instances: [] as {
     cols: number;
@@ -46,9 +47,9 @@ vi.mock("@xterm/addon-fit", () => {
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
-  ptyWrite: vi.fn(),
-  ptyResize: vi.fn(),
-  ptyAck: vi.fn(),
+  ptyWrite: vi.fn().mockResolvedValue(undefined),
+  ptyResize: vi.fn().mockResolvedValue(undefined),
+  ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyKill: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
@@ -75,6 +76,13 @@ describe("TerminalPane", () => {
     vi.clearAllMocks();
     xtermState.instances.length = 0;
     roState.callback = null;
+    // Fresh store: the pane under test renders the "abc" session.
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "abc" },
+    });
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -88,7 +96,6 @@ describe("TerminalPane", () => {
         disconnect = vi.fn();
       },
     );
-    ptySpawnMock.mockResolvedValue("abc");
     onPtyDataMock.mockResolvedValue(vi.fn());
     onPtyExitMock.mockResolvedValue(vi.fn());
   });
@@ -101,21 +108,19 @@ describe("TerminalPane", () => {
     return xtermState.instances[0]!;
   }
 
-  // Wait until the spawn promise's .then has run (idRef set, listeners wired).
+  // Wait until the listeners have been registered (id wired to the pane).
   async function waitForSpawned() {
     await vi.waitFor(() => expect(onPtyDataMock).toHaveBeenCalled());
   }
 
-  it("mounts a terminal container and spawns a pty session", async () => {
-    const { container } = render(<TerminalPane />);
+  it("renders a terminal container for the store session and does NOT spawn a pty itself", () => {
+    const { container } = render(<TerminalPane id="abc" />);
     expect(container.querySelector(".terminal-pane")).not.toBeNull();
-    await vi.waitFor(() => expect(ptySpawnMock).toHaveBeenCalled());
-    expect(term().open).toHaveBeenCalled();
-    expect(term().loadAddon).toHaveBeenCalled();
+    expect(ptySpawnMock).not.toHaveBeenCalled();
   });
 
-  it("renders pty output through term.write and acks the parsed char count", async () => {
-    render(<TerminalPane />);
+  it("renders pty output through term.write and acks via the store", async () => {
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
@@ -133,7 +138,7 @@ describe("TerminalPane", () => {
   });
 
   it("writes typed data back to the pty", async () => {
-    render(<TerminalPane />);
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     const dataHandler = term().onData.mock.calls[0][0] as (data: string) => void;
@@ -142,7 +147,7 @@ describe("TerminalPane", () => {
   });
 
   it("resizes the pty via FitAddon when the container resizes", async () => {
-    render(<TerminalPane />);
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     term().cols = 120;
@@ -151,18 +156,36 @@ describe("TerminalPane", () => {
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
   });
 
-  it("shows a one-line error state when spawn fails", async () => {
-    ptySpawnMock.mockRejectedValue(new Error("shell not found"));
-    render(<TerminalPane />);
-    await vi.waitFor(() =>
-      expect(term().writeln).toHaveBeenCalledWith(
-        "\r\n[spawn failed: shell not found]",
-      ),
-    );
+  it("renders the one-line error state when the store session is an error", () => {
+    useTerminalStore.setState({
+      sessions: {
+        err: {
+          id: "err",
+          title: "err",
+          status: "error",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    const { container } = render(<TerminalPane id="err" />);
+    const pane = container.querySelector(".terminal-pane")!;
+    expect(pane.textContent).toContain("session failed to start");
+    // Error panes are static: no pty listeners, no terminal instance.
+    expect(xtermState.instances.length).toBe(0);
+    expect(onPtyDataMock).not.toHaveBeenCalled();
+  });
+
+  it("renders an empty container when the session id is not yet in the store", () => {
+    const { container } = render(<TerminalPane id="ghost" />);
+    const pane = container.querySelector(".terminal-pane");
+    expect(pane).not.toBeNull();
+    expect(pane!.textContent).toBe("");
+    expect(xtermState.instances.length).toBe(0);
   });
 
   it("prints an exit message when the session dies", async () => {
-    render(<TerminalPane />);
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     const exitHandler = onPtyExitMock.mock.calls[0][0] as (p: {
@@ -173,17 +196,39 @@ describe("TerminalPane", () => {
     expect(term().writeln).toHaveBeenCalledWith("\r\n[process exited: 0]");
   });
 
-  it("kills the pty and disposes the terminal on unmount", async () => {
-    const { unmount } = render(<TerminalPane />);
+  it("ignores pty events addressed to a different session id", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      seq: number;
+    }) => void;
+    dataHandler({ id: "other", data: "nope", seq: 1 });
+    expect(term().write).not.toHaveBeenCalled();
+
+    const exitHandler = onPtyExitMock.mock.calls[0][0] as (p: {
+      id: string;
+      code: number | null;
+    }) => void;
+    exitHandler({ id: "other", code: 0 });
+    expect(term().writeln).not.toHaveBeenCalled();
+  });
+
+  it("disposes the terminal on unmount without killing the shared session", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     unmount();
-    expect(ptyKillMock).toHaveBeenCalledWith("abc");
     expect(term().dispose).toHaveBeenCalled();
+    // The session is owned by the store/layout, not the pane: closing one view
+    // of it must not kill the session underneath.
+    expect(ptyKillMock).not.toHaveBeenCalled();
   });
 
   it("does not ack when onWriteParsed fires with nothing written", async () => {
-    render(<TerminalPane />);
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
@@ -192,7 +237,7 @@ describe("TerminalPane", () => {
   });
 
   it("acks the cumulative parsed chars when chunks arrive before one parse", async () => {
-    render(<TerminalPane />);
+    render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
@@ -213,26 +258,41 @@ describe("TerminalPane", () => {
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 8);
   });
 
-  it("kills the session and skips wiring when spawn resolves after unmount", async () => {
-    let resolveSpawn!: (id: string) => void;
-    ptySpawnMock.mockReturnValue(
-      new Promise<string>((resolve) => {
-        resolveSpawn = resolve;
-      }),
-    );
+  it("keeps rendering the session after the id prop changes", async () => {
+    const { rerender } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    expect(term().write).not.toHaveBeenCalled();
 
-    const { unmount } = render(<TerminalPane />);
-    unmount();
+    // New id: a fresh terminal + listeners for the new session. The old
+    // terminal is disposed; the shared sessions stay alive.
+    useTerminalStore.setState({
+      sessions: {
+        ...useTerminalStore.getState().sessions,
+        def: { id: "def", title: "def", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    rerender(<TerminalPane id="def" />);
+    await vi.waitFor(() => expect(xtermState.instances.length).toBe(2));
+    expect(xtermState.instances[0]!.dispose).toHaveBeenCalled();
 
-    resolveSpawn("late-id");
-    await vi.waitFor(() =>
-      expect(ptyKillMock).toHaveBeenCalledWith("late-id"),
-    );
+    const dataHandler = onPtyDataMock.mock.calls[1][0] as (p: {
+      id: string;
+      data: string;
+      seq: number;
+    }) => void;
+    dataHandler({ id: "def", data: "hi", seq: 1 });
+    expect(xtermState.instances[1]!.write).toHaveBeenCalledWith("hi");
+  });
 
-    expect(onPtyDataMock).not.toHaveBeenCalled();
-    expect(onPtyExitMock).not.toHaveBeenCalled();
-    expect(term().onData).not.toHaveBeenCalled();
-    expect(ptyWriteMock).not.toHaveBeenCalled();
+  it("skips wiring when the id prop changes to a session not in the store", async () => {
+    const { rerender } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    expect(onPtyDataMock).toHaveBeenCalledTimes(1);
+
+    rerender(<TerminalPane id="ghost" />);
+    expect(xtermState.instances[0]!.dispose).toHaveBeenCalled();
+    // No new listener registered for the missing session.
+    expect(onPtyDataMock).toHaveBeenCalledTimes(1);
   });
 
   it("unsubscribes a listener whose registration resolves after unmount", async () => {
@@ -244,7 +304,7 @@ describe("TerminalPane", () => {
     );
 
     const unlistenData = vi.fn();
-    const { unmount } = render(<TerminalPane />);
+    const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
     unmount();
 

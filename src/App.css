@@ -5,8 +5,66 @@ body,
   margin: 0;
 }
 
-.terminal-pane {
+.pane-root {
   height: 100vh;
   width: 100vw;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-leaf {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-divider {
+  flex: 0 0 auto;
+  background: #21262d;
+  position: relative;
+  z-index: 1;
+}
+
+.pane-divider.dir-h {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.pane-divider.dir-v {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.pane-divider:hover {
+  background: #388bfd;
+}
+
+.terminal-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   background: #0d1117;
+}
+
+.terminal-pane-error {
+  color: #f85149;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 8px;
+  white-space: pre;
 }

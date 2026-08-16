@@ -296,4 +296,88 @@ describe("terminalStore", () => {
     useTerminalStore.getState().moveFocus("right");
     expect(useTerminalStore.getState().focusedPath).toEqual([]);
   });
+
+  describe("setRatio", () => {
+    it("updates the ratio of the split at the given path", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      useTerminalStore.getState().setRatio([], 0.75);
+      const layout = useTerminalStore.getState().layout;
+      expect(layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.75,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      });
+    });
+
+    it("updates a nested split ratio without touching the others", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: {
+            type: "split",
+            dir: "v",
+            ratio: 0.4,
+            a: { type: "leaf", id: "a" },
+            b: { type: "leaf", id: "b" },
+          },
+          b: { type: "leaf", id: "c" },
+        },
+      });
+      useTerminalStore.getState().setRatio([0], 0.6);
+      const { layout } = useTerminalStore.getState();
+      if (layout.type !== "split") throw new Error("expected split root");
+      expect(layout.ratio).toBe(0.5); // outer split untouched
+      if (layout.a.type !== "split") throw new Error("expected nested split");
+      expect(layout.a.ratio).toBe(0.6); // nested split updated
+    });
+
+    it("clamps the ratio to the valid range", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      useTerminalStore.getState().setRatio([], 1.5);
+      const afterHigh = useTerminalStore.getState().layout;
+      if (afterHigh.type !== "split") throw new Error("expected split root");
+      expect(afterHigh.ratio).toBe(1);
+      useTerminalStore.getState().setRatio([], -0.2);
+      const afterLow = useTerminalStore.getState().layout;
+      if (afterLow.type !== "split") throw new Error("expected split root");
+      expect(afterLow.ratio).toBe(0);
+    });
+
+    it("no-ops when the path points at a leaf", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      // Leaf at [0] — no split to resize, tree must stay untouched.
+      useTerminalStore.getState().setRatio([0], 0.9);
+      const after = useTerminalStore.getState().layout;
+      if (after.type !== "split") throw new Error("expected split root");
+      expect(after.ratio).toBe(0.5);
+    });
+  });
 });
