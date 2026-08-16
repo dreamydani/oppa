@@ -76,6 +76,23 @@ export function substituteLeafId(
   return { type: "split", dir: tree.dir, ratio: tree.ratio, a, b };
 }
 
+// Replace every leaf id through `map` (saved id -> fresh session id after a
+// persisted-layout restore). Ids absent from the map pass through untouched.
+// Pure: returns the SAME tree reference when nothing changes.
+export function remapLeafIds(
+  tree: Layout,
+  map: Record<string, string>,
+): Layout {
+  if (tree.type === "leaf") {
+    const to = map[tree.id];
+    return to === undefined ? tree : { type: "leaf", id: to };
+  }
+  const a = remapLeafIds(tree.a, map);
+  const b = remapLeafIds(tree.b, map);
+  if (a === tree.a && b === tree.b) return tree;
+  return { type: "split", dir: tree.dir, ratio: tree.ratio, a, b };
+}
+
 // Path of the depth-first leftmost leaf (the root leaf has path `[]`).
 export function firstLeafPath(tree: Layout): Path {
   if (tree.type === "leaf") return [];

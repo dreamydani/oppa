@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod layout;
 mod pty;
 
 use pty::manager::PtyManager;
@@ -15,6 +16,8 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
+            layout::save_layout,
+            layout::load_layout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

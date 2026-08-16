@@ -8,6 +8,8 @@ import {
   ptyKill,
   ptyAck,
   ptyList,
+  saveLayout,
+  loadLayout,
   onPtyData,
   onPtyExit,
 } from "./transport";
@@ -69,6 +71,22 @@ describe("pty transport", () => {
     invokeMock.mockResolvedValue(["abc", "def"]);
     await expect(ptyList()).resolves.toEqual(["abc", "def"]);
     expect(invokeMock).toHaveBeenCalledWith("pty_list");
+  });
+
+  it("saveLayout invokes save_layout with the serialized JSON under layoutJson", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const json = '{"layout":{"type":"leaf","id":"a"},"sessions":[]}';
+    await saveLayout(json);
+    expect(invokeMock).toHaveBeenCalledWith("save_layout", { layoutJson: json });
+  });
+
+  it("loadLayout invokes load_layout and resolves the saved JSON (or null)", async () => {
+    invokeMock.mockResolvedValue('{"layout":{"type":"leaf","id":"a"}}');
+    await expect(loadLayout()).resolves.toBe('{"layout":{"type":"leaf","id":"a"}}');
+    expect(invokeMock).toHaveBeenCalledWith("load_layout");
+
+    invokeMock.mockResolvedValue(null);
+    await expect(loadLayout()).resolves.toBeNull();
   });
 
   it("onPtyData subscribes to pty:data and forwards the payload", async () => {

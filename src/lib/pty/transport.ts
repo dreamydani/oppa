@@ -39,6 +39,12 @@ export function ptyAck(id: string, chars: number): Promise<void> {
 export function ptyList(): Promise<string[]> {
   return invoke("pty_list");
 }
+export function saveLayout(layoutJson: string): Promise<void> {
+  return invoke("save_layout", { layoutJson });
+}
+export function loadLayout(): Promise<string | null> {
+  return invoke("load_layout");
+}
 export async function onPtyData(cb: (p: PtyDataPayload) => void) {
   return listen<PtyDataPayload>("pty:data", (e) => cb(e.payload));
 }

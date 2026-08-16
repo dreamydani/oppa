@@ -7,10 +7,14 @@ vi.mock("../lib/pty/transport", () => ({
   ptyKill: vi.fn(),
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
+  saveLayout: vi.fn(),
+  loadLayout: vi.fn(),
 }));
 
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
+const saveLayoutMock = vi.mocked(transport.saveLayout);
+const loadLayoutMock = vi.mocked(transport.loadLayout);
 
 describe("terminalStore", () => {
   beforeEach(() => {
@@ -464,6 +468,144 @@ describe("terminalStore", () => {
       const after = useTerminalStore.getState().layout;
       if (after.type !== "split") throw new Error("expected split root");
       expect(after.ratio).toBe(0.5);
+    });
+  });
+
+  describe("saveLayout", () => {
+    it("serializes the current layout + session state to the transport", async () => {
+      useTerminalStore.setState({
+        sessions: {
+          a: { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
+          b: { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
+        },
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.4,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      await useTerminalStore.getState().saveLayout();
+      expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      const json = saveLayoutMock.mock.calls[0][0];
+      const parsed = JSON.parse(json);
+      expect(parsed).toEqual({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.4,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+        sessions: [
+          { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
+          { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
+        ],
+      });
+    });
+
+    it("propagates transport failures instead of swallowing them", async () => {
+      saveLayoutMock.mockRejectedValue(new Error("disk full"));
+      await expect(useTerminalStore.getState().saveLayout()).rejects.toThrow(
+        "disk full",
+      );
+    });
+  });
+
+  describe("loadLayout", () => {
+    beforeEach(() => {
+      // Default: no saved layout (fresh start).
+      loadLayoutMock.mockResolvedValue(null);
+      ptySpawnMock.mockResolvedValue("s1");
+    });
+
+    it("does nothing when no layout was saved", async () => {
+      await useTerminalStore.getState().loadLayout();
+      expect(ptySpawnMock).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
+    });
+
+    it("spawns a fresh shell per saved leaf and maps saved ids to the new session ids", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: {
+              type: "split",
+              dir: "v",
+              ratio: 0.3,
+              a: { type: "leaf", id: "old-left" },
+              b: { type: "leaf", id: "old-top" },
+            },
+            b: { type: "leaf", id: "old-right" },
+          },
+          sessions: [
+            { id: "old-left", title: "left", status: "running", cwd: "C:\\a", cols: 80, rows: 24 },
+            { id: "old-top", title: "top", status: "running", cwd: "C:\\b", cols: 80, rows: 24 },
+            { id: "old-right", title: "right", status: "running", cwd: "C:\\c", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      // Deterministic DFS leaf order: old-left, old-top, old-right.
+      ptySpawnMock
+        .mockResolvedValueOnce("new-left")
+        .mockResolvedValueOnce("new-top")
+        .mockResolvedValueOnce("new-right");
+
+      await useTerminalStore.getState().loadLayout();
+
+      // Restored sessions are fresh shells: spawned with the saved cwd, and
+      // their NEW ids (not the stale saved ones) back the tree + store.
+      expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
+        { cwd: "C:\\a" },
+        { cwd: "C:\\b" },
+        { cwd: "C:\\c" },
+      ]);
+      const { layout, sessions } = useTerminalStore.getState();
+      expect(layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "v",
+          ratio: 0.3,
+          a: { type: "leaf", id: "new-left" },
+          b: { type: "leaf", id: "new-top" },
+        },
+        b: { type: "leaf", id: "new-right" },
+      });
+      expect(Object.keys(sessions)).toEqual(["new-left", "new-top", "new-right"]);
+      expect(sessions["new-left"].cwd).toBe("C:\\a");
+      expect(JSON.stringify(layout)).not.toContain("old-");
+    });
+
+    it("keeps a leaf as an error session when its spawn fails", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          layout: { type: "leaf", id: "old-a" },
+          sessions: [{ id: "old-a", title: "a", status: "running", cwd: "C:\\gone", cols: 80, rows: 24 }],
+        }),
+      );
+      ptySpawnMock.mockRejectedValue(new Error("cwd not found"));
+
+      await useTerminalStore.getState().loadLayout();
+
+      const { layout, sessions } = useTerminalStore.getState();
+      const restoredId = (layout as { type: "leaf"; id: string }).id;
+      expect(restoredId).not.toBe("old-a");
+      expect(sessions[restoredId]?.status).toBe("error");
+      expect(sessions[restoredId]?.cwd).toBe("C:\\gone");
+    });
+
+    it("leaves the store untouched when the saved JSON is malformed", async () => {
+      loadLayoutMock.mockResolvedValue("{not valid json");
+      await expect(useTerminalStore.getState().loadLayout()).rejects.toThrow();
+      expect(ptySpawnMock).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
     });
   });
 });
