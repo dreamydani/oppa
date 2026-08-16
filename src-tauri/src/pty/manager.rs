@@ -15,10 +15,12 @@ pub type OnData = Box<dyn Fn(&str, &[u8]) + Send + Sync + 'static>;
 /// Callback invoked when a session's child exits with `(id, exit_code)`.
 pub type OnExit = Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static>;
 
-/// Pending output below this watermark releases backpressure. Full watermark
-/// logic (high/low watermarks) lands in a later task; ack() already uses this
-/// as the "safe to resume" threshold.
-const RESUME_WATERMARK: usize = 32 * 1024;
+/// Pending output above this watermark pauses the read loop (backpressure:
+/// the consumer has not acked enough of the buffered output).
+const HIGH_WATERMARK_BYTES: usize = 256 * 1024;
+/// Once paused, pending output must drop below this watermark before the read
+/// loop resumes. `ack()` also uses it as the "safe to resume" threshold.
+const LOW_WATERMARK_BYTES: usize = 32 * 1024;
 const READ_CHUNK_SIZE: usize = 8 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -158,6 +160,11 @@ impl PtyManager {
             let mut buf = [0u8; READ_CHUNK_SIZE];
             loop {
                 if paused.load(Ordering::SeqCst) {
+                    // Unpause as soon as buffered output drops below the low
+                    // watermark (the consumer has caught up enough to resume).
+                    if pending.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
+                        paused.store(false, Ordering::SeqCst);
+                    }
                     std::thread::sleep(POLL_INTERVAL);
                     continue;
                 }
@@ -166,6 +173,12 @@ impl PtyManager {
                     Ok(n) => {
                         let chunk = buf[..n].to_vec();
                         pending.fetch_add(n, Ordering::SeqCst);
+                        // Backpressure: once buffered output exceeds the high
+                        // watermark, stop reading until the consumer acks it
+                        // down below the low watermark.
+                        if pending.load(Ordering::SeqCst) > HIGH_WATERMARK_BYTES {
+                            paused.store(true, Ordering::SeqCst);
+                        }
                         // ConPTY handshake: the console sends a cursor
                         // position request (ESC[6n) and stalls further output
                         // until the app replies with ESC[<row>;<col>R. Answer
@@ -261,13 +274,20 @@ impl PtyManager {
         let Some(session) = sessions.get(id) else {
             return Err(format!("no session with id {id}"));
         };
-        let pending = session
+        // Decrement pending, then decide resume against a FRESH value.
+        // `fetch_update` returns the pre-update snapshot (Ok(previous)), so
+        // deriving the comparison from its return would repeat the stale
+        // snapshot bug: the read loop may add bytes after the update, and a
+        // stale comparison can unpause while pending is still above the low
+        // watermark. A fresh load() after the decrement keeps the resume
+        // decision correct under load.
+        session
             .pending_bytes
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| {
                 Some(p.saturating_sub(chars))
             })
             .unwrap_or(0);
-        if pending.saturating_sub(chars) < RESUME_WATERMARK {
+        if session.pending_bytes.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
             session.paused.store(false, Ordering::SeqCst);
         }
         Ok(())
@@ -448,6 +468,73 @@ mod tests {
             err.contains("no-such-session"),
             "expected the error to name the missing id, got: {err:?}"
         );
+    }
+
+    #[test]
+    fn backpressure_pauses_and_resumes() {
+        let sh = sh_path();
+        let manager = PtyManager::new();
+        let id = manager
+            .spawn(
+                Some(sh),
+                None,
+                80,
+                24,
+                // Infinite output so the read loop keeps hitting the watermark
+                // checks. Shell builtins only — no dependency on an external
+                // `yes` binary.
+                vec!["-c".to_string(), "while true; do echo x; done".to_string()],
+                None,
+                None,
+            )
+            .expect("spawn should succeed");
+
+        // Deterministic setup: force pending above the high watermark so the
+        // read loop trips the pause check on its next successful read. We do
+        // not rely on the shell's output crossing 256KB on its own — the OS
+        // pipe may back up and block the child first, which would leave
+        // pending plateauing below the watermark.
+        {
+            let sessions = manager.sessions().lock();
+            let session = sessions.get(&id).unwrap();
+            session
+                .pending_bytes
+                .store(HIGH_WATERMARK_BYTES + 1, Ordering::SeqCst);
+        }
+
+        // The read loop must observe pending > high and pause.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let paused = {
+                let sessions = manager.sessions().lock();
+                sessions.get(&id).unwrap().paused.load(Ordering::SeqCst)
+            };
+            if paused {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "read loop never paused after pending exceeded the high watermark"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // ack() drops pending below the low watermark; the read loop must
+        // resume.
+        manager
+            .ack(&id, 2 * 1024 * 1024)
+            .expect("ack should succeed");
+        {
+            let sessions = manager.sessions().lock();
+            let session = sessions.get(&id).unwrap();
+            assert!(
+                !session.paused.load(Ordering::SeqCst),
+                "expected ack to unpause the read loop once pending dropped below the low watermark"
+            );
+        }
+
+        // Hygiene: kill the infinite shell so it doesn't leak.
+        manager.kill(&id).expect("kill should succeed");
     }
 
     #[test]
