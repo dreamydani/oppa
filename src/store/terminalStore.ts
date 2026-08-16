@@ -5,12 +5,17 @@ import {
   ptyResize,
   ptyAck,
 } from "../lib/pty/transport";
+import {
+  split,
+  remove,
+  focus,
+  firstLeafPath,
+} from "../lib/pane-manager/layout";
+import type { Layout, Path } from "../lib/pane-manager/layout";
 
-// Shape matches Task 7's `layout.ts` exactly (with `ratio`) so the pane
-// engine can consume it without a breaking change.
-export type Layout =
-  | { type: "leaf"; id: string }
-  | { type: "split"; dir: "h" | "v"; ratio: number; a: Layout; b: Layout };
+// Re-exported so existing import sites keep working after the layout types
+// moved into `src/lib/pane-manager/layout.ts`.
+export type { Layout, Path } from "../lib/pane-manager/layout";
 
 export type SessionStatus = "running" | "exited" | "error";
 
@@ -26,20 +31,36 @@ export interface SessionInfo {
 export const DEFAULT_COLS = 80;
 export const DEFAULT_ROWS = 24;
 
+// The split node reached by walking `prefix` down from the root.
+function nodeAt(tree: Layout, prefix: Path): Layout {
+  let node = tree;
+  for (const step of prefix) {
+    if (node.type === "leaf") return node;
+    node = step === 0 ? node.a : node.b;
+  }
+  return node;
+}
+
 interface TerminalState {
   sessions: Record<string, SessionInfo>;
   layout: Layout;
+  focusedPath: Path;
   spawnSession: (cwd?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   setLayout: (layout: Layout) => void;
+  splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
+  closePane: (path?: Path) => Promise<void>;
+  focusPane: (path: Path) => void;
+  moveFocus: (dir: "left" | "right" | "up" | "down") => void;
 }
 
-export const useTerminalStore = create<TerminalState>((set) => ({
+export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
   layout: { type: "leaf", id: "" },
+  focusedPath: [],
 
   spawnSession: async (cwd) => {
     try {
@@ -130,4 +151,63 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   },
 
   setLayout: (layout) => set({ layout }),
+
+  // Split the pane at `path` (defaults to the focused pane): spawn a new
+  // session for the fresh leaf, rebuild the tree, and focus the new leaf.
+  splitPane: async (dir, path) => {
+    const target = path ?? get().focusedPath;
+    const id = await get().spawnSession();
+    set({
+      layout: split(dir, get().layout, target, id),
+      focusedPath: [...target, 1],
+    });
+  },
+
+  // Close the pane at `path` (defaults to the focused pane): kill its session
+  // if it has one, prune the leaf from the tree (collapsing empty splits), and
+  // focus the leftmost remaining leaf. Closing the last pane resets to a fresh
+  // empty leaf.
+  closePane: async (path) => {
+    const target = path ?? get().focusedPath;
+    const tree = get().layout;
+    const removedId = focus(tree, target);
+    const next = remove(tree, target);
+    if (get().sessions[removedId]) {
+      await get().killSession(removedId);
+    }
+    if (next === null) {
+      set({ layout: { type: "leaf", id: "" }, focusedPath: [] });
+      return;
+    }
+    set({ layout: next, focusedPath: firstLeafPath(next) });
+  },
+
+  focusPane: (path) => set({ focusedPath: path }),
+
+  // Move focus to a sibling pane. Interpretation: left/right travel through
+  // horizontal ("h") splits, up/down through vertical ("v") splits. Walk the
+  // focused path from the deepest ancestor up and use the NEAREST split whose
+  // dir matches the movement axis; if the focused leaf is already on the
+  // destination side of that split (e.g. pressing right while on the right
+  // side), try the next ancestor up. No matching ancestor → no-op. The target
+  // lands on the first leaf of the destination child, so the focused path
+  // always points at a leaf. This is intentionally simple; it does not handle
+  // non-rectangular neighborhoods, which is out of scope for v1.
+  moveFocus: (dir) => {
+    const tree = get().layout;
+    const path = get().focusedPath;
+    if (path.length === 0) return; // single root leaf: no sibling
+    const target = dir === "left" || dir === "up" ? 0 : 1;
+    const axis = dir === "left" || dir === "right" ? "h" : "v";
+    for (let i = path.length - 1; i >= 0; i--) {
+      const ancestor = nodeAt(tree, path.slice(0, i));
+      if (ancestor.type !== "split" || ancestor.dir !== axis) continue;
+      if (path[i] === target) continue; // already on the destination side
+      const destChild = path[i] === 0 ? ancestor.b : ancestor.a;
+      set({
+        focusedPath: [...path.slice(0, i), path[i] === 0 ? 1 : 0, ...firstLeafPath(destChild)],
+      });
+      return;
+    }
+  },
 }));

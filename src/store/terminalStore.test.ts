@@ -111,4 +111,189 @@ describe("terminalStore", () => {
     useTerminalStore.getState().setLayout(split);
     expect(useTerminalStore.getState().layout).toEqual(split);
   });
+
+  it("splitPane spawns a session, splits the layout, and focuses the new leaf", async () => {
+    ptySpawnMock.mockResolvedValue("s1");
+    useTerminalStore.setState({
+      layout: { type: "leaf", id: "root" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().splitPane("h");
+    expect(ptySpawnMock).toHaveBeenCalledTimes(1);
+    const { layout, focusedPath, sessions } = useTerminalStore.getState();
+    expect(layout).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: { type: "leaf", id: "root" },
+      b: { type: "leaf", id: "s1" },
+    });
+    expect(focusedPath).toEqual([1]);
+    expect(sessions["s1"]).toBeDefined();
+  });
+
+  it("splitPane splits at an explicit path", async () => {
+    ptySpawnMock.mockResolvedValue("s2");
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "x" },
+        b: { type: "leaf", id: "y" },
+      },
+      focusedPath: [1],
+    });
+    await useTerminalStore.getState().splitPane("v", [0]);
+    const { layout, focusedPath } = useTerminalStore.getState();
+    expect(layout).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "x" },
+        b: { type: "leaf", id: "s2" },
+      },
+      b: { type: "leaf", id: "y" },
+    });
+    expect(focusedPath).toEqual([0, 1]);
+  });
+
+  it("closePane removes the leaf, kills its session, and re-focuses a remaining leaf", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+        b: { id: "b", title: "b", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      focusedPath: [0],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).toHaveBeenCalledWith("a");
+    const { layout, focusedPath } = useTerminalStore.getState();
+    expect(layout).toEqual({ type: "leaf", id: "b" });
+    expect(focusedPath).toEqual([]);
+  });
+
+  it("closePane resets to a fresh empty leaf when the last pane is closed", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "a" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).toHaveBeenCalledWith("a");
+    const { layout, focusedPath } = useTerminalStore.getState();
+    expect(layout).toEqual({ type: "leaf", id: "" });
+    expect(focusedPath).toEqual([]);
+  });
+
+  it("closePane kills no session when the removed leaf has none", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {},
+      layout: { type: "leaf", id: "orphan" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(ptyKillMock).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
+  });
+
+  it("focusPane sets the focused path", () => {
+    useTerminalStore.getState().focusPane([0, 1]);
+    expect(useTerminalStore.getState().focusedPath).toEqual([0, 1]);
+  });
+
+  it("moveFocus moves to a sibling in a matching split", () => {
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      focusedPath: [0],
+    });
+    useTerminalStore.getState().moveFocus("right");
+    expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+    useTerminalStore.getState().moveFocus("left");
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+  });
+
+  it("moveFocus uses the nearest matching ancestor split", () => {
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+        b: { type: "leaf", id: "c" },
+      },
+      focusedPath: [0, 0],
+    });
+    useTerminalStore.getState().moveFocus("right");
+    expect(useTerminalStore.getState().focusedPath).toEqual([0, 1]);
+  });
+
+  it("moveFocus moves up/down through vertical splits", () => {
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "top" },
+        b: { type: "leaf", id: "bottom" },
+      },
+      focusedPath: [0],
+    });
+    useTerminalStore.getState().moveFocus("down");
+    expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+  });
+
+  it("moveFocus no-ops when the axis has no matching split", () => {
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      focusedPath: [0],
+    });
+    useTerminalStore.getState().moveFocus("up"); // vertical axis, only horizontal splits
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+    useTerminalStore.getState().moveFocus("left"); // already at the left edge
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+  });
+
+  it("moveFocus no-ops at a single-leaf root", () => {
+    useTerminalStore.setState({
+      layout: { type: "leaf", id: "a" },
+      focusedPath: [],
+    });
+    useTerminalStore.getState().moveFocus("right");
+    expect(useTerminalStore.getState().focusedPath).toEqual([]);
+  });
 });
