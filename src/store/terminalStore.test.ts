@@ -21,6 +21,7 @@ describe("terminalStore", () => {
     useTerminalStore.setState({
       sessions: {},
       layout: { type: "leaf", id: "" },
+      ready: false,
     });
     vi.clearAllMocks();
   });
@@ -51,6 +52,18 @@ describe("terminalStore", () => {
     const failed = Object.values(sessions)[0];
     expect(failed).toBeDefined();
     expect(failed.status).toBe("error");
+    // The underlying error message is surfaced on the session so the pane can
+    // render something real instead of a hardcoded string.
+    expect(failed.error).toBe("shell not found");
+  });
+
+  it("spawnSession records a string error when the failure is not an Error", async () => {
+    ptySpawnMock.mockRejectedValue("boom");
+    await useTerminalStore.getState().spawnSession();
+    const sessions = useTerminalStore.getState().sessions;
+    const failed = Object.values(sessions)[0];
+    expect(failed?.status).toBe("error");
+    expect(failed?.error).toBe("boom");
   });
 
   it("killSession kills the pty and marks the session exited", async () => {
@@ -472,6 +485,11 @@ describe("terminalStore", () => {
   });
 
   describe("saveLayout", () => {
+    beforeEach(() => {
+      // Ready = startup restore has settled; a real save happens then.
+      useTerminalStore.setState({ ready: true });
+    });
+
     it("serializes the current layout + session state to the transport", async () => {
       useTerminalStore.setState({
         sessions: {
@@ -510,6 +528,20 @@ describe("terminalStore", () => {
       await expect(useTerminalStore.getState().saveLayout()).rejects.toThrow(
         "disk full",
       );
+    });
+
+    it("skips the save while the store is not ready (mid-restore)", async () => {
+      // Not ready: a beforeunload during the startup restore must not
+      // overwrite the last good save with a near-empty snapshot.
+      useTerminalStore.setState({
+        ready: false,
+        sessions: {
+          a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+        },
+        layout: { type: "leaf", id: "a" },
+      });
+      await useTerminalStore.getState().saveLayout();
+      expect(saveLayoutMock).not.toHaveBeenCalled();
     });
   });
 

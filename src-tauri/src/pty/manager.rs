@@ -605,7 +605,8 @@ mod tests {
                 24,
                 vec![
                     "-c".to_string(),
-                    "echo $TERM $COLORTERM $TERM_PROGRAM".to_string(),
+                    "echo $TERM $COLORTERM $TERM_PROGRAM $TERM_PROGRAM_VERSION $LANG"
+                        .to_string(),
                 ],
                 None,
                 None,
@@ -616,9 +617,14 @@ mod tests {
         let out = drain_until(rx, "oppa", Duration::from_secs(5));
         let out = String::from_utf8_lossy(&out);
         assert!(
-            out.contains("xterm-256color") && out.contains("truecolor") && out.contains("oppa"),
+            out.contains("xterm-256color")
+                && out.contains("truecolor")
+                && out.contains("oppa")
+                && out.contains(env!("CARGO_PKG_VERSION"))
+                && out.contains("C.UTF-8"),
             "expected the spawned shell to see TERM=xterm-256color COLORTERM=truecolor \
-             TERM_PROGRAM=oppa, got: {out:?}"
+             TERM_PROGRAM=oppa TERM_PROGRAM_VERSION={} LANG=C.UTF-8, got: {out:?}",
+            env!("CARGO_PKG_VERSION")
         );
     }
 

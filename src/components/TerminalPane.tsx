@@ -114,10 +114,11 @@ export function TerminalPane({ id }: { id: string }) {
 
   if (session.status === "error") {
     // One-line inline error; the pane stays so the message remains visible
-    // (a re-spawn/retry path is out of scope for v1).
+    // (a re-spawn/retry path is out of scope for v1). When the failed spawn
+    // recorded a real reason, render it instead of the hardcoded fallback.
     return (
       <div className="terminal-pane terminal-pane-error">
-        [session failed to start]
+        {session.error ?? "[session failed to start]"}
       </div>
     );
   }

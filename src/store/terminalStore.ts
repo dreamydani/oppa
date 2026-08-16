@@ -28,9 +28,17 @@ export interface SessionInfo {
   title: string;
   status: SessionStatus;
   cwd?: string;
+  // Message from the failed spawn; set only on error sessions so the pane can
+  // render the real reason instead of a hardcoded string.
+  error?: string;
   cols: number;
   rows: number;
 }
+
+// Monotonic counter for synthetic error-session ids. Avoids crypto.randomUUID
+// (not available in insecure/non-secure contexts) and stays unique within the
+// session without depending on a global UUID source.
+let nextErrorId = 0;
 
 export const DEFAULT_COLS = 80;
 export const DEFAULT_ROWS = 24;
@@ -101,8 +109,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return id;
     } catch (error) {
       // Failed spawns surface as an inline pane error in TerminalPane;
-      // record a synthetic entry so the pane can render + retry.
-      const id = crypto.randomUUID();
+      // record a synthetic entry so the pane can render + retry. The id comes
+      // from a monotonic local counter (not crypto.randomUUID) so it works in
+      // non-secure contexts, and the real error message is stored on the
+      // session so the pane can show why the spawn failed.
+      const id = `error-${++nextErrorId}`;
       set((state) => ({
         sessions: {
           ...state.sessions,
@@ -110,6 +121,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             id,
             title: id,
             status: "error",
+            error: error instanceof Error ? error.message : String(error),
             cwd,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
@@ -279,6 +291,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   // sessions carry only the metadata needed to re-spawn: id, title, status,
   // cwd, cols, rows.
   saveLayout: async () => {
+    // Guard: a beforeunload during the startup restore must not overwrite the
+    // last good save with a near-empty snapshot. Once loadLayout has settled
+    // (ready=true), every save reflects a fully restored layout.
+    if (!get().ready) return;
     const { layout, sessions } = get();
     const snapshot = {
       layout,

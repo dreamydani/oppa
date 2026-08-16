@@ -74,6 +74,17 @@ impl PtySession {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "oppa");
+        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        // Locale-clean output on Windows dev boxes: the parent env rarely sets
+        // LANG, and a missing/garbage default makes shells emit cp1252 bytes.
+        // Only fall back to C.UTF-8 when the parent has no LANG — never
+        // clobber a real locale the user configured.
+        match std::env::var_os("LANG") {
+            Some(lang) if !lang.is_empty() => {}
+            _ => {
+                cmd.env("LANG", "C.UTF-8");
+            }
+        }
         if let Some(cwd) = cwd {
             cmd.cwd(cwd);
         }

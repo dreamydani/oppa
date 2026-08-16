@@ -195,6 +195,26 @@ describe("TerminalPane", () => {
     expect(onPtyDataMock).not.toHaveBeenCalled();
   });
 
+  it("renders the real error message when the session carries one", () => {
+    useTerminalStore.setState({
+      sessions: {
+        err: {
+          id: "err",
+          title: "err",
+          status: "error",
+          error: "failed to spawn pty session: shell not found",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    const { container } = render(<TerminalPane id="err" />);
+    const pane = container.querySelector(".terminal-pane")!;
+    expect(pane.textContent).toContain("failed to spawn pty session: shell not found");
+    expect(pane.textContent).not.toContain("session failed to start");
+    expect(xtermState.instances.length).toBe(0);
+  });
+
   it("renders an empty container when the session id is not yet in the store", () => {
     const { container } = render(<TerminalPane id="ghost" />);
     const pane = container.querySelector(".terminal-pane");
