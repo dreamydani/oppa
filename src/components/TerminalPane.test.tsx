@@ -181,4 +181,75 @@ describe("TerminalPane", () => {
     expect(ptyKillMock).toHaveBeenCalledWith("abc");
     expect(term().dispose).toHaveBeenCalled();
   });
+
+  it("does not ack when onWriteParsed fires with nothing written", async () => {
+    render(<TerminalPane />);
+    await waitForSpawned();
+
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+    expect(ptyAckMock).not.toHaveBeenCalled();
+  });
+
+  it("acks the cumulative parsed chars when chunks arrive before one parse", async () => {
+    render(<TerminalPane />);
+    await waitForSpawned();
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      seq: number;
+    }) => void;
+    // Second chunk lands before xterm's onWriteParsed fires for the first.
+    dataHandler({ id: "abc", data: "hello", seq: 1 });
+    dataHandler({ id: "abc", data: "!\r\n", seq: 2 });
+    expect(term().write).toHaveBeenNthCalledWith(1, "hello");
+    expect(term().write).toHaveBeenNthCalledWith(2, "!\r\n");
+
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+    // 5 + 3 = 8 chars parsed since the last ACK — no ACK may be lost.
+    expect(ptyAckMock).toHaveBeenCalledTimes(1);
+    expect(ptyAckMock).toHaveBeenCalledWith("abc", 8);
+  });
+
+  it("kills the session and skips wiring when spawn resolves after unmount", async () => {
+    let resolveSpawn!: (id: string) => void;
+    ptySpawnMock.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveSpawn = resolve;
+      }),
+    );
+
+    const { unmount } = render(<TerminalPane />);
+    unmount();
+
+    resolveSpawn("late-id");
+    await vi.waitFor(() =>
+      expect(ptyKillMock).toHaveBeenCalledWith("late-id"),
+    );
+
+    expect(onPtyDataMock).not.toHaveBeenCalled();
+    expect(onPtyExitMock).not.toHaveBeenCalled();
+    expect(term().onData).not.toHaveBeenCalled();
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribes a listener whose registration resolves after unmount", async () => {
+    let resolveDataListen!: (unlisten: () => void) => void;
+    onPtyDataMock.mockReturnValue(
+      new Promise<() => void>((resolve) => {
+        resolveDataListen = resolve;
+      }),
+    );
+
+    const unlistenData = vi.fn();
+    const { unmount } = render(<TerminalPane />);
+    await waitForSpawned();
+    unmount();
+
+    resolveDataListen(unlistenData);
+    await vi.waitFor(() => expect(unlistenData).toHaveBeenCalled());
+    expect(unlistenData).toHaveBeenCalledTimes(1);
+  });
 });
