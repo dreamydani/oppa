@@ -3,17 +3,19 @@ mod pty;
 
 use pty::manager::PtyManager;
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
-        .invoke_handler(tauri::generate_handler![greet, pty::commands::pty_list])
+        .invoke_handler(tauri::generate_handler![
+            pty::commands::pty_spawn,
+            pty::commands::pty_write,
+            pty::commands::pty_resize,
+            pty::commands::pty_kill,
+            pty::commands::pty_ack,
+            pty::commands::pty_list,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

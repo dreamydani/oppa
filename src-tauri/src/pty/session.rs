@@ -3,6 +3,32 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Arc;
 
+/// Pick the platform's default shell.
+///
+/// On Windows the console's `COMSPEC` (cmd.exe by default) is preferred, with
+/// `powershell.exe` as the fallback. Elsewhere `$SHELL` is honored when set and
+/// non-empty; otherwise the first of `/bin/zsh`, `/bin/bash`, `/bin/sh` that
+/// actually exists is used.
+pub fn default_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                ["/bin/zsh", "/bin/bash", "/bin/sh"]
+                    .into_iter()
+                    .find(|candidate| std::path::Path::new(candidate).exists())
+                    .unwrap_or("/bin/sh")
+                    .to_string()
+            })
+    }
+}
+
 /// A running PTY session: the master end, the shared input writer, the
 /// spawned child, its geometry, and the flow-control state shared with the
 /// manager's read loop.
@@ -30,18 +56,21 @@ pub struct PtySession {
 impl PtySession {
     /// Spawn `shell` with `args` attached to the given `pair`'s slave end.
     ///
-    /// Task 2 passes `"sh"` explicitly; shell detection arrives in a later
-    /// task which will call this with `default_shell()` instead.
+    /// `cwd` sets the child's working directory when provided.
     pub fn new(
         id: String,
         pair: PtyPair,
         shell: &str,
-        args: &[&str],
+        args: &[String],
+        cwd: Option<&str>,
         cols: u16,
         rows: u16,
     ) -> std::io::Result<Self> {
         let mut cmd = CommandBuilder::new(shell);
-        cmd.args(args);
+        cmd.args(args.iter().map(String::as_str));
+        if let Some(cwd) = cwd {
+            cmd.cwd(cwd);
+        }
         let child = pair
             .slave
             .spawn_command(cmd)
