@@ -8,23 +8,27 @@
   --radius-md: 6px;
   --radius-lg: 8px;
 
-  /* Core Colors */
-  --background: #0a0a0a;
-  --foreground: #fafafa;
-  --card: #171717;
-  --card-foreground: #fafafa;
-  --sidebar: #121212;
-  --sidebar-foreground: #fafafa;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --border: rgba(255, 255, 255, 0.08);
-  --muted: #262626;
-  --muted-foreground: #a1a1a1;
-  --accent: #2c2c2c;
+  /* Core Canvas & Surfaces */
+  --background: #141414;
+  --foreground: #ededec;
+  --card: #282827;
+  --card-foreground: #ededec;
+  --sidebar: #212120;
+  --sidebar-foreground: #ededec;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.07);
+  --muted: #2e2e2d;
+  --muted-foreground: #9e9e9a;
+  --text-faint: #6e6e6a;
+  --accent: #383837;
   --accent-foreground: #ffffff;
-  --primary: #e5e5e5;
-  --primary-foreground: #171717;
-  --destructive: #ff6568;
-  --ring: #737373;
+  --primary: #ededec;
+  --primary-foreground: #141414;
+  --destructive: #e05252;
+  --ring: rgba(255, 255, 255, 0.20);
+
+  /* Functional Tokens */
+  --accent-blue: #58a6ff;
 
   /* Git Status Colors */
   --git-added: #4ade80;
@@ -47,3 +51,4 @@ body {
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }
+
