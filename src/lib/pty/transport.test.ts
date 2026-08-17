@@ -10,6 +10,10 @@ import {
   ptyList,
   saveLayout,
   loadLayout,
+  saveScrollback,
+  loadScrollback,
+  deleteScrollback,
+  cleanupStaleScrollbacks,
   onPtyData,
   onPtyExit,
   onPtyCwd,
@@ -129,5 +133,37 @@ describe("pty transport", () => {
     handler({ payload: { id: "abc", cwd: "C:\\work" } });
     expect(cb).toHaveBeenCalledWith({ id: "abc", cwd: "C:\\work" });
     expect(result).toBe(unlisten);
+  });
+
+  it("saveScrollback invokes save_scrollback with id and data", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await saveScrollback("term-1", "serialized data");
+    expect(invokeMock).toHaveBeenCalledWith("save_scrollback", {
+      id: "term-1",
+      data: "serialized data",
+    });
+  });
+
+  it("loadScrollback invokes load_scrollback with id and returns data or null", async () => {
+    invokeMock.mockResolvedValue("persisted scrollback");
+    await expect(loadScrollback("term-1")).resolves.toBe("persisted scrollback");
+    expect(invokeMock).toHaveBeenCalledWith("load_scrollback", { id: "term-1" });
+
+    invokeMock.mockResolvedValue(null);
+    await expect(loadScrollback("term-2")).resolves.toBeNull();
+  });
+
+  it("deleteScrollback invokes delete_scrollback with id", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await deleteScrollback("term-1");
+    expect(invokeMock).toHaveBeenCalledWith("delete_scrollback", { id: "term-1" });
+  });
+
+  it("cleanupStaleScrollbacks invokes cleanup_stale_scrollbacks with activeIds", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await cleanupStaleScrollbacks(["term-1", "term-2"]);
+    expect(invokeMock).toHaveBeenCalledWith("cleanup_stale_scrollbacks", {
+      activeIds: ["term-1", "term-2"],
+    });
   });
 });
