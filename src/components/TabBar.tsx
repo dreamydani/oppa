@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { Plus, X } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 
@@ -106,7 +107,7 @@ export function TabBar(): React.ReactElement {
                     void closeTab(tab.id);
                   }}
                 >
-                  ✕
+                  <X size={12} />
                 </button>
               )}
             </div>
@@ -120,7 +121,7 @@ export function TabBar(): React.ReactElement {
         aria-label="New Tab"
         onClick={() => void createTab()}
       >
-        +
+        <Plus size={14} />
       </button>
     </div>
   );
