@@ -105,15 +105,14 @@ describe("LeftSidebar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
   });
 
-  it("creates a new tab when + button is clicked", async () => {
+  it("opens workspace launcher modal when + button is clicked", () => {
+    useTerminalStore.setState({ isWorkspaceLauncherOpen: false });
     render(<LeftSidebar />);
 
     const addBtn = screen.getByTitle("New Tab");
     fireEvent.click(addBtn);
 
-    await vi.waitFor(() => {
-      expect(useTerminalStore.getState().tabs).toHaveLength(3);
-    });
+    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
   });
 
   it("closes a tab when close button is clicked", async () => {

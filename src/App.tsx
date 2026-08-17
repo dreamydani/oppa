@@ -4,12 +4,14 @@ import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
+import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
 // ctrlKey elsewhere):
+//   Cmd/Ctrl+N        open / toggle workspace launcher modal
 //   Cmd/Ctrl+T        create new tab
 //   Cmd/Ctrl+W        close active tab / focused pane
 //   Ctrl+Tab          cycle active tab forward
@@ -131,6 +133,9 @@ function App() {
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         toggleLeftSidebar();
+      } else if (key === "n" && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        useTerminalStore.getState().toggleWorkspaceLauncher();
       } else if (key === "t" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void createTab();
@@ -175,6 +180,7 @@ function App() {
         </main>
         {rightSidebarOpen && <RightSidebar />}
       </div>
+      <WorkspaceLauncherModal />
     </div>
   );
 }

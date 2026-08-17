@@ -76,6 +76,7 @@ describe("App", () => {
       leftSidebarWidth: 240,
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
+      isWorkspaceLauncherOpen: false,
     });
   });
 
@@ -439,5 +440,20 @@ describe("App", () => {
       }),
     );
     expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+  });
+
+  it("toggles workspace launcher modal on Ctrl+N or Cmd+N", () => {
+    useTerminalStore.setState({ isWorkspaceLauncherOpen: false });
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "n", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "n", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
   });
 });

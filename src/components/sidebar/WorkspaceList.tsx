@@ -8,9 +8,9 @@ export function WorkspaceList(): React.ReactElement {
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const sessions = useTerminalStore((s) => s.sessions);
   const selectTab = useTerminalStore((s) => s.selectTab);
-  const createTab = useTerminalStore((s) => s.createTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
+  const openWorkspaceLauncher = useTerminalStore((s) => s.openWorkspaceLauncher);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -79,7 +79,7 @@ export function WorkspaceList(): React.ReactElement {
             className="workspace-icon-btn"
             title="New Workspace"
             aria-label="New Workspace"
-            onClick={() => void createTab()}
+            onClick={() => openWorkspaceLauncher()}
           >
             <Plus size={14} />
           </button>
