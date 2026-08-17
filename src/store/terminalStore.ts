@@ -110,6 +110,17 @@ export interface TerminalState {
   moveFocus: (dir: "left" | "right" | "up" | "down") => void;
   saveLayout: () => Promise<void>;
   loadLayout: () => Promise<void>;
+  leftSidebarOpen: boolean;
+  leftSidebarWidth: number;
+  rightSidebarOpen: boolean;
+  rightSidebarWidth: number;
+  rightSidebarTab: "explorer" | "git";
+  toggleLeftSidebar: () => void;
+  setLeftSidebarWidth: (width: number) => void;
+  toggleRightSidebar: () => void;
+  setRightSidebarWidth: (width: number) => void;
+  setRightSidebarTab: (tab: "explorer" | "git") => void;
+  getActiveCwd: () => string | undefined;
 }
 
 function getSyncedTabs(state: TerminalState): TabState[] {
@@ -156,6 +167,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   cachedScrollbacks: {},
   restoredScrollbacks: {},
   ready: false,
+  leftSidebarOpen: true,
+  leftSidebarWidth: 240,
+  rightSidebarOpen: true,
+  rightSidebarWidth: 280,
+  rightSidebarTab: "explorer",
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -690,5 +706,27 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     } finally {
       set({ ready: true });
     }
+  },
+
+  toggleLeftSidebar: () =>
+    set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
+
+  setLeftSidebarWidth: (width) =>
+    set({ leftSidebarWidth: width }),
+
+  toggleRightSidebar: () =>
+    set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen })),
+
+  setRightSidebarWidth: (width) =>
+    set({ rightSidebarWidth: width }),
+
+  setRightSidebarTab: (tab) =>
+    set({ rightSidebarTab: tab }),
+
+  getActiveCwd: () => {
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const leafId = focus(activeTab.layout, activeTab.focusedPath);
+    return state.sessions[leafId]?.cwd;
   },
 }));

@@ -38,6 +38,11 @@ describe("terminalStore", () => {
       cachedScrollbacks: {},
       restoredScrollbacks: {},
       ready: false,
+      leftSidebarOpen: true,
+      leftSidebarWidth: 240,
+      rightSidebarOpen: true,
+      rightSidebarWidth: 280,
+      rightSidebarTab: "explorer",
     });
     vi.clearAllMocks();
   });
@@ -1258,6 +1263,81 @@ describe("terminalStore", () => {
         expect(state.activeTabId).toBe(state.tabs[0].id);
         expect(state.layout).toEqual({ type: "leaf", id: "new-legacy" });
       });
+    });
+  });
+
+  describe("UI state slice", () => {
+    it("initializes with default sidebar states and tab", () => {
+      const state = useTerminalStore.getState();
+      expect(state.leftSidebarOpen).toBe(true);
+      expect(state.leftSidebarWidth).toBe(240);
+      expect(state.rightSidebarOpen).toBe(true);
+      expect(state.rightSidebarWidth).toBe(280);
+      expect(state.rightSidebarTab).toBe("explorer");
+    });
+
+    it("toggles left sidebar visibility", () => {
+      useTerminalStore.getState().toggleLeftSidebar();
+      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+      useTerminalStore.getState().toggleLeftSidebar();
+      expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    });
+
+    it("sets left sidebar width", () => {
+      useTerminalStore.getState().setLeftSidebarWidth(320);
+      expect(useTerminalStore.getState().leftSidebarWidth).toBe(320);
+    });
+
+    it("toggles right sidebar visibility", () => {
+      useTerminalStore.getState().toggleRightSidebar();
+      expect(useTerminalStore.getState().rightSidebarOpen).toBe(false);
+      useTerminalStore.getState().toggleRightSidebar();
+      expect(useTerminalStore.getState().rightSidebarOpen).toBe(true);
+    });
+
+    it("sets right sidebar width", () => {
+      useTerminalStore.getState().setRightSidebarWidth(360);
+      expect(useTerminalStore.getState().rightSidebarWidth).toBe(360);
+    });
+
+    it("switches right sidebar tab between explorer and git", () => {
+      useTerminalStore.getState().setRightSidebarTab("git");
+      expect(useTerminalStore.getState().rightSidebarTab).toBe("git");
+      useTerminalStore.getState().setRightSidebarTab("explorer");
+      expect(useTerminalStore.getState().rightSidebarTab).toBe("explorer");
+    });
+
+    it("getActiveCwd returns the cwd of the currently active focused session", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cwd: "D:\\projects\\oppa", cols: 80, rows: 24 },
+          s2: { id: "s2", title: "s2", status: "running", cwd: "C:\\users\\test", cols: 80, rows: 24 },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          { id: "tab-2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+
+      expect(useTerminalStore.getState().getActiveCwd()).toBe("D:\\projects\\oppa");
+
+      useTerminalStore.getState().selectTab("tab-2");
+      expect(useTerminalStore.getState().getActiveCwd()).toBe("C:\\users\\test");
+    });
+
+    it("getActiveCwd returns undefined when focused session does not exist or has no cwd", () => {
+      useTerminalStore.setState({
+        sessions: {},
+        tabs: [{ id: "tab-1", layout: { type: "leaf", id: "" }, focusedPath: [] }],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "" },
+        focusedPath: [],
+      });
+
+      expect(useTerminalStore.getState().getActiveCwd()).toBeUndefined();
     });
   });
 });
