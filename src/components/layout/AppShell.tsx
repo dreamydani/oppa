@@ -13,6 +13,10 @@ import "./AppShell.css";
 export function AppShell(): React.ReactElement {
   const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
   const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
+  const tabs = useTerminalStore((s) => s.tabs);
+  const activeTabId = useTerminalStore((s) => s.activeTabId);
+
+  const activeTab = tabs.find((t) => t.id === activeTabId);
 
   return (
     <div className="app-shell">
@@ -21,15 +25,22 @@ export function AppShell(): React.ReactElement {
         {leftSidebarOpen && <LeftSidebar />}
         <main className="app-main">
           <TabBar />
-          <Toolbar />
-          <div className="terminal-workbench">
-            <PaneSplit />
-          </div>
+          {activeTab?.isWizard ? (
+            <div className="terminal-workbench">
+              <WorkspaceSetupWizard tabId={activeTab.id} />
+            </div>
+          ) : (
+            <>
+              <Toolbar />
+              <div className="terminal-workbench">
+                <PaneSplit />
+              </div>
+            </>
+          )}
         </main>
         {rightSidebarOpen && <RightSidebar />}
       </div>
       <StatusBar />
-      <WorkspaceSetupWizard />
     </div>
   );
 }

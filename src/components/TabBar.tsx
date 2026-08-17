@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Sparkles } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 
@@ -10,7 +10,7 @@ export function TabBar(): React.ReactElement {
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
-  const openSetupWizard = useTerminalStore((s) => s.openSetupWizard);
+  const createWizardTab = useTerminalStore((s) => s.createWizardTab);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -47,6 +47,7 @@ export function TabBar(): React.ReactElement {
 
   const getTabLabel = (tab: (typeof tabs)[0]) => {
     if (tab.title) return tab.title;
+    if (tab.isWizard) return "New Workspace";
     try {
       const leafId = focus(tab.layout, tab.focusedPath || []);
       const session = sessions[leafId];
@@ -93,6 +94,12 @@ export function TabBar(): React.ReactElement {
                 />
               ) : (
                 <span className="tab-title" title={label}>
+                  {tab.isWizard && (
+                    <Sparkles
+                      size={12}
+                      className="tab-wizard-icon inline-block mr-1 text-amber-400"
+                    />
+                  )}
                   {label}
                 </span>
               )}
@@ -119,7 +126,7 @@ export function TabBar(): React.ReactElement {
         className="tab-add-btn"
         title="New Tab (Ctrl+T)"
         aria-label="New Tab"
-        onClick={() => openSetupWizard()}
+        onClick={() => createWizardTab()}
       >
         <Plus size={14} />
       </button>

@@ -65,7 +65,7 @@ describe("AppShell", () => {
     });
   });
 
-  it("renders Titlebar, LeftSidebar, main area with TabBar, Toolbar, PaneSplit, RightSidebar, and StatusBar", () => {
+  it("renders Titlebar, LeftSidebar, main area with TabBar, Toolbar, PaneSplit, RightSidebar, and StatusBar when active tab is terminal", () => {
     const { container } = render(<AppShell />);
 
     expect(container.querySelector(".app-shell")).toBeTruthy();
@@ -79,10 +79,24 @@ describe("AppShell", () => {
     expect(container.querySelector(".status-bar")).toBeTruthy();
   });
 
-  it("renders WorkspaceSetupWizard dialog when isSetupWizardOpen is true", () => {
-    useTerminalStore.setState({ isSetupWizardOpen: true, wizardStep: 1 });
-    const { getByRole } = render(<AppShell />);
+  it("renders WorkspaceSetupWizard inline in .terminal-workbench and hides Toolbar when active tab is a wizard tab", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-wizard",
+          title: "New Workspace",
+          isWizard: true,
+          layout: { type: "leaf", id: "" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-wizard",
+    });
+    const { container, getByRole } = render(<AppShell />);
 
-    expect(getByRole("dialog", { name: /workspace setup wizard/i })).toBeTruthy();
+    expect(container.querySelector(".toolbar")).toBeNull();
+    expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
+    expect(container.querySelector(".left-sidebar")).toBeTruthy();
+    expect(container.querySelector(".right-sidebar")).toBeTruthy();
   });
 });

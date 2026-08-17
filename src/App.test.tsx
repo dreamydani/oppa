@@ -457,10 +457,21 @@ describe("App", () => {
     expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
   });
 
-  it("renders WorkspaceSetupWizard dialog when isSetupWizardOpen is true", () => {
-    useTerminalStore.setState({ isSetupWizardOpen: true, wizardStep: 1 });
+  it("renders WorkspaceSetupWizard when active tab is a wizard tab", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-wizard",
+          title: "New Workspace",
+          isWizard: true,
+          layout: { type: "leaf", id: "" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-wizard",
+    });
     const { getByRole } = render(<App />);
 
-    expect(getByRole("dialog", { name: /workspace setup wizard/i })).toBeTruthy();
+    expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
   });
 });

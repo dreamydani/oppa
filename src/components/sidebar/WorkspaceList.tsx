@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Plus, X, Folder, TerminalSquare } from "lucide-react";
+import { Plus, X, Folder, TerminalSquare, Sparkles } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { focus } from "../../lib/pane-manager/layout";
 
@@ -10,7 +10,7 @@ export function WorkspaceList(): React.ReactElement {
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
-  const openSetupWizard = useTerminalStore((s) => s.openSetupWizard);
+  const createWizardTab = useTerminalStore((s) => s.createWizardTab);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -46,6 +46,12 @@ export function WorkspaceList(): React.ReactElement {
   };
 
   const getTabDetails = (tab: (typeof tabs)[0]) => {
+    if (tab.isWizard) {
+      return {
+        title: tab.title || "New Workspace",
+        cwd: undefined,
+      };
+    }
     let title = tab.title;
     let cwd: string | undefined;
     try {
@@ -79,7 +85,7 @@ export function WorkspaceList(): React.ReactElement {
             className="workspace-icon-btn"
             title="New Workspace"
             aria-label="New Workspace"
-            onClick={() => openSetupWizard()}
+            onClick={() => createWizardTab()}
           >
             <Plus size={14} />
           </button>
@@ -102,7 +108,13 @@ export function WorkspaceList(): React.ReactElement {
             >
               <div className="workspace-card-main">
                 <div className="workspace-card-icon">
-                  {cwd ? <Folder size={14} /> : <TerminalSquare size={14} />}
+                  {tab.isWizard ? (
+                    <Sparkles size={14} className="text-amber-400" />
+                  ) : cwd ? (
+                    <Folder size={14} />
+                  ) : (
+                    <TerminalSquare size={14} />
+                  )}
                 </div>
 
                 <div className="workspace-card-info">

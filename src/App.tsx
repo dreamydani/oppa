@@ -36,6 +36,11 @@ function App() {
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
 
+  const tabs = useTerminalStore((s) => s.tabs);
+  const activeTabId = useTerminalStore((s) => s.activeTabId);
+
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+
   // Restore the persisted layout once on startup (StrictMode double-invokes
   // effects in dev; a ref guarantees the restore runs exactly once).
   const restoredRef = useRef(false);
@@ -177,12 +182,15 @@ function App() {
       <div className="workspace-container">
         {leftSidebarOpen && <LeftSidebar />}
         <main className="main-viewport">
-          <PaneSplit />
+          {activeTab?.isWizard ? (
+            <WorkspaceSetupWizard tabId={activeTab.id} />
+          ) : (
+            <PaneSplit />
+          )}
         </main>
         {rightSidebarOpen && <RightSidebar />}
       </div>
       <WorkspaceLauncherModal />
-      <WorkspaceSetupWizard />
     </div>
   );
 }

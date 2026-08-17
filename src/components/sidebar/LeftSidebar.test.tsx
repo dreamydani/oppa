@@ -90,13 +90,15 @@ describe("LeftSidebar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
   });
 
-  it("opens workspace wizard when + button is clicked", () => {
-    useTerminalStore.setState({ isSetupWizardOpen: false });
+  it("creates and activates wizard tab when + button is clicked", () => {
     render(<LeftSidebar />);
     const addBtn = screen.getByTitle("New Workspace");
     fireEvent.click(addBtn);
 
-    expect(useTerminalStore.getState().isSetupWizardOpen).toBe(true);
+    const state = useTerminalStore.getState();
+    expect(state.tabs).toHaveLength(3);
+    expect(state.tabs[2].isWizard).toBe(true);
+    expect(state.activeTabId).toBe(state.tabs[2].id);
   });
 
   it("closes a workspace tab when close button is clicked", async () => {

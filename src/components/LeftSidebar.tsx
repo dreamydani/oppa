@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
+import { Sparkles } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import {
@@ -18,7 +19,7 @@ export function LeftSidebar(): React.ReactElement | null {
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
-  const openSetupWizard = useTerminalStore((s) => s.openSetupWizard);
+  const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
 
@@ -57,6 +58,12 @@ export function LeftSidebar(): React.ReactElement | null {
   };
 
   const getTabDetails = (tab: (typeof tabs)[0]) => {
+    if (tab.isWizard) {
+      return {
+        title: tab.title || "New Workspace",
+        cwd: undefined,
+      };
+    }
     let title = tab.title;
     let cwd: string | undefined;
     try {
@@ -141,7 +148,7 @@ export function LeftSidebar(): React.ReactElement | null {
             className="sidebar-icon-btn"
             title="New Tab"
             aria-label="New Tab"
-            onClick={() => openSetupWizard()}
+            onClick={() => createWizardTab()}
           >
             <PlusIcon size={14} />
           </button>
@@ -167,13 +174,21 @@ export function LeftSidebar(): React.ReactElement | null {
               >
                 {/* Workspace avatar badge */}
                 <div className="tab-card-avatar">
-                  <TerminalIcon size={14} />
+                  {tab.isWizard ? (
+                    <Sparkles size={14} className="text-amber-400" />
+                  ) : (
+                    <TerminalIcon size={14} />
+                  )}
                 </div>
 
                 <div className="tab-card-content">
                   <div className="tab-card-row-top">
                     <span className="tab-card-app-icon">
-                      <TerminalIcon size={12} />
+                      {tab.isWizard ? (
+                        <Sparkles size={12} className="text-amber-400" />
+                      ) : (
+                        <TerminalIcon size={12} />
+                      )}
                     </span>
                     {isEditing ? (
                       <input

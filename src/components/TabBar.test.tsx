@@ -178,13 +178,43 @@ describe("TabBar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
   });
 
-  it("opens setup wizard when the add button is clicked", () => {
-    useTerminalStore.setState({ isSetupWizardOpen: false });
+  it("creates and activates a wizard tab when the add button is clicked", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+    });
     const { getByRole } = render(<TabBar />);
     const addBtn = getByRole("button", { name: /new tab/i });
     fireEvent.click(addBtn);
 
-    expect(useTerminalStore.getState().isSetupWizardOpen).toBe(true);
+    const state = useTerminalStore.getState();
+    expect(state.tabs).toHaveLength(2);
+    expect(state.tabs[1].isWizard).toBe(true);
+    expect(state.activeTabId).toBe(state.tabs[1].id);
+  });
+
+  it("renders wizard tab with New Workspace title and sparkles icon", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-wizard",
+          layout: { type: "leaf", id: "" },
+          focusedPath: [],
+          isWizard: true,
+        },
+      ],
+      activeTabId: "tab-wizard",
+    });
+
+    const { container, getByText } = render(<TabBar />);
+    expect(getByText("New Workspace")).toBeTruthy();
+    expect(container.querySelector(".tab-wizard-icon")).toBeTruthy();
   });
 
   it("renders close buttons only when more than one tab exists", () => {
