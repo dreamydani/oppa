@@ -121,6 +121,10 @@ export interface TerminalState {
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: "explorer" | "git") => void;
   getActiveCwd: () => string | undefined;
+  isWorkspaceLauncherOpen: boolean;
+  openWorkspaceLauncher: () => void;
+  closeWorkspaceLauncher: () => void;
+  toggleWorkspaceLauncher: () => void;
 }
 
 function getSyncedTabs(state: TerminalState): TabState[] {
@@ -172,6 +176,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   rightSidebarOpen: false,
   rightSidebarWidth: 280,
   rightSidebarTab: "explorer",
+  isWorkspaceLauncherOpen: false,
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -729,4 +734,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const leafId = focus(activeTab.layout, activeTab.focusedPath);
     return state.sessions[leafId]?.cwd;
   },
+
+  openWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: true }),
+  closeWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: false }),
+  toggleWorkspaceLauncher: () =>
+    set((s) => ({ isWorkspaceLauncherOpen: !s.isWorkspaceLauncherOpen })),
 }));
