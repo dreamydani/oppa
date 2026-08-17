@@ -53,6 +53,47 @@ pub fn fs_read_dir(path: String) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
+#[tauri::command]
+pub fn fs_read_file(path: String) -> Result<String, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Path is not a file: {}", path));
+    }
+
+    fs::read_to_string(file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn fs_write_file(path: String, content: String) -> Result<(), String> {
+    let file_path = Path::new(&path);
+    if let Some(parent) = file_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+
+    fs::write(file_path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn fs_create_file(path: String) -> Result<(), String> {
+    let file_path = Path::new(&path);
+    if file_path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = file_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+
+    fs::write(file_path, "").map_err(|e| e.to_string())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,4 +142,75 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn test_fs_read_and_write_file_roundtrip() {
+        let dir = temp_dir("rw_test");
+        let file_path = dir.join("test.txt");
+        let full_path = file_path.to_string_lossy().to_string();
+
+        fs_write_file(full_path.clone(), "hello oppa editor".to_string()).unwrap();
+        let content = fs_read_file(full_path).unwrap();
+        assert_eq!(content, "hello oppa editor");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_write_file_creates_parent_directories() {
+        let dir = temp_dir("parents_test");
+        let file_path = dir.join("nested").join("sub").join("file.txt");
+        let full_path = file_path.to_string_lossy().to_string();
+
+        fs_write_file(full_path.clone(), "nested content".to_string()).unwrap();
+        let content = fs_read_file(full_path).unwrap();
+        assert_eq!(content, "nested content");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_create_file_creates_empty_file_and_parents() {
+        let dir = temp_dir("create_test");
+        let file_path = dir.join("sub").join("new_file.txt");
+        let full_path = file_path.to_string_lossy().to_string();
+
+        fs_create_file(full_path.clone()).unwrap();
+        assert!(file_path.exists());
+        let content = fs_read_file(full_path).unwrap();
+        assert_eq!(content, "");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_create_file_already_exists_returns_ok() {
+        let dir = temp_dir("create_exists");
+        let file_path = dir.join("existing.txt");
+        let full_path = file_path.to_string_lossy().to_string();
+
+        fs_write_file(full_path.clone(), "original content".to_string()).unwrap();
+        let res = fs_create_file(full_path.clone());
+        assert!(res.is_ok());
+        let content = fs_read_file(full_path).unwrap();
+        assert_eq!(content, "original content");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_read_file_nonexistent_returns_err() {
+        let res = fs_read_file("/nonexistent/path/for/oppa/test.txt".to_string());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_fs_read_file_directory_returns_err() {
+        let dir = temp_dir("read_dir_err");
+        let res = fs_read_file(dir.to_string_lossy().to_string());
+        assert!(res.is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
+
