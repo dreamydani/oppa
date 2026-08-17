@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { X, ArrowLeft, ArrowRight, Zap, Play } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { WizardStepStart } from "./WizardStepStart";
@@ -16,13 +16,21 @@ const STEPS = [
   { step: 3, title: "Agents" },
 ] as const;
 
-export function WorkspaceSetupWizard(): React.ReactElement | null {
+export interface WorkspaceSetupWizardProps {
+  tabId?: string;
+}
+
+export function WorkspaceSetupWizard({
+  tabId,
+}: WorkspaceSetupWizardProps = {}): React.ReactElement | null {
   const isSetupWizardOpen = useTerminalStore((s) => s.isSetupWizardOpen);
   const storeStep = useTerminalStore((s) => s.wizardStep);
   const setStoreStep = useTerminalStore((s) => s.setWizardStep);
   const closeSetupWizard = useTerminalStore((s) => s.closeSetupWizard);
+  const closeTab = useTerminalStore((s) => s.closeTab);
   const loadWizardData = useTerminalStore((s) => s.loadWizardData);
   const launchCustomWorkspace = useTerminalStore((s) => s.launchCustomWorkspace);
+  const launchWorkspaceForTab = useTerminalStore((s) => s.launchWorkspaceForTab);
   const saveWorkspacePreset = useTerminalStore((s) => s.saveWorkspacePreset);
   const recentWorkspaces = useTerminalStore((s) => s.recentWorkspaces);
   const workspacePresets = useTerminalStore((s) => s.workspacePresets);
@@ -59,18 +67,25 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
     }
   }, []);
 
+  const handleClose = useCallback(() => {
+    if (tabId) {
+      closeTab(tabId);
+    }
+    closeSetupWizard();
+  }, [tabId, closeTab, closeSetupWizard]);
+
   // Keyboard shortcut listener for Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        closeSetupWizard();
+        handleClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeSetupWizard]);
+  }, [handleClose]);
 
-  if (!isSetupWizardOpen) {
+  if (!tabId && !isSetupWizardOpen) {
     return null;
   }
 
@@ -89,13 +104,18 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
   };
 
   const handleQuickSpawn = async () => {
-    await launchCustomWorkspace({
+    const config = {
       name: name.trim() || undefined,
       cwd: cwd.trim() || undefined,
       shell: shell.trim() || undefined,
       terminalCount: 1,
-    });
-    closeSetupWizard();
+    };
+    if (tabId) {
+      await launchWorkspaceForTab(tabId, config);
+    } else {
+      await launchCustomWorkspace(config);
+      closeSetupWizard();
+    }
   };
 
   const handleLaunch = async () => {
@@ -112,44 +132,45 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
       });
     }
 
-    await launchCustomWorkspace({
+    const config = {
       name: name.trim() || undefined,
       cwd: cwd.trim() || undefined,
       shell: shell.trim() || undefined,
       terminalCount,
       commands: commands.slice(0, terminalCount),
       agentPersona: agentPersona !== "none" ? agentPersona : undefined,
-    });
+    };
 
-    closeSetupWizard();
+    if (tabId) {
+      await launchWorkspaceForTab(tabId, config);
+    } else {
+      await launchCustomWorkspace(config);
+      closeSetupWizard();
+    }
   };
 
   return (
     <div
-      className="wizard-modal-overlay"
-      role="dialog"
-      aria-modal="true"
+      className="wizard-workbench-page"
+      role="region"
       aria-label="Workspace Setup Wizard"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeSetupWizard();
-      }}
     >
-      <div className="wizard-modal-dialog">
-        {/* Wizard Header */}
-        <div className="wizard-dialog-header">
+      <div className="wizard-content-container">
+        {/* Wizard Top Header */}
+        <div className="wizard-page-header">
           <div className="wizard-dialog-title-group">
             <span className="wizard-logo-tag">OPPA</span>
-            <span className="wizard-dialog-heading">Workspace Wizard</span>
+            <span className="wizard-dialog-heading">Workspace Setup</span>
           </div>
 
           <button
             type="button"
             className="wizard-close-btn"
-            onClick={closeSetupWizard}
+            onClick={handleClose}
             aria-label="Close wizard"
             title="Close wizard (Esc)"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
@@ -186,7 +207,7 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
         </div>
 
         {/* Wizard Main Step Content */}
-        <div className="wizard-dialog-body">
+        <div className="wizard-step-body">
           {step === 1 && (
             <WizardStepStart
               name={name}
@@ -229,7 +250,7 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
         </div>
 
         {/* Wizard Bottom Navigation Bar */}
-        <div className="wizard-dialog-footer">
+        <div className="wizard-action-footer">
           <div className="wizard-footer-left">
             <button
               type="button"
@@ -238,7 +259,7 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
               disabled={step === 1}
               aria-label="Back"
             >
-              <ArrowLeft size={16} />
+              <ArrowLeft size={15} />
               <span>Back</span>
             </button>
           </div>
@@ -267,7 +288,7 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
                 <span>
                   Next: {step === 1 ? "Layout" : "Agents"}
                 </span>
-                <ArrowRight size={16} />
+                <ArrowRight size={15} />
               </button>
             ) : (
               <button
@@ -276,7 +297,7 @@ export function WorkspaceSetupWizard(): React.ReactElement | null {
                 onClick={handleLaunch}
                 aria-label="Launch Workspace"
               >
-                <Play size={16} className="fill-current" />
+                <Play size={15} className="fill-current" />
                 <span>Launch Workspace</span>
               </button>
             )}

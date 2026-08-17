@@ -145,7 +145,7 @@ export function WizardStepLayout({
             <input
               id="wizard-folder-input"
               type="text"
-              className="wizard-text-input"
+              className="wizard-text-input wizard-mono-input"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
               placeholder="e.g. /home/project or D:\dev\oppa"
@@ -164,6 +164,7 @@ export function WizardStepLayout({
             onKeyDown={handleCdKeyDown}
             placeholder="subpath or cd .. (e.g. src)"
           />
+          <kbd className="wizard-cd-kbd">Enter ↵</kbd>
           <button
             type="button"
             className="wizard-cd-submit-btn"

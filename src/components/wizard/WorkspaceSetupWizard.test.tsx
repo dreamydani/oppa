@@ -377,4 +377,72 @@ describe("WorkspaceSetupWizard full assembly", () => {
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
     expect(closeSpy).toHaveBeenCalledTimes(2);
   });
+
+  it("renders full-page workbench container without modal overlay", () => {
+    const { container } = render(<WorkspaceSetupWizard tabId="tab-wizard-1" />);
+    expect(container.querySelector(".wizard-workbench-page")).toBeInTheDocument();
+    expect(container.querySelector(".wizard-content-container")).toBeInTheDocument();
+    expect(container.querySelector(".wizard-modal-overlay")).not.toBeInTheDocument();
+    expect(container.querySelector(".wizard-modal-dialog")).not.toBeInTheDocument();
+  });
+
+  it("launches workspace into tab when tabId prop is provided", async () => {
+    const launchTabSpy = vi.spyOn(useTerminalStore.getState(), "launchWorkspaceForTab");
+    render(<WorkspaceSetupWizard tabId="tab-wizard-1" />);
+
+    // Fill Step 1
+    fireEvent.change(screen.getByPlaceholderText("My Project"), {
+      target: { value: "Tab Workspace" },
+    });
+
+    // Step 2
+    fireEvent.click(screen.getByTestId("wizard-progress-step-2"));
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. \/home\/project/i), {
+      target: { value: "D:/dev/tab-project" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "2 terminals layout" }));
+
+    // Step 3
+    fireEvent.click(screen.getByTestId("wizard-progress-step-3"));
+    const launchBtn = screen.getByRole("button", { name: /launch workspace/i });
+    fireEvent.click(launchBtn);
+
+    await waitFor(() => {
+      expect(launchTabSpy).toHaveBeenCalledWith(
+        "tab-wizard-1",
+        expect.objectContaining({
+          name: "Tab Workspace",
+          cwd: "D:/dev/tab-project",
+          terminalCount: 2,
+        }),
+      );
+    });
+  });
+
+  it("handles Quick Spawn with tabId prop", async () => {
+    const launchTabSpy = vi.spyOn(useTerminalStore.getState(), "launchWorkspaceForTab");
+    render(<WorkspaceSetupWizard tabId="tab-wizard-1" />);
+
+    const quickSpawnBtn = screen.getByRole("button", { name: /quick spawn/i });
+    fireEvent.click(quickSpawnBtn);
+
+    await waitFor(() => {
+      expect(launchTabSpy).toHaveBeenCalledWith(
+        "tab-wizard-1",
+        expect.objectContaining({
+          terminalCount: 1,
+        }),
+      );
+    });
+  });
+
+  it("closes tab when tabId prop is provided and close button is clicked", () => {
+    const closeTabSpy = vi.spyOn(useTerminalStore.getState(), "closeTab");
+    render(<WorkspaceSetupWizard tabId="tab-wizard-1" />);
+
+    const closeBtn = screen.getByRole("button", { name: /close wizard/i });
+    fireEvent.click(closeBtn);
+
+    expect(closeTabSpy).toHaveBeenCalledWith("tab-wizard-1");
+  });
 });

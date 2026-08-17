@@ -23,42 +23,44 @@ export function WizardStepStart({
         </p>
       </div>
 
-      <div className="wizard-form-group">
-        <label htmlFor="wizard-workspace-name" className="wizard-label">
-          Workspace Name
-        </label>
-        <div className="wizard-input-wrapper">
-          <input
-            id="wizard-workspace-name"
-            type="text"
-            className="wizard-text-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Project"
-            autoFocus
-          />
+      <div className="wizard-section">
+        <div className="wizard-form-group">
+          <label htmlFor="wizard-workspace-name" className="wizard-label">
+            Workspace Name
+          </label>
+          <div className="wizard-input-wrapper">
+            <input
+              id="wizard-workspace-name"
+              type="text"
+              className="wizard-text-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Project"
+              autoFocus
+            />
+          </div>
         </div>
-      </div>
 
-      <div className="wizard-form-group">
-        <label htmlFor="wizard-shell-select" className="wizard-label">
-          Preferred Shell
-        </label>
-        <div className="wizard-input-wrapper">
-          <select
-            id="wizard-shell-select"
-            className="wizard-select-input"
-            value={shell}
-            onChange={(e) => setShell(e.target.value)}
-          >
-            <option value="">Default Shell</option>
-            <option value="powershell.exe">PowerShell</option>
-            <option value="cmd.exe">Command Prompt</option>
-            <option value="bash.exe">Git Bash</option>
-            <option value="wsl.exe">WSL</option>
-            <option value="/bin/bash">Bash</option>
-            <option value="/bin/zsh">Zsh</option>
-          </select>
+        <div className="wizard-form-group">
+          <label htmlFor="wizard-shell-select" className="wizard-label">
+            Preferred Shell
+          </label>
+          <div className="wizard-input-wrapper">
+            <select
+              id="wizard-shell-select"
+              className="wizard-select-input"
+              value={shell}
+              onChange={(e) => setShell(e.target.value)}
+            >
+              <option value="">Default Shell</option>
+              <option value="powershell.exe">PowerShell</option>
+              <option value="cmd.exe">Command Prompt</option>
+              <option value="bash.exe">Git Bash</option>
+              <option value="wsl.exe">WSL</option>
+              <option value="/bin/bash">Bash</option>
+              <option value="/bin/zsh">Zsh</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
