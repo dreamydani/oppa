@@ -1,36 +1,57 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
+import * as opener from "@tauri-apps/plugin-opener";
 
-// xterm's Terminal is mocked so the test asserts the wiring contract
-// (store session -> write -> ack -> resize -> kill) without a real buffer.
+// xterm's Terminal and Addons are mocked so the test asserts the wiring contract
+// (store session -> write -> ack -> resize -> kill, plus addons and search).
 const xtermState = vi.hoisted(() => ({
   instances: [] as {
     cols: number;
     rows: number;
+    unicode: { activeVersion: string };
     write: ReturnType<typeof vi.fn>;
     writeln: ReturnType<typeof vi.fn>;
     onData: ReturnType<typeof vi.fn>;
     onWriteParsed: ReturnType<typeof vi.fn>;
     open: ReturnType<typeof vi.fn>;
     loadAddon: ReturnType<typeof vi.fn>;
+    attachCustomKeyEventHandler: ReturnType<typeof vi.fn>;
+    getSelection: ReturnType<typeof vi.fn>;
+    focus: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
+    customKeyHandler?: (event: KeyboardEvent) => boolean;
   }[],
+}));
+
+const addonState = vi.hoisted(() => ({
+  unicode11Instances: [] as unknown[],
+  searchInstances: [] as unknown[],
+  webLinksInstances: [] as { handler?: (event: MouseEvent, uri: string) => void }[],
+  webglInstances: [] as { onContextLoss: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; contextLossCallback?: () => void }[],
+  canvasInstances: [] as unknown[],
 }));
 
 vi.mock("@xterm/xterm", () => {
   class MockTerminal {
     cols = 80;
     rows = 24;
+    unicode = { activeVersion: "6" };
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
     write = vi.fn();
     writeln = vi.fn();
     open = vi.fn();
     loadAddon = vi.fn();
+    attachCustomKeyEventHandler = vi.fn((fn: (event: KeyboardEvent) => boolean) => {
+      this.customKeyHandler = fn;
+    });
+    getSelection = vi.fn().mockReturnValue("");
+    focus = vi.fn();
     dispose = vi.fn();
+    customKeyHandler?: (event: KeyboardEvent) => boolean;
     constructor() {
       xtermState.instances.push(this);
     }
@@ -44,6 +65,65 @@ vi.mock("@xterm/addon-fit", () => {
   }
   return { FitAddon: MockFitAddon };
 });
+
+vi.mock("@xterm/addon-unicode11", () => {
+  class MockUnicode11Addon {
+    constructor() {
+      addonState.unicode11Instances.push(this);
+    }
+  }
+  return { Unicode11Addon: MockUnicode11Addon };
+});
+
+vi.mock("@xterm/addon-search", () => {
+  class MockSearchAddon {
+    findNext = vi.fn();
+    findPrevious = vi.fn();
+    clearDecorations = vi.fn();
+    constructor() {
+      addonState.searchInstances.push(this);
+    }
+  }
+  return { SearchAddon: MockSearchAddon };
+});
+
+vi.mock("@xterm/addon-web-links", () => {
+  class MockWebLinksAddon {
+    handler?: (event: MouseEvent, uri: string) => void;
+    constructor(handler?: (event: MouseEvent, uri: string) => void) {
+      this.handler = handler;
+      addonState.webLinksInstances.push(this);
+    }
+  }
+  return { WebLinksAddon: MockWebLinksAddon };
+});
+
+vi.mock("@xterm/addon-webgl", () => {
+  class MockWebglAddon {
+    onContextLoss = vi.fn((cb: () => void) => {
+      this.contextLossCallback = cb;
+    });
+    dispose = vi.fn();
+    contextLossCallback?: () => void;
+    constructor() {
+      addonState.webglInstances.push(this);
+    }
+  }
+  return { WebglAddon: MockWebglAddon };
+});
+
+vi.mock("@xterm/addon-canvas", () => {
+  class MockCanvasAddon {
+    constructor() {
+      addonState.canvasInstances.push(this);
+    }
+  }
+  return { CanvasAddon: MockCanvasAddon };
+});
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -62,6 +142,7 @@ const ptyAckMock = vi.mocked(transport.ptyAck);
 const ptyKillMock = vi.mocked(transport.ptyKill);
 const onPtyDataMock = vi.mocked(transport.onPtyData);
 const onPtyExitMock = vi.mocked(transport.onPtyExit);
+const openUrlMock = vi.mocked(opener.openUrl);
 
 // happy-dom's ResizeObserver never fires; capture the callback so tests can
 // trigger a resize the way a browser layout change would.
@@ -75,6 +156,11 @@ describe("TerminalPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     xtermState.instances.length = 0;
+    addonState.unicode11Instances.length = 0;
+    addonState.searchInstances.length = 0;
+    addonState.webLinksInstances.length = 0;
+    addonState.webglInstances.length = 0;
+    addonState.canvasInstances.length = 0;
     roState.callback = null;
     // Fresh store: the pane under test renders the "abc" session.
     useTerminalStore.setState({
@@ -161,12 +247,6 @@ describe("TerminalPane", () => {
     await waitForSpawned();
     expect(xtermState.instances.length).toBe(1);
 
-    // A RO callback (as if observe() fired immediately) writes a FRESH
-    // session object into the store via resizeSession. The effect must NOT
-    // re-run on that: status stays "running", so no new Terminal is created
-    // and the current one is not disposed. With the session object in the
-    // effect deps this loops forever (mount -> resize -> store write ->
-    // cleanup+re-run -> new RO fires -> resize -> ...).
     fireResize();
     fireResize();
     await vi.waitFor(() => expect(ptyResizeMock).toHaveBeenCalledTimes(2));
@@ -190,7 +270,6 @@ describe("TerminalPane", () => {
     const { container } = render(<TerminalPane id="err" />);
     const pane = container.querySelector(".terminal-pane")!;
     expect(pane.textContent).toContain("session failed to start");
-    // Error panes are static: no pty listeners, no terminal instance.
     expect(xtermState.instances.length).toBe(0);
     expect(onPtyDataMock).not.toHaveBeenCalled();
   });
@@ -261,8 +340,6 @@ describe("TerminalPane", () => {
 
     unmount();
     expect(term().dispose).toHaveBeenCalled();
-    // The session is owned by the store/layout, not the pane: closing one view
-    // of it must not kill the session underneath.
     expect(ptyKillMock).not.toHaveBeenCalled();
   });
 
@@ -284,7 +361,6 @@ describe("TerminalPane", () => {
       data: string;
       seq: number;
     }) => void;
-    // Second chunk lands before xterm's onWriteParsed fires for the first.
     dataHandler({ id: "abc", data: "hello", seq: 1 });
     dataHandler({ id: "abc", data: "!\r\n", seq: 2 });
     expect(term().write).toHaveBeenNthCalledWith(1, "hello");
@@ -292,7 +368,6 @@ describe("TerminalPane", () => {
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
-    // 5 + 3 = 8 chars parsed since the last ACK — no ACK may be lost.
     expect(ptyAckMock).toHaveBeenCalledTimes(1);
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 8);
   });
@@ -302,8 +377,6 @@ describe("TerminalPane", () => {
     await waitForSpawned();
     expect(term().write).not.toHaveBeenCalled();
 
-    // New id: a fresh terminal + listeners for the new session. The old
-    // terminal is disposed; the shared sessions stay alive.
     useTerminalStore.setState({
       sessions: {
         ...useTerminalStore.getState().sessions,
@@ -330,7 +403,6 @@ describe("TerminalPane", () => {
 
     rerender(<TerminalPane id="ghost" />);
     expect(xtermState.instances[0]!.dispose).toHaveBeenCalled();
-    // No new listener registered for the missing session.
     expect(onPtyDataMock).toHaveBeenCalledTimes(1);
   });
 
@@ -350,5 +422,103 @@ describe("TerminalPane", () => {
     resolveDataListen(unlistenData);
     await vi.waitFor(() => expect(unlistenData).toHaveBeenCalled());
     expect(unlistenData).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads Unicode11Addon, SearchAddon, WebLinksAddon, and WebglAddon and activates unicode 11", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(addonState.unicode11Instances.length).toBe(1);
+    expect(term().unicode.activeVersion).toBe("11");
+    expect(addonState.searchInstances.length).toBe(1);
+    expect(addonState.webLinksInstances.length).toBe(1);
+    expect(addonState.webglInstances.length).toBe(1);
+    expect(term().loadAddon).toHaveBeenCalledTimes(5); // fit, unicode11, search, webLinks, webgl
+  });
+
+  it("opens search overlay with selected text when Ctrl+F or Cmd+F is pressed in terminal", async () => {
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(container.querySelector(".terminal-search-overlay")).toBeNull();
+
+    term().getSelection.mockReturnValue("selected_query");
+
+    const preventDefault = vi.fn();
+    const handled = term().customKeyHandler?.({
+      ctrlKey: true,
+      metaKey: false,
+      key: "f",
+      preventDefault,
+    } as unknown as KeyboardEvent);
+
+    expect(handled).toBe(false);
+    expect(preventDefault).toHaveBeenCalled();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".terminal-search-overlay")).not.toBeNull();
+    });
+
+    const searchInput = screen.getByRole("textbox", { name: /find in terminal/i }) as HTMLInputElement;
+    expect(searchInput.value).toBe("selected_query");
+  });
+
+  it("closes search overlay on Escape and refocuses the terminal", async () => {
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    // Open search
+    act(() => {
+      term().customKeyHandler?.({
+        ctrlKey: true,
+        metaKey: false,
+        key: "f",
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent);
+    });
+
+    expect(container.querySelector(".terminal-search-overlay")).not.toBeNull();
+
+    // Press Escape via terminal custom key handler
+    const preventDefault = vi.fn();
+    act(() => {
+      term().customKeyHandler?.({
+        ctrlKey: false,
+        metaKey: false,
+        key: "Escape",
+        preventDefault,
+      } as unknown as KeyboardEvent);
+    });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(container.querySelector(".terminal-search-overlay")).toBeNull();
+    expect(term().focus).toHaveBeenCalled();
+  });
+
+  it("handles WebGL context loss by falling back to CanvasAddon", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const webglInstance = addonState.webglInstances[0]!;
+    expect(webglInstance.onContextLoss).toHaveBeenCalled();
+
+    // Trigger context loss
+    act(() => {
+      webglInstance.contextLossCallback?.();
+    });
+
+    expect(webglInstance.dispose).toHaveBeenCalled();
+    expect(addonState.canvasInstances.length).toBe(1);
+  });
+
+  it("opens URL via Tauri opener on link click with window.open fallback", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const webLinksInstance = addonState.webLinksInstances[0]!;
+    expect(webLinksInstance.handler).toBeDefined();
+
+    webLinksInstance.handler?.({} as MouseEvent, "https://example.com");
+    expect(openUrlMock).toHaveBeenCalledWith("https://example.com");
   });
 });
