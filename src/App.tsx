@@ -4,6 +4,7 @@ import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
+import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { useTerminalStore } from "./store/terminalStore";
@@ -180,6 +181,8 @@ function App() {
     <div className="app-container">
       <TitleBar />
       <div className="workspace-container">
+        <div className="soft-edge-left" />
+        <div className="soft-edge-right" />
         {leftSidebarOpen && <LeftSidebar />}
         <main className="main-viewport">
           {activeTab?.isWizard ? (
@@ -190,6 +193,7 @@ function App() {
         </main>
         {rightSidebarOpen && <RightSidebar />}
       </div>
+      <StatusBar />
       <WorkspaceLauncherModal />
     </div>
   );

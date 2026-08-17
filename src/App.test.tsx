@@ -114,6 +114,15 @@ describe("App", () => {
     expect(container.querySelector(".right-sidebar")).not.toBeNull();
   });
 
+  it("renders status bar footer and soft edge curves in app layout", () => {
+    const { getByRole, container } = render(<App />);
+
+    expect(getByRole("contentinfo")).not.toBeNull();
+    expect(container.querySelector(".status-bar")).not.toBeNull();
+    expect(container.querySelector(".soft-edge-left")).not.toBeNull();
+    expect(container.querySelector(".soft-edge-right")).not.toBeNull();
+  });
+
   it("conditionally renders LeftSidebar and RightSidebar based on store state", () => {
     useTerminalStore.setState({
       leftSidebarOpen: false,
