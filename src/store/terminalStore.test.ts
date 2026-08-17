@@ -40,7 +40,7 @@ describe("terminalStore", () => {
       ready: false,
       leftSidebarOpen: true,
       leftSidebarWidth: 240,
-      rightSidebarOpen: true,
+      rightSidebarOpen: false,
       rightSidebarWidth: 280,
       rightSidebarTab: "explorer",
     });
@@ -1267,11 +1267,17 @@ describe("terminalStore", () => {
   });
 
   describe("UI state slice", () => {
+    it("has expected initial store state", () => {
+      const initialState = useTerminalStore.getInitialState();
+      expect(initialState.leftSidebarOpen).toBe(true);
+      expect(initialState.rightSidebarOpen).toBe(false);
+    });
+
     it("initializes with default sidebar states and tab", () => {
       const state = useTerminalStore.getState();
       expect(state.leftSidebarOpen).toBe(true);
       expect(state.leftSidebarWidth).toBe(240);
-      expect(state.rightSidebarOpen).toBe(true);
+      expect(state.rightSidebarOpen).toBe(false);
       expect(state.rightSidebarWidth).toBe(280);
       expect(state.rightSidebarTab).toBe("explorer");
     });
@@ -1289,10 +1295,11 @@ describe("terminalStore", () => {
     });
 
     it("toggles right sidebar visibility", () => {
-      useTerminalStore.getState().toggleRightSidebar();
       expect(useTerminalStore.getState().rightSidebarOpen).toBe(false);
       useTerminalStore.getState().toggleRightSidebar();
       expect(useTerminalStore.getState().rightSidebarOpen).toBe(true);
+      useTerminalStore.getState().toggleRightSidebar();
+      expect(useTerminalStore.getState().rightSidebarOpen).toBe(false);
     });
 
     it("sets right sidebar width", () => {

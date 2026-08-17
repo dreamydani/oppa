@@ -169,7 +169,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   ready: false,
   leftSidebarOpen: true,
   leftSidebarWidth: 240,
-  rightSidebarOpen: true,
+  rightSidebarOpen: false,
   rightSidebarWidth: 280,
   rightSidebarTab: "explorer",
 
