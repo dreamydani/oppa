@@ -46,16 +46,11 @@ describe("TitleBar", () => {
     expect(pill?.getAttribute("data-tauri-drag-region")).toBe("false");
   });
 
-  it("renders terminal mode tab as active with flared fillets", () => {
-    const { container } = render(<TitleBar />);
+  it("renders terminal mode tab as active inside the capsule", () => {
+    render(<TitleBar />);
     const terminalTab = screen.getByText(/terminal/).closest(".mode-tab");
     expect(terminalTab).toBeTruthy();
     expect(terminalTab?.classList.contains("active")).toBe(true);
-
-    const flareLeft = container.querySelector(".tab-flare-left");
-    const flareRight = container.querySelector(".tab-flare-right");
-    expect(flareLeft).toBeTruthy();
-    expect(flareRight).toBeTruthy();
   });
 
   it("renders browser and editor tabs as disabled", () => {

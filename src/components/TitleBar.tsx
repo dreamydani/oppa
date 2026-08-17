@@ -61,8 +61,6 @@ export function TitleBar(): ReactElement {
           </span>
           <span className="mode-tab active" title="Terminal (Active)">
             terminal
-            <span className="tab-flare-left" />
-            <span className="tab-flare-right" />
           </span>
           <span className="mode-tab disabled" title="Editor (Coming soon)">
             editor
