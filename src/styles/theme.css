@@ -1,0 +1,49 @@
+:root {
+  /* Fonts */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', Consolas, 'Cascadia Code', Menlo, monospace;
+
+  /* Sizing & Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Core Colors */
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --sidebar: #121212;
+  --sidebar-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent: #2c2c2c;
+  --accent-foreground: #ffffff;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --destructive: #ff6568;
+  --ring: #737373;
+
+  /* Git Status Colors */
+  --git-added: #4ade80;
+  --git-modified: #fbbf24;
+  --git-deleted: #f87171;
+  --git-untracked: #a3e635;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
