@@ -43,27 +43,28 @@ pub fn run() {
             app.manage(save_done);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let flag = window.state::<Arc<AtomicBool>>().inner().clone();
+                flag.store(false, Ordering::SeqCst);
+                let window_clone = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = window_clone.emit("app:before-close", ());
+                    let deadline = Instant::now() + Duration::from_millis(1500);
+                    while Instant::now() < deadline {
+                        if flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    let _ = window_clone.destroy();
+                });
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
-                // Ask the renderer to flush its save, then wait briefly.
-                let _ = app_handle.emit("app:before-close", ());
-                let deadline = Instant::now() + Duration::from_millis(1500);
-                let flag = app_handle.state::<Arc<AtomicBool>>();
-                while Instant::now() < deadline {
-                    if flag.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                // Reset the flag so a subsequent exit (user closes again) also
-                // waits for a save.
-                flag.store(false, Ordering::SeqCst);
-                app_handle.exit(0);
-            }
-        });
+        .run(|_app_handle, _event| {});
 }
 
 /// The renderer calls this after it finishes flushing the layout save during
