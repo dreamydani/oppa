@@ -96,6 +96,7 @@ export interface TerminalState {
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
+  renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
   createTab: (cwd?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
@@ -106,6 +107,8 @@ export interface TerminalState {
   setSplitRatio?: (path: Path, ratio: number) => void;
   splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
   closePane: (path?: Path) => Promise<void>;
+  maximizedSessionId: string | null;
+  toggleMaximizePane: (id?: string) => void;
   focusPane: (path: Path) => void;
   moveFocus: (dir: "left" | "right" | "up" | "down") => void;
   saveLayout: () => Promise<void>;
@@ -177,6 +180,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   rightSidebarWidth: 280,
   rightSidebarTab: "explorer",
   isWorkspaceLauncherOpen: false,
+  maximizedSessionId: null,
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -310,6 +314,25 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         sessions: {
           ...state.sessions,
           [id]: { ...session, cwd },
+        },
+      };
+    });
+    if (updated) {
+      void get().saveLayout().catch(() => {});
+    }
+  },
+
+  renameSession: (id, title) => {
+    let updated = false;
+    set((state) => {
+      const session = state.sessions[id];
+      if (!session) return state;
+      if (session.title === title) return state;
+      updated = true;
+      return {
+        sessions: {
+          ...state.sessions,
+          [id]: { ...session, title },
         },
       };
     });
@@ -556,6 +579,24 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       focusedPath: nextFocusedPath,
     });
     void get().saveLayout().catch(() => {});
+  },
+
+  toggleMaximizePane: (id) => {
+    const current = get().maximizedSessionId;
+    if (id !== undefined) {
+      set({ maximizedSessionId: current === id ? null : id });
+      return;
+    }
+    if (current !== null) {
+      set({ maximizedSessionId: null });
+      return;
+    }
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const focusedId = focus(activeTab.layout, activeTab.focusedPath);
+    if (focusedId) {
+      set({ maximizedSessionId: focusedId });
+    }
   },
 
   focusPane: (path) =>

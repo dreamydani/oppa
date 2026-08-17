@@ -44,6 +44,7 @@ describe("terminalStore", () => {
       rightSidebarWidth: 280,
       rightSidebarTab: "explorer",
       isWorkspaceLauncherOpen: false,
+      maximizedSessionId: null,
     });
     vi.clearAllMocks();
   });
@@ -1368,4 +1369,88 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
     });
   });
+
+  describe("pane maximization and session renaming", () => {
+    it("initializes maximizedSessionId as null", () => {
+      expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+    });
+
+    it("renameSession updates a session's title", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      useTerminalStore.getState().renameSession("s1", "Build Terminal");
+      expect(useTerminalStore.getState().sessions["s1"].title).toBe("Build Terminal");
+    });
+
+    it("renameSession does nothing if session does not exist", () => {
+      useTerminalStore.setState({ sessions: {} });
+      useTerminalStore.getState().renameSession("missing", "Title");
+      expect(useTerminalStore.getState().sessions["missing"]).toBeUndefined();
+    });
+
+    it("renameSession persists layout change when ready", () => {
+      useTerminalStore.setState({
+        ready: true,
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().renameSession("s1", "Server");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("toggleMaximizePane sets maximizedSessionId when provided an id", () => {
+      useTerminalStore.getState().toggleMaximizePane("s1");
+      expect(useTerminalStore.getState().maximizedSessionId).toBe("s1");
+    });
+
+    it("toggleMaximizePane resets maximizedSessionId to null when called again with the same id", () => {
+      useTerminalStore.setState({ maximizedSessionId: "s1" });
+      useTerminalStore.getState().toggleMaximizePane("s1");
+      expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+    });
+
+    it("toggleMaximizePane switches maximizedSessionId when called with a different id", () => {
+      useTerminalStore.setState({ maximizedSessionId: "s1" });
+      useTerminalStore.getState().toggleMaximizePane("s2");
+      expect(useTerminalStore.getState().maximizedSessionId).toBe("s2");
+    });
+
+    it("toggleMaximizePane without arguments maximizes currently focused pane if none maximized", () => {
+      const splitLayout = {
+        type: "split" as const,
+        dir: "h" as const,
+        ratio: 0.5,
+        a: { type: "leaf" as const, id: "s1" },
+        b: { type: "leaf" as const, id: "s2" },
+      };
+      useTerminalStore.setState({
+        maximizedSessionId: null,
+        tabs: [
+          {
+            id: "tab-1",
+            layout: splitLayout,
+            focusedPath: [1],
+          },
+        ],
+        activeTabId: "tab-1",
+        layout: splitLayout,
+        focusedPath: [1],
+      });
+
+      useTerminalStore.getState().toggleMaximizePane();
+      expect(useTerminalStore.getState().maximizedSessionId).toBe("s2");
+    });
+
+    it("toggleMaximizePane without arguments restores to null if already maximized", () => {
+      useTerminalStore.setState({ maximizedSessionId: "s2" });
+      useTerminalStore.getState().toggleMaximizePane();
+      expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+    });
+  });
 });
+
