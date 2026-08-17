@@ -90,15 +90,32 @@ describe("TitleBar", () => {
     expect(browserTab.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("renders editor tab as disabled and non-clickable", () => {
+  it("switches to editor mode when editor tab is clicked", () => {
     render(<TitleBar />);
-    const editorTab = screen.getByText("editor");
+    const editorTab = screen.getByRole("button", { name: /editor/i });
+    const terminalTab = screen.getByRole("button", { name: /terminal/i });
 
-    expect(editorTab.classList.contains("disabled")).toBe(true);
-    expect(editorTab.getAttribute("title")).toBe("Editor (Coming soon)");
+    expect(editorTab.classList.contains("active")).toBe(false);
+    expect(editorTab.getAttribute("aria-pressed")).toBe("false");
+    expect(useTerminalStore.getState().activeAppMode).toBe("terminal");
 
     fireEvent.click(editorTab);
-    expect(useTerminalStore.getState().activeAppMode).toBe("terminal");
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("editor");
+    expect(editorTab.classList.contains("active")).toBe(true);
+    expect(editorTab.getAttribute("aria-pressed")).toBe("true");
+    expect(terminalTab.classList.contains("active")).toBe(false);
+    expect(terminalTab.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("renders editor tab as active when activeAppMode is editor", () => {
+    useTerminalStore.setState({ activeAppMode: "editor" });
+    render(<TitleBar />);
+    const editorTab = screen.getByRole("button", { name: /editor/i });
+
+    expect(editorTab.classList.contains("active")).toBe(true);
+    expect(editorTab.getAttribute("aria-pressed")).toBe("true");
+    expect(editorTab.classList.contains("disabled")).toBe(false);
   });
 
   it("renders window control buttons (minimize, maximize, close)", () => {

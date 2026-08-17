@@ -8,6 +8,7 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
+import { EditorViewport } from "./components/editor/EditorViewport";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -187,7 +188,9 @@ function App() {
         <div className="soft-edge-right" />
         {leftSidebarOpen && <LeftSidebar />}
         <main className="main-viewport">
-          {activeAppMode === "browser" ? (
+          {activeAppMode === "editor" ? (
+            <EditorViewport />
+          ) : activeAppMode === "browser" ? (
             <BrowserViewport />
           ) : activeTab?.isWizard ? (
             <WorkspaceSetupWizard tabId={activeTab.id} />

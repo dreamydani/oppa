@@ -13,6 +13,7 @@ interface TreeNodeProps {
   expandedPaths: Set<string>;
   dirChildren: Record<string, FileEntry[]>;
   onToggleDir: (dirPath: string) => void;
+  onOpenFile: (filePath: string) => void;
 }
 
 function FileTreeNode({
@@ -21,6 +22,7 @@ function FileTreeNode({
   expandedPaths,
   dirChildren,
   onToggleDir,
+  onOpenFile,
 }: TreeNodeProps): React.ReactElement {
   const isExpanded = expandedPaths.has(entry.path);
   const children = dirChildren[entry.path] ?? [];
@@ -33,6 +35,8 @@ function FileTreeNode({
         onClick={() => {
           if (entry.is_dir) {
             onToggleDir(entry.path);
+          } else {
+            onOpenFile(entry.path);
           }
         }}
         role="treeitem"
@@ -65,6 +69,7 @@ function FileTreeNode({
               expandedPaths={expandedPaths}
               dirChildren={dirChildren}
               onToggleDir={onToggleDir}
+              onOpenFile={onOpenFile}
             />
           ))}
         </div>
@@ -75,11 +80,21 @@ function FileTreeNode({
 
 export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.ReactElement {
   const cwd = useTerminalStore((s) => s.getActiveCwd());
+  const openFileInEditor = useTerminalStore((s) => s.openFileInEditor);
+  const setAppMode = useTerminalStore((s) => s.setAppMode);
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [dirChildren, setDirChildren] = useState<Record<string, FileEntry[]>>({});
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleOpenFile = useCallback(
+    (filePath: string) => {
+      void openFileInEditor(filePath);
+      setAppMode("editor");
+    },
+    [openFileInEditor, setAppMode]
+  );
 
   const loadRoot = useCallback(async (dirPath: string) => {
     setLoading(true);
@@ -155,6 +170,7 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
             expandedPaths={expandedPaths}
             dirChildren={dirChildren}
             onToggleDir={handleToggleDir}
+            onOpenFile={handleOpenFile}
           />
         ))}
       </div>

@@ -36,6 +36,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 vi.mock("./lib/fs/transport", () => ({
   readDir: vi.fn().mockResolvedValue([]),
+  readFile: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("./lib/git/transport", () => ({
@@ -522,6 +523,46 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(container.querySelector(".pane-root")).not.toBeNull();
       expect(container.querySelector(".browser-viewport")).toBeNull();
+    });
+  });
+
+  it("renders EditorViewport in main-viewport when activeAppMode is 'editor'", () => {
+    useTerminalStore.setState({
+      activeAppMode: "editor",
+      leftSidebarOpen: true,
+      rightSidebarOpen: true,
+    });
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".main-viewport .editor-viewport")).not.toBeNull();
+    expect(container.querySelector(".pane-root")).toBeNull();
+    expect(container.querySelector(".left-sidebar")).not.toBeNull();
+    expect(container.querySelector(".right-sidebar")).not.toBeNull();
+  });
+
+  it("switches between terminal PaneSplit and EditorViewport when mode changes", async () => {
+    useTerminalStore.setState({
+      activeAppMode: "terminal",
+    });
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".pane-root")).not.toBeNull();
+    expect(container.querySelector(".editor-viewport")).toBeNull();
+
+    // Switch to editor
+    useTerminalStore.getState().setAppMode("editor");
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".editor-viewport")).not.toBeNull();
+      expect(container.querySelector(".pane-root")).toBeNull();
+    });
+
+    // Switch back to terminal
+    useTerminalStore.getState().setAppMode("terminal");
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".pane-root")).not.toBeNull();
+      expect(container.querySelector(".editor-viewport")).toBeNull();
     });
   });
 });

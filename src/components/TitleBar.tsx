@@ -80,10 +80,11 @@ export function TitleBar(): ReactElement {
           </button>
           <button
             type="button"
-            className="mode-tab disabled"
-            title="Editor (Coming soon)"
-            aria-label="Editor (Coming soon)"
-            disabled
+            className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
+            onClick={() => setAppMode("editor")}
+            title="Editor"
+            aria-label="Editor"
+            aria-pressed={activeAppMode === "editor"}
           >
             editor
           </button>

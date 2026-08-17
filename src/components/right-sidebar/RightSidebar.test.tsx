@@ -7,6 +7,7 @@ import * as gitTransport from "../../lib/git/transport";
 
 vi.mock("../../lib/fs/transport", () => ({
   readDir: vi.fn(),
+  readFile: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("../../lib/git/transport", () => ({
@@ -227,6 +228,24 @@ describe("RightSidebar", () => {
 
     await waitFor(() => {
       expect(readDirMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("opens file in editor and switches app mode to editor when file item is clicked", async () => {
+    render(<RightSidebar />);
+
+    await waitFor(() => {
+      expect(screen.getByText("package.json")).toBeDefined();
+    });
+
+    const fileItem = screen.getByText("package.json");
+    fireEvent.click(fileItem);
+
+    await waitFor(() => {
+      const state = useTerminalStore.getState();
+      expect(state.activeAppMode).toBe("editor");
+      expect(state.activeEditorPath).toBe("/mock/workspace/package.json");
+      expect(state.editorTabs.some((t) => t.path === "/mock/workspace/package.json")).toBe(true);
     });
   });
 });
