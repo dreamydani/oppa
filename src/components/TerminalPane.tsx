@@ -23,6 +23,7 @@ export function TerminalPane({ id }: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const serializeAddonRef = useRef<SerializeAddon | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const isSearchOpenRef = useRef(false);
   isSearchOpenRef.current = isSearchOpen;
@@ -67,6 +68,7 @@ export function TerminalPane({ id }: { id: string }) {
     const search = new SearchAddon();
     const webLinks = new WebLinksAddon(handleLinkClick);
     const serialize = new SerializeAddon();
+    serializeAddonRef.current = serialize;
 
     term.loadAddon(fit);
     term.loadAddon(unicode11);
@@ -159,6 +161,10 @@ export function TerminalPane({ id }: { id: string }) {
     ro.observe(containerRef.current!);
 
     return () => {
+      const buffer = serializeAddonRef.current?.serialize();
+      if (buffer) {
+        useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
+      }
       unregisterSerializer(idRef.current);
       disposed = true;
       ro.disconnect();
@@ -166,6 +172,7 @@ export function TerminalPane({ id }: { id: string }) {
       term.dispose();
       termRef.current = null;
       searchAddonRef.current = null;
+      serializeAddonRef.current = null;
     };
   }, [
     id,

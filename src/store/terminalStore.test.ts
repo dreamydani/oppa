@@ -35,6 +35,7 @@ describe("terminalStore", () => {
       layout: { type: "leaf", id: "" },
       focusedPath: [],
       serializers: {},
+      cachedScrollbacks: {},
       restoredScrollbacks: {},
       ready: false,
     });
@@ -156,6 +157,11 @@ describe("terminalStore", () => {
     expect(useTerminalStore.getState().serializers["abc"]).toBe(fn);
     useTerminalStore.getState().unregisterSerializer("abc");
     expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
+  });
+
+  it("cacheScrollback stores buffer in cachedScrollbacks", () => {
+    useTerminalStore.getState().cacheScrollback("abc", "cached-buffer-content");
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("cached-buffer-content");
   });
 
   it("setRestoredScrollback and clearRestoredScrollback manage restored scrollback state", () => {
@@ -687,6 +693,28 @@ describe("terminalStore", () => {
       expect(cleanupStaleScrollbacksMock).toHaveBeenCalledWith(
         expect.arrayContaining(["a", "b", "c"]),
       );
+    });
+
+    it("saves scrollback from cachedScrollbacks when session has no active serializer (background tabs)", async () => {
+      useTerminalStore.setState({
+        sessions: {
+          active: { id: "active", title: "active", status: "running", cols: 80, rows: 24 },
+          bg: { id: "bg", title: "bg", status: "running", cols: 80, rows: 24 },
+        },
+        serializers: {
+          active: () => "active-buffer",
+        },
+        cachedScrollbacks: {
+          bg: "bg-cached-buffer",
+        },
+        layout: {
+          type: "leaf",
+          id: "active",
+        },
+      });
+      await useTerminalStore.getState().saveLayout();
+      expect(saveScrollbackMock).toHaveBeenCalledWith("active", "active-buffer");
+      expect(saveScrollbackMock).toHaveBeenCalledWith("bg", "bg-cached-buffer");
     });
 
     it("propagates transport failures instead of swallowing them", async () => {

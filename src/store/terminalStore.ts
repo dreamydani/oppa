@@ -79,6 +79,7 @@ export interface TerminalState {
   layout: Layout;
   focusedPath: Path;
   serializers: Record<string, () => string>;
+  cachedScrollbacks: Record<string, string>;
   restoredScrollbacks: Record<string, string>;
   // True once the persisted layout has been loaded (or failed to load) on
   // startup; the UI stays hidden until then so a restore never races the
@@ -86,6 +87,7 @@ export interface TerminalState {
   ready: boolean;
   registerSerializer: (id: string, fn: () => string) => void;
   unregisterSerializer: (id: string) => void;
+  cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
   spawnSession: (cwd?: string) => Promise<string>;
@@ -151,6 +153,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   layout: { type: "leaf", id: "" },
   focusedPath: [],
   serializers: {},
+  cachedScrollbacks: {},
   restoredScrollbacks: {},
   ready: false,
 
@@ -165,6 +168,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       delete serializers[id];
       return { serializers };
     }),
+
+  cacheScrollback: (id, buffer) =>
+    set((state) => ({
+      cachedScrollbacks: { ...state.cachedScrollbacks, [id]: buffer },
+    })),
 
   setRestoredScrollback: (id, data) =>
     set((state) => ({
@@ -347,9 +355,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const sessions = { ...get().sessions };
+    const cachedScrollbacks = { ...get().cachedScrollbacks };
     for (const sId of sessionIds) {
       if (sId) {
         delete sessions[sId];
+        delete cachedScrollbacks[sId];
       }
     }
 
@@ -364,6 +374,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
       set({
         sessions,
+        cachedScrollbacks,
         tabs: [freshTab],
         activeTabId: freshTabId,
         layout: freshTab.layout,
@@ -376,6 +387,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         const nextActiveTab = remainingTabs[nextIdx];
         set({
           sessions,
+          cachedScrollbacks,
           tabs: remainingTabs,
           activeTabId: nextActiveTab.id,
           layout: nextActiveTab.layout,
@@ -385,6 +397,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
         set({
           sessions,
+          cachedScrollbacks,
           tabs: remainingTabs,
           layout: activeTab.layout,
           focusedPath: activeTab.focusedPath,
@@ -500,6 +513,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
     const sessions = { ...get().sessions };
     delete sessions[removedId];
+    const cachedScrollbacks = { ...get().cachedScrollbacks };
+    delete cachedScrollbacks[removedId];
     const nextLayout: Layout = next === null ? { type: "leaf", id: "" } : next;
     const nextFocusedPath: Path = next === null ? [] : firstLeafPath(next);
     const activeId = state.activeTabId || activeTab.id;
@@ -508,6 +523,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     );
     set({
       sessions,
+      cachedScrollbacks,
       tabs,
       layout: nextLayout,
       focusedPath: nextFocusedPath,
@@ -558,7 +574,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   // Persist the current multi-tab layout, session state, and active scrollbacks.
   saveLayout: async () => {
     if (!get().ready) return;
-    const { activeTabId, sessions, serializers } = get();
+    const { activeTabId, sessions, serializers, cachedScrollbacks } = get();
     const currentTabs = getSyncedTabs(get());
     const snapshot = {
       tabs: currentTabs.map((t) => ({
@@ -579,7 +595,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
     await transportSaveLayout(JSON.stringify(snapshot));
     for (const s of Object.values(sessions)) {
-      const buffer = serializers[s.id]?.();
+      const buffer = serializers[s.id]?.() || cachedScrollbacks[s.id];
       if (buffer) {
         await saveScrollback(s.id, buffer);
       }

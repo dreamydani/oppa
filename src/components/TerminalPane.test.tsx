@@ -181,6 +181,7 @@ describe("TerminalPane", () => {
       },
       layout: { type: "leaf", id: "abc" },
       serializers: {},
+      cachedScrollbacks: {},
       restoredScrollbacks: {},
     });
     vi.stubGlobal(
@@ -461,6 +462,14 @@ describe("TerminalPane", () => {
 
     unmount();
     expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
+  });
+
+  it("caches serialized buffer into store on unmount for background tabs", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    unmount();
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
   });
 
   it("replays restored scrollback, prints Session Restored banner, and clears restored state on mount", async () => {
