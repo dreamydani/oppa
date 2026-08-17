@@ -47,7 +47,7 @@
 .workspace-nav-btn.active,
 .workspace-nav-btn:hover {
   background: var(--accent);
-  color: var(--accent-foreground);
+  color: var(--foreground);
 }
 
 .workspace-content {
@@ -95,7 +95,7 @@
 
 .workspace-icon-btn:hover {
   background: var(--accent);
-  color: var(--accent-foreground);
+  color: var(--foreground);
 }
 
 .workspace-list {
@@ -123,12 +123,12 @@
 }
 
 .workspace-card:hover {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--muted);
 }
 
 .workspace-card.active {
-  background-color: var(--accent);
-  color: var(--accent-foreground);
+  background-color: var(--card);
+  color: var(--foreground);
 }
 
 .workspace-card-main {
@@ -148,7 +148,7 @@
 }
 
 .workspace-card.active .workspace-card-icon {
-  color: var(--accent-foreground);
+  color: var(--foreground);
 }
 
 .workspace-card-info {
@@ -214,7 +214,7 @@
 }
 
 .workspace-card-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--accent);
   color: var(--foreground);
 }
 
@@ -230,5 +230,5 @@
 
 .resize-handle-right:hover,
 .resize-handle-right:active {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--ring);
 }
