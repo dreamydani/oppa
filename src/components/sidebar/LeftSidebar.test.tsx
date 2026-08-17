@@ -90,13 +90,13 @@ describe("LeftSidebar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
   });
 
-  it("opens workspace launcher modal when + button is clicked", () => {
-    useTerminalStore.setState({ isWorkspaceLauncherOpen: false });
+  it("opens workspace wizard when + button is clicked", () => {
+    useTerminalStore.setState({ isSetupWizardOpen: false });
     render(<LeftSidebar />);
     const addBtn = screen.getByTitle("New Workspace");
     fireEvent.click(addBtn);
 
-    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
+    expect(useTerminalStore.getState().isSetupWizardOpen).toBe(true);
   });
 
   it("closes a workspace tab when close button is clicked", async () => {

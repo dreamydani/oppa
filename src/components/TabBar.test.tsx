@@ -178,14 +178,13 @@ describe("TabBar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
   });
 
-  it("creates a new tab when the add button is clicked", async () => {
+  it("opens setup wizard when the add button is clicked", () => {
+    useTerminalStore.setState({ isSetupWizardOpen: false });
     const { getByRole } = render(<TabBar />);
     const addBtn = getByRole("button", { name: /new tab/i });
     fireEvent.click(addBtn);
 
-    await vi.waitFor(() => {
-      expect(useTerminalStore.getState().tabs).toHaveLength(2);
-    });
+    expect(useTerminalStore.getState().isSetupWizardOpen).toBe(true);
   });
 
   it("renders close buttons only when more than one tab exists", () => {

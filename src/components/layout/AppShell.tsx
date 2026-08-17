@@ -6,6 +6,7 @@ import { StatusBar } from "./StatusBar";
 import { TabBar } from "../TabBar";
 import { Toolbar } from "../Toolbar";
 import { PaneSplit } from "../PaneSplit";
+import { WorkspaceSetupWizard } from "../wizard/WorkspaceSetupWizard";
 import { useTerminalStore } from "../../store/terminalStore";
 import "./AppShell.css";
 
@@ -28,6 +29,7 @@ export function AppShell(): React.ReactElement {
         {rightSidebarOpen && <RightSidebar />}
       </div>
       <StatusBar />
+      <WorkspaceSetupWizard />
     </div>
   );
 }

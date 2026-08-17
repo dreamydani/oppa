@@ -5,6 +5,7 @@ import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
+import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -181,6 +182,7 @@ function App() {
         {rightSidebarOpen && <RightSidebar />}
       </div>
       <WorkspaceLauncherModal />
+      <WorkspaceSetupWizard />
     </div>
   );
 }

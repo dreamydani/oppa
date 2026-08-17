@@ -18,7 +18,7 @@ export function LeftSidebar(): React.ReactElement | null {
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
-  const openWorkspaceLauncher = useTerminalStore((s) => s.openWorkspaceLauncher);
+  const openSetupWizard = useTerminalStore((s) => s.openSetupWizard);
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
 
@@ -141,7 +141,7 @@ export function LeftSidebar(): React.ReactElement | null {
             className="sidebar-icon-btn"
             title="New Tab"
             aria-label="New Tab"
-            onClick={() => openWorkspaceLauncher()}
+            onClick={() => openSetupWizard()}
           >
             <PlusIcon size={14} />
           </button>

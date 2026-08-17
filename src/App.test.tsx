@@ -456,4 +456,11 @@ describe("App", () => {
     );
     expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
   });
+
+  it("renders WorkspaceSetupWizard dialog when isSetupWizardOpen is true", () => {
+    useTerminalStore.setState({ isSetupWizardOpen: true, wizardStep: 1 });
+    const { getByRole } = render(<App />);
+
+    expect(getByRole("dialog", { name: /workspace setup wizard/i })).toBeTruthy();
+  });
 });

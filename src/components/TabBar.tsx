@@ -8,9 +8,9 @@ export function TabBar(): React.ReactElement {
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const sessions = useTerminalStore((s) => s.sessions);
   const selectTab = useTerminalStore((s) => s.selectTab);
-  const createTab = useTerminalStore((s) => s.createTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const renameTab = useTerminalStore((s) => s.renameTab);
+  const openSetupWizard = useTerminalStore((s) => s.openSetupWizard);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -119,7 +119,7 @@ export function TabBar(): React.ReactElement {
         className="tab-add-btn"
         title="New Tab (Ctrl+T)"
         aria-label="New Tab"
-        onClick={() => void createTab()}
+        onClick={() => openSetupWizard()}
       >
         <Plus size={14} />
       </button>
