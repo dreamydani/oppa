@@ -1,4 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod fs;
+mod git;
 mod layout;
 mod pty;
 
@@ -34,6 +36,8 @@ pub fn run() {
             pty::commands::cleanup_stale_scrollbacks,
             layout::save_layout,
             layout::load_layout,
+            fs::fs_read_dir,
+            git::git_status,
             confirm_save_complete,
         ])
         .setup(move |app| {
