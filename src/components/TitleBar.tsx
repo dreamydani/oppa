@@ -51,10 +51,24 @@ export function TitleBar(): ReactElement {
         >
           <PanelLeftIcon />
         </button>
-        <span className="app-brand-title">OPPA</span>
+        <span className="app-brand-title">oppa</span>
       </div>
 
-      <div className="title-bar-center" data-tauri-drag-region />
+      <div className="title-bar-center" data-tauri-drag-region>
+        <div className="mode-switcher-pill" data-tauri-drag-region="false">
+          <span className="mode-tab disabled" title="Browser (Coming soon)">
+            browser
+          </span>
+          <span className="mode-tab active" title="Terminal (Active)">
+            terminal
+            <span className="tab-flare-left" />
+            <span className="tab-flare-right" />
+          </span>
+          <span className="mode-tab disabled" title="Editor (Coming soon)">
+            editor
+          </span>
+        </div>
+      </div>
 
       <div className="title-bar-right">
         <button
