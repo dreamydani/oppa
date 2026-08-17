@@ -4,6 +4,7 @@ import {
   ptyKill,
   ptyResize,
   ptyAck,
+  ptyWrite,
   saveLayout as transportSaveLayout,
   loadLayout as transportLoadLayout,
   saveScrollback,
@@ -11,6 +12,7 @@ import {
   deleteScrollback,
   cleanupStaleScrollbacks,
 } from "../lib/pty/transport";
+import type { PtySpawnOptions } from "../lib/pty/transport";
 import {
   split,
   remove,
@@ -20,10 +22,31 @@ import {
   remapLeafIds,
 } from "../lib/pane-manager/layout";
 import type { Layout, Path } from "../lib/pane-manager/layout";
+import { createGridLayout } from "../lib/pane-manager/gridLayout";
+import {
+  saveRecents,
+  loadRecents,
+  savePresets,
+  loadPresets,
+} from "../lib/workspace/transport";
+import type {
+  RecentWorkspace,
+  WorkspacePreset,
+} from "../lib/workspace/transport";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
 export type { Layout, Path } from "../lib/pane-manager/layout";
+export type { RecentWorkspace, WorkspacePreset } from "../lib/workspace/transport";
+
+export interface WorkspaceConfig {
+  name?: string;
+  cwd?: string;
+  terminalCount: number;
+  shell?: string;
+  commands?: string[];
+  agentPersona?: string;
+}
 
 export type SessionStatus = "running" | "exited" | "error";
 
@@ -90,7 +113,7 @@ export interface TerminalState {
   cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
-  spawnSession: (cwd?: string) => Promise<string>;
+  spawnSession: (cwd?: string, shell?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
@@ -128,6 +151,17 @@ export interface TerminalState {
   openWorkspaceLauncher: () => void;
   closeWorkspaceLauncher: () => void;
   toggleWorkspaceLauncher: () => void;
+  isSetupWizardOpen: boolean;
+  wizardStep: 1 | 2 | 3;
+  recentWorkspaces: RecentWorkspace[];
+  workspacePresets: WorkspacePreset[];
+  openSetupWizard: () => void;
+  closeSetupWizard: () => void;
+  setWizardStep: (step: 1 | 2 | 3) => void;
+  loadWizardData: () => Promise<void>;
+  launchCustomWorkspace: (config: WorkspaceConfig) => Promise<string>;
+  addRecentWorkspace: (recent: RecentWorkspace) => Promise<void>;
+  saveWorkspacePreset: (preset: WorkspacePreset) => Promise<void>;
 }
 
 function getSyncedTabs(state: TerminalState): TabState[] {
@@ -181,6 +215,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   rightSidebarTab: "explorer",
   isWorkspaceLauncherOpen: false,
   maximizedSessionId: null,
+  isSetupWizardOpen: false,
+  wizardStep: 1,
+  recentWorkspaces: [],
+  workspacePresets: [],
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -211,9 +249,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd) => {
+  spawnSession: async (cwd, shell) => {
     try {
-      const id = await ptySpawn(cwd ? { cwd } : undefined);
+      const opts: PtySpawnOptions = {};
+      if (cwd) opts.cwd = cwd;
+      if (shell) opts.shell = shell;
+      const id = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       set((state) => ({
         sessions: {
           ...state.sessions,
@@ -780,4 +821,105 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   closeWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: false }),
   toggleWorkspaceLauncher: () =>
     set((s) => ({ isWorkspaceLauncherOpen: !s.isWorkspaceLauncherOpen })),
+
+  openSetupWizard: () => set({ isSetupWizardOpen: true, wizardStep: 1 }),
+  closeSetupWizard: () => set({ isSetupWizardOpen: false }),
+  setWizardStep: (step) => set({ wizardStep: step }),
+
+  loadWizardData: async () => {
+    try {
+      const [recents, presets] = await Promise.all([
+        loadRecents().catch(() => []),
+        loadPresets().catch(() => []),
+      ]);
+      set({
+        recentWorkspaces: Array.isArray(recents) ? recents : [],
+        workspacePresets: Array.isArray(presets) ? presets : [],
+      });
+    } catch {
+      // Keep defaults on failure
+    }
+  },
+
+  addRecentWorkspace: async (recent) => {
+    const current = get().recentWorkspaces;
+    const filtered = current.filter((r) =>
+      recent.path ? r.path !== recent.path : r.name !== recent.name,
+    );
+    const updated = [recent, ...filtered].slice(0, 20);
+    set({ recentWorkspaces: updated });
+    try {
+      await saveRecents(updated);
+    } catch {
+      // Best-effort persistence
+    }
+  },
+
+  saveWorkspacePreset: async (preset) => {
+    const current = get().workspacePresets;
+    const filtered = current.filter((p) => p.id !== preset.id);
+    const updated = [...filtered, preset];
+    set({ workspacePresets: updated });
+    try {
+      await savePresets(updated);
+    } catch {
+      // Best-effort persistence
+    }
+  },
+
+  launchCustomWorkspace: async (config) => {
+    const count = Math.max(1, config.terminalCount || 1);
+    const sessionIds: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = await get().spawnSession(config.cwd, config.shell);
+      sessionIds.push(id);
+      if (config.commands && config.commands[i] && config.commands[i].trim()) {
+        const cmd = config.commands[i].trim();
+        void ptyWrite(id, `${cmd}\n`).catch(() => {});
+      }
+    }
+
+    const layout = createGridLayout(count, sessionIds);
+    const tabId = `tab-${++nextTabId}`;
+
+    let title = config.name?.trim();
+    if (!title && config.cwd) {
+      const normalized = config.cwd.replace(/[\\/]+$/, "");
+      const parts = normalized.split(/[\\/]/);
+      title = parts[parts.length - 1] || config.cwd;
+    }
+    if (!title) {
+      title = `Workspace ${tabId.replace("tab-", "")}`;
+    }
+
+    const newTab: TabState = {
+      id: tabId,
+      title,
+      layout,
+      focusedPath: firstLeafPath(layout),
+    };
+
+    set((state) => {
+      const currentTabs = getSyncedTabs(state);
+      const tabs = [...currentTabs, newTab];
+      return {
+        tabs,
+        activeTabId: tabId,
+        layout: newTab.layout,
+        focusedPath: newTab.focusedPath,
+        isSetupWizardOpen: false,
+      };
+    });
+
+    const recentEntry: RecentWorkspace = {
+      name: title,
+      path: config.cwd || "",
+      terminal_count: count,
+      last_opened: Date.now(),
+    };
+    await get().addRecentWorkspace(recentEntry);
+
+    void get().saveLayout().catch(() => {});
+    return tabId;
+  },
 }));

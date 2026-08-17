@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useTerminalStore } from "./terminalStore";
 import * as transport from "../lib/pty/transport";
+import * as workspaceTransport from "../lib/workspace/transport";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
   ptyKill: vi.fn(),
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
+  ptyWrite: vi.fn().mockResolvedValue(undefined),
   saveLayout: vi.fn(),
   loadLayout: vi.fn(),
   saveScrollback: vi.fn().mockResolvedValue(undefined),
@@ -15,14 +17,26 @@ vi.mock("../lib/pty/transport", () => ({
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../lib/workspace/transport", () => ({
+  saveRecents: vi.fn().mockResolvedValue(undefined),
+  loadRecents: vi.fn().mockResolvedValue([]),
+  savePresets: vi.fn().mockResolvedValue(undefined),
+  loadPresets: vi.fn().mockResolvedValue([]),
+}));
+
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
+const ptyWriteMock = vi.mocked(transport.ptyWrite);
 const saveLayoutMock = vi.mocked(transport.saveLayout);
 const loadLayoutMock = vi.mocked(transport.loadLayout);
 const saveScrollbackMock = vi.mocked(transport.saveScrollback);
 const loadScrollbackMock = vi.mocked(transport.loadScrollback);
 const deleteScrollbackMock = vi.mocked(transport.deleteScrollback);
 const cleanupStaleScrollbacksMock = vi.mocked(transport.cleanupStaleScrollbacks);
+const saveRecentsMock = vi.mocked(workspaceTransport.saveRecents);
+const loadRecentsMock = vi.mocked(workspaceTransport.loadRecents);
+const savePresetsMock = vi.mocked(workspaceTransport.savePresets);
+const loadPresetsMock = vi.mocked(workspaceTransport.loadPresets);
 
 describe("terminalStore", () => {
   beforeEach(() => {
@@ -1450,6 +1464,175 @@ describe("terminalStore", () => {
       useTerminalStore.setState({ maximizedSessionId: "s2" });
       useTerminalStore.getState().toggleMaximizePane();
       expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+    });
+  });
+
+  describe("workspace setup wizard state and actions", () => {
+    it("initializes wizard state with default values", () => {
+      const state = useTerminalStore.getState();
+      expect(state.isSetupWizardOpen).toBe(false);
+      expect(state.wizardStep).toBe(1);
+      expect(state.recentWorkspaces).toEqual([]);
+      expect(state.workspacePresets).toEqual([]);
+    });
+
+    it("opens, closes, and sets wizard step", () => {
+      useTerminalStore.getState().openSetupWizard();
+      expect(useTerminalStore.getState().isSetupWizardOpen).toBe(true);
+      expect(useTerminalStore.getState().wizardStep).toBe(1);
+
+      useTerminalStore.getState().setWizardStep(2);
+      expect(useTerminalStore.getState().wizardStep).toBe(2);
+
+      useTerminalStore.getState().setWizardStep(3);
+      expect(useTerminalStore.getState().wizardStep).toBe(3);
+
+      useTerminalStore.getState().closeSetupWizard();
+      expect(useTerminalStore.getState().isSetupWizardOpen).toBe(false);
+    });
+
+    it("loadWizardData loads recents and presets from transport into state", async () => {
+      const mockRecents = [
+        { name: "Project A", path: "D:\\projA", terminal_count: 4, last_opened: 12345 },
+      ];
+      const mockPresets = [
+        { id: "p1", name: "Dev Stack", terminal_count: 4, commands: ["npm run dev"] },
+      ];
+      loadRecentsMock.mockResolvedValueOnce(mockRecents);
+      loadPresetsMock.mockResolvedValueOnce(mockPresets);
+
+      await useTerminalStore.getState().loadWizardData();
+
+      expect(loadRecentsMock).toHaveBeenCalled();
+      expect(loadPresetsMock).toHaveBeenCalled();
+      expect(useTerminalStore.getState().recentWorkspaces).toEqual(mockRecents);
+      expect(useTerminalStore.getState().workspacePresets).toEqual(mockPresets);
+    });
+
+    it("addRecentWorkspace prepends, deduplicates by path, and persists", async () => {
+      useTerminalStore.setState({
+        recentWorkspaces: [
+          { name: "Old Name", path: "D:\\repo", terminal_count: 2, last_opened: 100 },
+          { name: "Other", path: "D:\\other", terminal_count: 1, last_opened: 90 },
+        ],
+      });
+
+      const newRecent = {
+        name: "New Name",
+        path: "D:\\repo",
+        terminal_count: 4,
+        last_opened: 200,
+      };
+
+      await useTerminalStore.getState().addRecentWorkspace(newRecent);
+
+      const updated = useTerminalStore.getState().recentWorkspaces;
+      expect(updated).toHaveLength(2);
+      expect(updated[0]).toEqual(newRecent);
+      expect(updated[1].path).toBe("D:\\other");
+      expect(saveRecentsMock).toHaveBeenCalledWith(updated);
+    });
+
+    it("saveWorkspacePreset adds or replaces a preset and persists", async () => {
+      useTerminalStore.setState({
+        workspacePresets: [
+          { id: "preset-1", name: "Preset 1", terminal_count: 2, commands: [] },
+        ],
+      });
+
+      const updatedPreset = {
+        id: "preset-1",
+        name: "Preset 1 Updated",
+        terminal_count: 4,
+        commands: ["cargo build"],
+      };
+
+      await useTerminalStore.getState().saveWorkspacePreset(updatedPreset);
+
+      const presets = useTerminalStore.getState().workspacePresets;
+      expect(presets).toHaveLength(1);
+      expect(presets[0].name).toBe("Preset 1 Updated");
+      expect(savePresetsMock).toHaveBeenCalledWith(presets);
+    });
+
+    it("launchCustomWorkspace spawns multiple sessions, executes startup commands, creates a grid tab, and closes the wizard", async () => {
+      ptySpawnMock
+        .mockResolvedValueOnce("s-1")
+        .mockResolvedValueOnce("s-2")
+        .mockResolvedValueOnce("s-3")
+        .mockResolvedValueOnce("s-4");
+
+      useTerminalStore.setState({
+        isSetupWizardOpen: true,
+        wizardStep: 3,
+        ready: true,
+      });
+
+      const tabId = await useTerminalStore.getState().launchCustomWorkspace({
+        name: "Full Stack Dev",
+        cwd: "D:\\workspace\\project",
+        terminalCount: 4,
+        shell: "powershell.exe",
+        commands: ["pnpm dev", "cargo watch", "", "git status"],
+      });
+
+      expect(ptySpawnMock).toHaveBeenCalledTimes(4);
+      expect(ptySpawnMock).toHaveBeenCalledWith({
+        cwd: "D:\\workspace\\project",
+        shell: "powershell.exe",
+      });
+
+      expect(ptyWriteMock).toHaveBeenCalledWith("s-1", "pnpm dev\n");
+      expect(ptyWriteMock).toHaveBeenCalledWith("s-2", "cargo watch\n");
+      expect(ptyWriteMock).toHaveBeenCalledWith("s-4", "git status\n");
+
+      const state = useTerminalStore.getState();
+      expect(state.isSetupWizardOpen).toBe(false);
+      expect(state.activeTabId).toBe(tabId);
+
+      const activeTab = state.tabs.find((t) => t.id === tabId);
+      expect(activeTab).toBeDefined();
+      expect(activeTab?.title).toBe("Full Stack Dev");
+      expect(activeTab?.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "s-1" },
+          b: { type: "leaf", id: "s-2" },
+        },
+        b: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "s-3" },
+          b: { type: "leaf", id: "s-4" },
+        },
+      });
+
+      // Recent workspaces updated
+      expect(state.recentWorkspaces[0]).toMatchObject({
+        name: "Full Stack Dev",
+        path: "D:\\workspace\\project",
+        terminal_count: 4,
+      });
+      expect(saveRecentsMock).toHaveBeenCalled();
+    });
+
+    it("launchCustomWorkspace infers tab title from folder basename when name is omitted", async () => {
+      ptySpawnMock.mockResolvedValueOnce("s-single");
+
+      const tabId = await useTerminalStore.getState().launchCustomWorkspace({
+        cwd: "C:\\Users\\dev\\my-app",
+        terminalCount: 1,
+      });
+
+      const state = useTerminalStore.getState();
+      const activeTab = state.tabs.find((t) => t.id === tabId);
+      expect(activeTab?.title).toBe("my-app");
     });
   });
 });
