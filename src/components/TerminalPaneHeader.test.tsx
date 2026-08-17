@@ -44,6 +44,7 @@ describe("TerminalPaneHeader", () => {
 
     expect(screen.getByText("Terminal 1")).toBeTruthy();
     expect(screen.getByTitle("More Options")).toBeTruthy();
+    expect(screen.getByTitle("Open in Browser")).toBeTruthy();
     expect(screen.getByTitle("Maximize Pane")).toBeTruthy();
     expect(screen.getByTitle("Split Right")).toBeTruthy();
     expect(screen.getByTitle("Split Down")).toBeTruthy();
@@ -210,4 +211,46 @@ describe("TerminalPaneHeader", () => {
     fireEvent.mouseDown(screen.getByTestId("outside"));
     expect(screen.queryByText("Clear Scrollback")).toBeNull();
   });
+
+  it("switches to browser mode when Open in Browser button is clicked without detected ports", () => {
+    useTerminalStore.setState({ activeAppMode: "terminal", detectedPorts: [] });
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const openBrowserBtn = screen.getByTitle("Open in Browser");
+    fireEvent.click(openBrowserBtn);
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+  });
+
+  it("navigates to detected port URL and switches to browser mode when Open in Browser button is clicked", () => {
+    useTerminalStore.setState({
+      activeAppMode: "terminal",
+      detectedPorts: [
+        { port: 5173, url: "http://localhost:5173", title: "Localhost :5173", timestamp: Date.now() },
+      ],
+    });
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const openBrowserBtn = screen.getByTitle("Open in Browser");
+    fireEvent.click(openBrowserBtn);
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+    expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
+  });
+
+  it("switches to browser mode when Open in Browser is clicked from More menu", () => {
+    useTerminalStore.setState({ activeAppMode: "terminal" });
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const moreBtn = screen.getByTitle("More Options");
+    fireEvent.click(moreBtn);
+
+    const menuOpenBrowser = screen.getByText("Open in Browser");
+    expect(menuOpenBrowser).toBeTruthy();
+    fireEvent.click(menuOpenBrowser);
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+    expect(screen.queryByText("Clear Scrollback")).toBeNull();
+  });
 });
+

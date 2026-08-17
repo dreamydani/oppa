@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { StatusBar } from "./StatusBar";
 import * as gitTransport from "../../lib/git/transport";
@@ -112,4 +112,52 @@ describe("StatusBar", () => {
     expect(screen.getByText("120x30")).toBeTruthy();
     expect(screen.getByText(/Ready|Running/i)).toBeTruthy();
   });
+
+  it("renders localhost badge when detectedPorts contains active servers", () => {
+    mockGetGitStatus.mockResolvedValue({
+      is_git: false,
+      branch: "",
+      files: [],
+      ahead: 0,
+      behind: 0,
+    });
+    useTerminalStore.setState({
+      activeAppMode: "terminal",
+      browserUrl: "",
+      detectedPorts: [
+        { port: 5173, url: "http://localhost:5173", title: "Localhost :5173", timestamp: Date.now() },
+      ],
+    });
+
+    render(<StatusBar />);
+
+    const badge = screen.getByText("localhost:5173");
+    expect(badge).toBeTruthy();
+
+    fireEvent.click(badge);
+    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+    expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
+  });
+
+  it("renders multiple localhost badges when multiple ports are active", () => {
+    mockGetGitStatus.mockResolvedValue({
+      is_git: false,
+      branch: "",
+      files: [],
+      ahead: 0,
+      behind: 0,
+    });
+    useTerminalStore.setState({
+      detectedPorts: [
+        { port: 3000, url: "http://localhost:3000", title: "Localhost :3000", timestamp: Date.now() },
+        { port: 8080, url: "http://localhost:8080", title: "Localhost :8080", timestamp: Date.now() },
+      ],
+    });
+
+    render(<StatusBar />);
+
+    expect(screen.getByText("localhost:3000")).toBeTruthy();
+    expect(screen.getByText("localhost:8080")).toBeTruthy();
+  });
 });
+

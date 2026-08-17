@@ -5,6 +5,7 @@ import {
   Minimize2,
   SplitSquareHorizontal,
   SplitSquareVertical,
+  Globe,
   X,
 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
@@ -24,6 +25,9 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
+  const setAppMode = useTerminalStore((s) => s.setAppMode);
+  const navigateBrowser = useTerminalStore((s) => s.navigateBrowser);
+  const detectedPorts = useTerminalStore((s) => s.detectedPorts);
 
   const isMaximized = maximizedSessionId === id;
   const displayTitle = session?.title || "oppa";
@@ -69,6 +73,14 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     },
     [handleSave, session?.title]
   );
+
+  const handleOpenInBrowser = useCallback(() => {
+    if (detectedPorts.length > 0) {
+      const targetUrl = detectedPorts[detectedPorts.length - 1].url;
+      navigateBrowser(targetUrl);
+    }
+    setAppMode("browser");
+  }, [detectedPorts, navigateBrowser, setAppMode]);
 
   // Close dropdown menu on outside clicks
   useEffect(() => {
@@ -160,8 +172,26 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             >
               Split Down
             </button>
+            <button
+              className="terminal-pane-header-menu-item"
+              onClick={() => {
+                setIsMenuOpen(false);
+                handleOpenInBrowser();
+              }}
+            >
+              Open in Browser
+            </button>
           </div>
         )}
+
+        <button
+          className="terminal-pane-header-btn"
+          title="Open in Browser"
+          aria-label="Open in Browser"
+          onClick={handleOpenInBrowser}
+        >
+          <Globe size={14} />
+        </button>
 
         <button
           className="terminal-pane-header-btn"

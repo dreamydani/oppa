@@ -10,6 +10,9 @@ export function StatusBar(): React.ReactElement {
   const sessions = useTerminalStore((s) => s.sessions);
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
+  const detectedPorts = useTerminalStore((s) => s.detectedPorts);
+  const setAppMode = useTerminalStore((s) => s.setAppMode);
+  const navigateBrowser = useTerminalStore((s) => s.navigateBrowser);
 
   const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null);
 
@@ -82,6 +85,22 @@ export function StatusBar(): React.ReactElement {
           <Folder size={13} />
           <span className="status-bar-cwd">{getCwdDisplay()}</span>
         </div>
+
+        {detectedPorts.map((port) => (
+          <button
+            key={port.port}
+            type="button"
+            className="status-bar-item localhost-badge"
+            title={`Open ${port.url} in Browser`}
+            onClick={() => {
+              navigateBrowser(port.url);
+              setAppMode("browser");
+            }}
+          >
+            <span className="localhost-bolt">⚡</span>
+            <span>{`localhost:${port.port}`}</span>
+          </button>
+        ))}
       </div>
 
       <div className="status-bar-section status-bar-section-right">
