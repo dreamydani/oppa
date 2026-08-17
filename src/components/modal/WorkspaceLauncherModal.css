@@ -1,0 +1,203 @@
+.launcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  animation: launcherFadeIn 0.12s ease-out;
+}
+
+@keyframes launcherFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.launcher-card {
+  width: 540px;
+  max-width: 90vw;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--card, #282827);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: launcherScaleIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes launcherScaleIn {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.launcher-search-row {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  gap: 10px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+}
+
+.launcher-search-icon {
+  color: var(--muted-foreground, #9e9e9a);
+  flex-shrink: 0;
+}
+
+.launcher-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--foreground, #ededec);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  outline: none;
+}
+
+.launcher-search-input::placeholder {
+  color: var(--muted-foreground, #9e9e9a);
+}
+
+.launcher-esc-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground, #9e9e9a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+  cursor: pointer;
+}
+
+.launcher-list {
+  padding: 6px;
+  overflow-y: auto;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.launcher-category-header {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground, #9e9e9a);
+  padding: 8px 8px 4px 8px;
+  text-transform: uppercase;
+}
+
+.launcher-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.launcher-item:hover,
+.launcher-item.selected {
+  background-color: var(--muted, #2e2e2d);
+}
+
+.launcher-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.launcher-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground, #9e9e9a);
+  flex-shrink: 0;
+}
+
+.launcher-item.selected .launcher-item-icon {
+  color: var(--foreground, #ededec);
+}
+
+.launcher-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.launcher-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground, #ededec);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.launcher-item-subtitle {
+  font-size: 11px;
+  color: var(--muted-foreground, #9e9e9a);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.launcher-item-shortcut {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted-foreground, #9e9e9a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.launcher-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground, #9e9e9a);
+}
+
+.launcher-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background-color: var(--sidebar, #212120);
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+  font-size: 11px;
+  color: var(--muted-foreground, #9e9e9a);
+}
+
+.launcher-footer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+}
