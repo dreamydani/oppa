@@ -21,6 +21,7 @@ describe("TitleBar", () => {
     useTerminalStore.setState({
       leftSidebarOpen: true,
       rightSidebarOpen: false,
+      activeAppMode: "terminal",
     });
   });
 
@@ -46,22 +47,58 @@ describe("TitleBar", () => {
     expect(pill?.getAttribute("data-tauri-drag-region")).toBe("false");
   });
 
-  it("renders terminal mode tab as active inside the capsule", () => {
+  it("renders terminal mode tab as active by default", () => {
     render(<TitleBar />);
-    const terminalTab = screen.getByText(/terminal/).closest(".mode-tab");
+    const terminalTab = screen.getByRole("button", { name: /terminal/i });
     expect(terminalTab).toBeTruthy();
-    expect(terminalTab?.classList.contains("active")).toBe(true);
+    expect(terminalTab.classList.contains("active")).toBe(true);
+    expect(terminalTab.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("renders browser and editor tabs as disabled", () => {
+  it("switches to browser mode when browser tab is clicked", () => {
     render(<TitleBar />);
-    const browserTab = screen.getByText("browser").closest(".mode-tab");
-    const editorTab = screen.getByText("editor").closest(".mode-tab");
+    const browserTab = screen.getByRole("button", { name: /browser/i });
+    const terminalTab = screen.getByRole("button", { name: /terminal/i });
 
-    expect(browserTab?.classList.contains("disabled")).toBe(true);
-    expect(editorTab?.classList.contains("disabled")).toBe(true);
-    expect(browserTab?.getAttribute("title")).toBe("Browser (Coming soon)");
-    expect(editorTab?.getAttribute("title")).toBe("Editor (Coming soon)");
+    expect(browserTab.classList.contains("active")).toBe(false);
+    expect(useTerminalStore.getState().activeAppMode).toBe("terminal");
+
+    fireEvent.click(browserTab);
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+    expect(browserTab.classList.contains("active")).toBe(true);
+    expect(browserTab.getAttribute("aria-pressed")).toBe("true");
+    expect(terminalTab.classList.contains("active")).toBe(false);
+    expect(terminalTab.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("switches back to terminal mode when terminal tab is clicked", () => {
+    useTerminalStore.setState({ activeAppMode: "browser" });
+    render(<TitleBar />);
+    const browserTab = screen.getByRole("button", { name: /browser/i });
+    const terminalTab = screen.getByRole("button", { name: /terminal/i });
+
+    expect(browserTab.classList.contains("active")).toBe(true);
+    expect(terminalTab.classList.contains("active")).toBe(false);
+
+    fireEvent.click(terminalTab);
+
+    expect(useTerminalStore.getState().activeAppMode).toBe("terminal");
+    expect(terminalTab.classList.contains("active")).toBe(true);
+    expect(terminalTab.getAttribute("aria-pressed")).toBe("true");
+    expect(browserTab.classList.contains("active")).toBe(false);
+    expect(browserTab.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("renders editor tab as disabled and non-clickable", () => {
+    render(<TitleBar />);
+    const editorTab = screen.getByText("editor");
+
+    expect(editorTab.classList.contains("disabled")).toBe(true);
+    expect(editorTab.getAttribute("title")).toBe("Editor (Coming soon)");
+
+    fireEvent.click(editorTab);
+    expect(useTerminalStore.getState().activeAppMode).toBe("terminal");
   });
 
   it("renders window control buttons (minimize, maximize, close)", () => {

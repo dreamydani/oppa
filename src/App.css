@@ -106,15 +106,27 @@ body,
   color: var(--text-muted, #71717a);
   position: relative;
   user-select: none;
-  cursor: default;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  line-height: normal;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mode-tab:hover:not(.disabled):not(.active) {
+  color: var(--text-primary, #ededec);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .mode-tab.disabled {
   opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .mode-tab.active {

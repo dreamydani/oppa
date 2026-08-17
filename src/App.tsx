@@ -7,6 +7,7 @@ import { PaneSplit } from "./components/PaneSplit";
 import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
+import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -36,6 +37,7 @@ function App() {
   const saveLayout = useTerminalStore((s) => s.saveLayout);
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
+  const activeAppMode = useTerminalStore((s) => s.activeAppMode);
 
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
@@ -185,7 +187,9 @@ function App() {
         <div className="soft-edge-right" />
         {leftSidebarOpen && <LeftSidebar />}
         <main className="main-viewport">
-          {activeTab?.isWizard ? (
+          {activeAppMode === "browser" ? (
+            <BrowserViewport />
+          ) : activeTab?.isWizard ? (
             <WorkspaceSetupWizard tabId={activeTab.id} />
           ) : (
             <PaneSplit />

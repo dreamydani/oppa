@@ -77,6 +77,7 @@ describe("App", () => {
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
       isWorkspaceLauncherOpen: false,
+      activeAppMode: "terminal",
     });
   });
 
@@ -482,5 +483,45 @@ describe("App", () => {
     const { getByRole } = render(<App />);
 
     expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
+  });
+
+  it("renders BrowserViewport in main-viewport when activeAppMode is 'browser'", () => {
+    useTerminalStore.setState({
+      activeAppMode: "browser",
+      leftSidebarOpen: true,
+      rightSidebarOpen: true,
+    });
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".main-viewport .browser-viewport")).not.toBeNull();
+    expect(container.querySelector(".pane-root")).toBeNull();
+    expect(container.querySelector(".left-sidebar")).not.toBeNull();
+    expect(container.querySelector(".right-sidebar")).not.toBeNull();
+  });
+
+  it("switches between terminal PaneSplit and BrowserViewport when mode changes", async () => {
+    useTerminalStore.setState({
+      activeAppMode: "terminal",
+    });
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".pane-root")).not.toBeNull();
+    expect(container.querySelector(".browser-viewport")).toBeNull();
+
+    // Switch to browser
+    useTerminalStore.getState().setAppMode("browser");
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".browser-viewport")).not.toBeNull();
+      expect(container.querySelector(".pane-root")).toBeNull();
+    });
+
+    // Switch back to terminal
+    useTerminalStore.getState().setAppMode("terminal");
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".pane-root")).not.toBeNull();
+      expect(container.querySelector(".browser-viewport")).toBeNull();
+    });
   });
 });

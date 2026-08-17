@@ -14,6 +14,8 @@ export function TitleBar(): ReactElement {
   const rightOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleLeft = useTerminalStore((s) => s.toggleLeftSidebar);
   const toggleRight = useTerminalStore((s) => s.toggleRightSidebar);
+  const activeAppMode = useTerminalStore((s) => s.activeAppMode);
+  const setAppMode = useTerminalStore((s) => s.setAppMode);
 
   const handleMinimize = () => {
     try {
@@ -56,15 +58,35 @@ export function TitleBar(): ReactElement {
 
       <div className="title-bar-center" data-tauri-drag-region>
         <div className="mode-switcher-pill" data-tauri-drag-region="false">
-          <span className="mode-tab disabled" title="Browser (Coming soon)">
+          <button
+            type="button"
+            className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
+            onClick={() => setAppMode("browser")}
+            title="Browser"
+            aria-label="Browser"
+            aria-pressed={activeAppMode === "browser"}
+          >
             browser
-          </span>
-          <span className="mode-tab active" title="Terminal (Active)">
+          </button>
+          <button
+            type="button"
+            className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
+            onClick={() => setAppMode("terminal")}
+            title="Terminal"
+            aria-label="Terminal"
+            aria-pressed={activeAppMode === "terminal"}
+          >
             terminal
-          </span>
-          <span className="mode-tab disabled" title="Editor (Coming soon)">
+          </button>
+          <button
+            type="button"
+            className="mode-tab disabled"
+            title="Editor (Coming soon)"
+            aria-label="Editor (Coming soon)"
+            disabled
+          >
             editor
-          </span>
+          </button>
         </div>
       </div>
 
