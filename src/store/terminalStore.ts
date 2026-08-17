@@ -279,10 +279,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   updateSessionCwd: (id, cwd) => {
+    let updated = false;
     set((state) => {
       const session = state.sessions[id];
       if (!session) return state;
       if (session.cwd === cwd) return state;
+      updated = true;
       return {
         sessions: {
           ...state.sessions,
@@ -290,6 +292,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         },
       };
     });
+    if (updated) {
+      void get().saveLayout().catch(() => {});
+    }
   },
 
   // Replace every occurrence of leaf id `from` with `to` in the layout trees across all tabs.
@@ -418,6 +423,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       layout: tab.layout,
       focusedPath: tab.focusedPath,
     });
+    void get().saveLayout().catch(() => {});
   },
 
   renameTab: (tabId, title) => {

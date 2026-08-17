@@ -509,6 +509,52 @@ describe("terminalStore", () => {
       useTerminalStore.setState({ ready: true });
     });
 
+    it("createTab persists the new tab layout", async () => {
+      ptySpawnMock.mockResolvedValue("s2");
+      await useTerminalStore.getState().createTab();
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("closeTab persists the layout after closing a tab", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        ],
+        activeTabId: "t1",
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      await useTerminalStore.getState().closeTab("t2");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("selectTab persists the new active tab", () => {
+      useTerminalStore.setState({
+        tabs: [
+          { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        ],
+        activeTabId: "t1",
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().selectTab("t2");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("renameTab persists the tab title change", () => {
+      useTerminalStore.setState({
+        tabs: [{ id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
+        activeTabId: "t1",
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().renameTab("t1", "New Title");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
     it("splitPane persists the new arrangement", async () => {
       ptySpawnMock.mockResolvedValue("s1");
       await useTerminalStore.getState().splitPane("h");
@@ -533,8 +579,32 @@ describe("terminalStore", () => {
           b: { type: "leaf", id: "b" },
         },
       });
+      saveLayoutMock.mockClear();
       useTerminalStore.getState().setRatio([], 0.75);
       expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("updateSessionCwd persists the updated cwd", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cwd: "/old/dir", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().updateSessionCwd("s1", "/new/dir");
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("updateSessionCwd does not persist if cwd is unchanged or session is missing", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cwd: "/same/dir", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().updateSessionCwd("s1", "/same/dir");
+      useTerminalStore.getState().updateSessionCwd("nonexistent", "/any/dir");
+      expect(saveLayoutMock).not.toHaveBeenCalled();
     });
   });
 
