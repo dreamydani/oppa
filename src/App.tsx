@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AppShell } from "./components/layout/AppShell";
+import { TitleBar } from "./components/TitleBar";
+import { LeftSidebar } from "./components/LeftSidebar";
+import { RightSidebar } from "./components/RightSidebar";
+import { PaneSplit } from "./components/PaneSplit";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -22,6 +25,8 @@ function App() {
   const closePane = useTerminalStore((s) => s.closePane);
   const moveFocus = useTerminalStore((s) => s.moveFocus);
   const createTab = useTerminalStore((s) => s.createTab);
+  const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
+  const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleLeftSidebar = useTerminalStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useTerminalStore((s) => s.toggleRightSidebar);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
@@ -160,7 +165,18 @@ function App() {
   // sessionless placeholder leaf before the restore would spawn a throwaway
   // shell that loadLayout then replaces (an orphaned pty).
   if (!ready) return null;
-  return <AppShell />;
+  return (
+    <div className="app-container">
+      <TitleBar />
+      <div className="workspace-container">
+        {leftSidebarOpen && <LeftSidebar />}
+        <main className="main-viewport">
+          <PaneSplit />
+        </main>
+        {rightSidebarOpen && <RightSidebar />}
+      </div>
+    </div>
+  );
 }
 
 export default App;

@@ -26,6 +26,14 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    minimize: vi.fn(),
+    toggleMaximize: vi.fn(),
+    close: vi.fn(),
+  }),
+}));
+
 vi.mock("./lib/fs/transport", () => ({
   readDir: vi.fn().mockResolvedValue([]),
 }));
@@ -68,7 +76,6 @@ describe("App", () => {
       leftSidebarWidth: 240,
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
-      rightSidebarTab: "explorer",
     });
   });
 
@@ -94,19 +101,33 @@ describe("App", () => {
     });
   });
 
-  it("renders full 3-column AppShell layout with Titlebar, LeftSidebar, Workbench, RightSidebar, and StatusBar when ready", () => {
+  it("renders full 3-column minimalist layout with TitleBar, LeftSidebar, main viewport with PaneSplit, and RightSidebar when ready", () => {
     const { container } = render(<App />);
 
-    expect(container.querySelector(".app-shell")).not.toBeNull();
-    expect(container.querySelector(".titlebar")).not.toBeNull();
+    expect(container.querySelector(".app-container")).not.toBeNull();
+    expect(container.querySelector(".title-bar")).not.toBeNull();
+    expect(container.querySelector(".workspace-container")).not.toBeNull();
     expect(container.querySelector(".left-sidebar")).not.toBeNull();
-    expect(container.querySelector(".app-main")).not.toBeNull();
-    expect(container.querySelector(".tab-bar")).not.toBeNull();
-    expect(container.querySelector(".toolbar")).not.toBeNull();
-    expect(container.querySelector(".terminal-workbench")).not.toBeNull();
+    expect(container.querySelector(".main-viewport")).not.toBeNull();
     expect(container.querySelector(".pane-root")).not.toBeNull();
     expect(container.querySelector(".right-sidebar")).not.toBeNull();
-    expect(container.querySelector(".status-bar")).not.toBeNull();
+  });
+
+  it("conditionally renders LeftSidebar and RightSidebar based on store state", () => {
+    useTerminalStore.setState({
+      leftSidebarOpen: false,
+      rightSidebarOpen: false,
+    });
+
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".app-container")).not.toBeNull();
+    expect(container.querySelector(".title-bar")).not.toBeNull();
+    expect(container.querySelector(".workspace-container")).not.toBeNull();
+    expect(container.querySelector(".left-sidebar")).toBeNull();
+    expect(container.querySelector(".main-viewport")).not.toBeNull();
+    expect(container.querySelector(".pane-root")).not.toBeNull();
+    expect(container.querySelector(".right-sidebar")).toBeNull();
   });
 
   it("toggles left sidebar with Ctrl+B shortcut", () => {
