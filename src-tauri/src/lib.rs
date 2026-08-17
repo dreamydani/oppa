@@ -3,6 +3,7 @@ mod fs;
 mod git;
 mod layout;
 mod pty;
+mod workspace_presets;
 
 use pty::manager::PtyManager;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,6 +39,10 @@ pub fn run() {
             layout::load_layout,
             fs::fs_read_dir,
             git::git_status,
+            workspace_presets::save_recents,
+            workspace_presets::load_recents,
+            workspace_presets::save_presets,
+            workspace_presets::load_presets,
             confirm_save_complete,
         ])
         .setup(move |app| {
