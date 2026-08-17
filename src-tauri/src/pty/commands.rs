@@ -19,13 +19,20 @@ pub struct PtyExitPayload {
     pub error: Option<String>,
 }
 
+/// Payload emitted on the `pty:cwd` event when a session's CWD changes.
+#[derive(Clone, Serialize)]
+pub struct PtyCwdPayload {
+    pub id: String,
+    pub cwd: String,
+}
+
 /// Spawn a PTY session running `shell` (default: the platform's default
 /// shell, see [`crate::pty::session::default_shell`]) in `cwd` (default: the
 /// app's working directory) and return the new session id.
 ///
-/// The emitter closures capture the `AppHandle` and forward output and exit
-/// signals to the frontend as `pty:data` / `pty:exit` events. The manager
-/// itself never sees the `AppHandle` (see `PtyManager::spawn`).
+/// The emitter closures capture the `AppHandle` and forward output, exit, and
+/// cwd signals to the frontend as `pty:data` / `pty:exit` / `pty:cwd` events.
+/// The manager itself never sees the `AppHandle` (see `PtyManager::spawn`).
 #[tauri::command]
 pub fn pty_spawn(
     manager: State<'_, PtyManager>,
@@ -39,9 +46,12 @@ pub fn pty_spawn(
     let rows = rows.unwrap_or(24);
     let seq = AtomicU64::new(0);
 
-    // `app` is moved into the on_data closure; the on_exit closure gets its
-    // own clone.
+    let config = crate::pty::shell_args::resolve_shell_launch_config(shell, cwd);
+
+    // `app` is moved into the on_data closure; the on_exit and on_cwd closures get their
+    // own clones.
     let on_exit_app = app.clone();
+    let on_cwd_app = app.clone();
     let on_data: Box<dyn Fn(&str, &[u8]) + Send + Sync + 'static> =
         Box::new(move |id: &str, bytes: &[u8]| {
             let payload = PtyDataPayload {
@@ -60,9 +70,25 @@ pub fn pty_spawn(
             };
             let _ = on_exit_app.emit("pty:exit", payload);
         });
+    let on_cwd: Box<dyn Fn(&str, &str) + Send + Sync + 'static> =
+        Box::new(move |id: &str, cwd: &str| {
+            let payload = PtyCwdPayload {
+                id: id.to_string(),
+                cwd: cwd.to_string(),
+            };
+            let _ = on_cwd_app.emit("pty:cwd", payload);
+        });
 
-    let args: Vec<String> = Vec::new();
-    manager.spawn(shell, cwd, cols, rows, args, Some(on_data), Some(on_exit))
+    manager.spawn(
+        Some(config.program),
+        config.cwd,
+        cols,
+        rows,
+        config.args,
+        Some(on_data),
+        Some(on_exit),
+        Some(on_cwd),
+    )
 }
 
 #[tauri::command]
@@ -130,4 +156,16 @@ mod tests {
             "expected no sessions on a fresh manager, got: {ids:?}"
         );
     }
+
+    #[test]
+    fn pty_cwd_payload_serializes() {
+        let payload = PtyCwdPayload {
+            id: "session-123".into(),
+            cwd: "C:\\projects\\oppa".into(),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"id\":\"session-123\""));
+        assert!(json.contains("\"cwd\":\"C:\\\\projects\\\\oppa\""));
+    }
 }
+

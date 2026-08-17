@@ -47,6 +47,7 @@ pub struct PtySession {
     /// Shared with the manager's watchdog, which polls `try_wait` to detect
     /// child exit and then closes the master.
     pub child: Arc<parking_lot::Mutex<Box<dyn Child + Send + Sync>>>,
+    pub cwd: Arc<parking_lot::Mutex<Option<String>>>,
     pub cols: u16,
     pub rows: u16,
     pub pending_bytes: Arc<AtomicUsize>,
@@ -98,6 +99,7 @@ impl PtySession {
             master: Arc::new(parking_lot::Mutex::new(Some(pair.master))),
             writer: Arc::new(parking_lot::Mutex::new(writer)),
             child: Arc::new(parking_lot::Mutex::new(child)),
+            cwd: Arc::new(parking_lot::Mutex::new(cwd.map(|s| s.to_string()))),
             cols,
             rows,
             pending_bytes: Arc::new(AtomicUsize::new(0)),

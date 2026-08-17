@@ -14,6 +14,8 @@ use std::time::Duration;
 pub type OnData = Box<dyn Fn(&str, &[u8]) + Send + Sync + 'static>;
 /// Callback invoked when a session's child exits with `(id, exit_code)`.
 pub type OnExit = Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static>;
+/// Callback invoked when a session's dynamic working directory changes with `(id, cwd)`.
+pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
 
 /// Pending output above this watermark pauses the read loop (backpressure:
 /// the consumer has not acked enough of the buffered output).
@@ -80,6 +82,7 @@ impl PtyManager {
         args: Vec<String>,
         on_data: Option<OnData>,
         on_exit: Option<OnExit>,
+        on_cwd: Option<OnCwd>,
     ) -> Result<String, String> {
         let shell = shell.unwrap_or_else(default_shell);
 
@@ -112,7 +115,7 @@ impl PtyManager {
                     format!("failed to spawn pty session: {e}")
                 })?;
 
-            self.start_read_loop(&session, out_tx, exit_tx, on_data, on_exit);
+            self.start_read_loop(&session, out_tx, exit_tx, on_data, on_exit, on_cwd);
             sessions.insert(id.clone(), session);
             id
         };
@@ -127,8 +130,10 @@ impl PtyManager {
         exit_tx: Sender<Option<i32>>,
         on_data: Option<OnData>,
         on_exit: Option<OnExit>,
+        on_cwd: Option<OnCwd>,
     ) {
         let id = session.id.clone();
+        let session_cwd = Arc::clone(&session.cwd);
         let mut reader = session
             .master
             .lock()
@@ -158,6 +163,7 @@ impl PtyManager {
         // exactly once.
         std::thread::spawn(move || {
             let mut buf = [0u8; READ_CHUNK_SIZE];
+            let mut osc_scanner = crate::pty::osc_scanner::OscScanner::new();
             loop {
                 if paused.load(Ordering::SeqCst) {
                     // Unpause as soon as buffered output drops below the low
@@ -185,6 +191,12 @@ impl PtyManager {
                         // it immediately so the child's output keeps flowing.
                         if chunk.windows(4).any(|w| w == b"\x1b[6n") {
                             let _ = writer.lock().write_all(b"\x1b[1;1R");
+                        }
+                        if let Some(new_cwd) = osc_scanner.scan(&buf[..n]) {
+                            *session_cwd.lock() = Some(new_cwd.clone());
+                            if let Some(on_cwd) = &on_cwd {
+                                on_cwd(&id, &new_cwd);
+                            }
                         }
                         if let Some(on_data) = &on_data {
                             on_data(&id, &chunk);
@@ -389,6 +401,7 @@ mod tests {
                 vec!["-c".to_string(), "echo hi".to_string()],
                 None,
                 None,
+                None,
             )
             .expect("spawn should succeed");
         assert!(manager.sessions().lock().contains_key(&id));
@@ -407,7 +420,7 @@ mod tests {
         let sh = sh_path();
         let manager = PtyManager::new();
         let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None)
+            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
             .expect("spawn should succeed");
         assert!(manager.sessions().lock().contains_key(&id));
 
@@ -429,7 +442,7 @@ mod tests {
         let sh = sh_path();
         let manager = PtyManager::new();
         let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None)
+            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
             .expect("spawn should succeed");
         assert!(manager.sessions().lock().contains_key(&id));
 
@@ -484,6 +497,7 @@ mod tests {
                 // checks. Shell builtins only — no dependency on an external
                 // `yes` binary.
                 vec!["-c".to_string(), "while true; do echo x; done".to_string()],
+                None,
                 None,
                 None,
             )
@@ -550,6 +564,7 @@ mod tests {
                 vec!["-c".to_string(), "exit 0".to_string()],
                 None,
                 None,
+                None,
             )
             .expect("spawn should succeed");
         assert!(manager.sessions().lock().contains_key(&id));
@@ -571,6 +586,7 @@ mod tests {
                 80,
                 24,
                 vec!["-c".to_string(), "sleep 100".to_string()],
+                None,
                 None,
                 None,
             )
@@ -610,6 +626,7 @@ mod tests {
                 ],
                 None,
                 None,
+                None,
             )
             .expect("spawn should succeed");
 
@@ -639,6 +656,7 @@ mod tests {
                 80,
                 24,
                 vec!["-c".to_string(), "sleep 0.2".to_string()],
+                None,
                 None,
                 None,
             )
@@ -678,6 +696,7 @@ mod tests {
                     let _ = data_tx.send(bytes.to_vec());
                 })),
                 None,
+                None,
             )
             .expect("spawn should succeed");
 
@@ -706,6 +725,7 @@ mod tests {
                 Some(Box::new(move |_id, code| {
                     let _ = exit_tx.send(code);
                 })),
+                None,
             )
             .expect("spawn should succeed");
 
@@ -725,6 +745,7 @@ mod tests {
             Vec::new(),
             None,
             None,
+            None,
         );
         assert!(
             result.is_err(),
@@ -737,7 +758,7 @@ mod tests {
     fn spawn_with_default_shell() {
         let manager = PtyManager::new();
         let id = manager
-            .spawn(None, None, 80, 24, Vec::new(), None, None)
+            .spawn(None, None, 80, 24, Vec::new(), None, None, None)
             .expect("spawn with default_shell should succeed");
         assert!(manager.sessions().lock().contains_key(&id));
 
@@ -771,6 +792,7 @@ mod tests {
                 80,
                 24,
                 Vec::new(),
+                None,
                 None,
                 None,
             )
@@ -815,4 +837,65 @@ mod tests {
             expected, printed
         );
     }
+
+    #[test]
+    fn spawn_initializes_session_cwd() {
+        let sh = sh_path();
+        let manager = PtyManager::new();
+        let id = manager
+            .spawn(
+                Some(sh),
+                Some("C:\\my\\initial\\dir".to_string()),
+                80,
+                24,
+                vec!["-c".to_string(), "exit 0".to_string()],
+                None,
+                None,
+                None,
+            )
+            .expect("spawn should succeed");
+
+        let sessions = manager.sessions().lock();
+        let session = sessions.get(&id).expect("session exists");
+        assert_eq!(
+            *session.cwd.lock(),
+            Some("C:\\my\\initial\\dir".to_string())
+        );
+    }
+
+    #[test]
+    fn on_cwd_callback_receives_osc_updates_and_updates_session_cwd() {
+        let sh = sh_path();
+        let manager = PtyManager::new();
+        let (cwd_tx, cwd_rx) = channel::<(String, String)>();
+        let id = manager
+            .spawn(
+                Some(sh),
+                None,
+                80,
+                24,
+                vec![
+                    "-c".to_string(),
+                    "printf '\\033]9;9;C:\\\\updated\\\\path\\007'; sleep 0.2".to_string(),
+                ],
+                None,
+                None,
+                Some(Box::new(move |id, cwd| {
+                    let _ = cwd_tx.send((id.to_string(), cwd.to_string()));
+                })),
+            )
+            .expect("spawn should succeed");
+
+        let received = cwd_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("expected on_cwd callback invocation");
+        assert_eq!(received.0, id);
+        assert_eq!(received.1, "C:\\updated\\path");
+
+        let sessions = manager.sessions().lock();
+        if let Some(session) = sessions.get(&id) {
+            assert_eq!(*session.cwd.lock(), Some("C:\\updated\\path".to_string()));
+        }
+    }
 }
+
