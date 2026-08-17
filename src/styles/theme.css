@@ -7,20 +7,23 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --soft-edge-radius: 12px;
 
   /* Core Canvas & Surfaces */
-  --background: #141414;
+  --topbar-bg: #000000;
+  --workspace-bg: #18181b;
+  --background: #18181b;
   --foreground: #ededec;
-  --card: #282827;
+  --card: #222225;
   --card-foreground: #ededec;
-  --sidebar: #212120;
+  --sidebar: #141416;
   --sidebar-foreground: #ededec;
   --sidebar-border: rgba(255, 255, 255, 0.07);
   --border: rgba(255, 255, 255, 0.07);
-  --muted: #2e2e2d;
+  --muted: #27272a;
   --muted-foreground: #9e9e9a;
-  --text-faint: #6e6e6a;
-  --accent: #383837;
+  --text-faint: #71717a;
+  --accent: #27272a;
   --accent-foreground: #ffffff;
   --primary: #ededec;
   --primary-foreground: #141414;
@@ -51,4 +54,3 @@ body {
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }
-

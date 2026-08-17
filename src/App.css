@@ -42,7 +42,7 @@ body,
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background-color: var(--bg-window);
+  background-color: var(--topbar-bg, #000000);
 }
 
 /* ==========================================================================
@@ -154,7 +154,36 @@ body,
   min-width: 0;
   overflow: hidden;
   position: relative;
-  background-color: var(--bg-terminal);
+  background-color: var(--workspace-bg, #18181b);
+}
+
+/* Inverted Soft Edge Curves connecting TopBar to Workspace */
+.soft-edge-left,
+.soft-edge-right {
+  position: absolute;
+  top: 0;
+  width: var(--soft-edge-radius, 12px);
+  height: var(--soft-edge-radius, 12px);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.soft-edge-left {
+  left: 0;
+  background: radial-gradient(
+    circle at 100% 100%,
+    transparent var(--soft-edge-radius, 12px),
+    var(--topbar-bg, #000000) var(--soft-edge-radius, 12px)
+  );
+}
+
+.soft-edge-right {
+  right: 0;
+  background: radial-gradient(
+    circle at 0% 100%,
+    transparent var(--soft-edge-radius, 12px),
+    var(--topbar-bg, #000000) var(--soft-edge-radius, 12px)
+  );
 }
 
 .main-viewport {
