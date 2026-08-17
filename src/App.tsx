@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { TabBar } from "./components/TabBar";
-import { PaneSplit } from "./components/PaneSplit";
-import { Toolbar } from "./components/Toolbar";
+import { AppShell } from "./components/layout/AppShell";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -17,11 +15,15 @@ import "./App.css";
 //   Cmd/Ctrl+Shift+D  split focused pane horizontally
 //   Cmd/Ctrl+Shift+E  split focused pane vertically
 //   Cmd/Ctrl+arrows   move focus to a sibling pane
+//   Cmd/Ctrl+B        toggle left sidebar
+//   Cmd/Ctrl+Shift+B  toggle right sidebar
 function App() {
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
   const moveFocus = useTerminalStore((s) => s.moveFocus);
   const createTab = useTerminalStore((s) => s.createTab);
+  const toggleLeftSidebar = useTerminalStore((s) => s.toggleLeftSidebar);
+  const toggleRightSidebar = useTerminalStore((s) => s.toggleRightSidebar);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
@@ -118,7 +120,13 @@ function App() {
 
       if (!modifier(e) && !e.ctrlKey && !e.metaKey) return;
       const key = e.key.toLowerCase();
-      if (key === "t" && !e.altKey && !e.shiftKey) {
+      if (key === "b" && e.shiftKey) {
+        e.preventDefault();
+        toggleRightSidebar();
+      } else if (key === "b" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        toggleLeftSidebar();
+      } else if (key === "t" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void createTab();
       } else if (key === "w" && !e.altKey && !e.shiftKey) {
@@ -146,19 +154,13 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splitPane, closePane, moveFocus, createTab]);
+  }, [splitPane, closePane, moveFocus, createTab, toggleLeftSidebar, toggleRightSidebar]);
 
   // Hold the pane grid until the startup restore has settled: rendering a
   // sessionless placeholder leaf before the restore would spawn a throwaway
   // shell that loadLayout then replaces (an orphaned pty).
   if (!ready) return null;
-  return (
-    <>
-      <TabBar />
-      <Toolbar />
-      <PaneSplit />
-    </>
-  );
+  return <AppShell />;
 }
 
 export default App;

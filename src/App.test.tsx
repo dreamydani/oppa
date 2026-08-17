@@ -26,6 +26,20 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+vi.mock("./lib/fs/transport", () => ({
+  readDir: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("./lib/git/transport", () => ({
+  getGitStatus: vi.fn().mockResolvedValue({
+    is_git: false,
+    branch: "",
+    files: [],
+    ahead: 0,
+    behind: 0,
+  }),
+}));
+
 vi.mock("./components/TerminalPane", () => ({
   TerminalPane: ({ id }: { id: string }) => (
     <div className="terminal-pane" data-session-id={id} />
@@ -39,9 +53,22 @@ describe("App", () => {
       sessions: {
         s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
       },
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
       layout: { type: "leaf", id: "s1" },
       focusedPath: [],
       ready: true,
+      leftSidebarOpen: true,
+      leftSidebarWidth: 240,
+      rightSidebarOpen: true,
+      rightSidebarWidth: 280,
+      rightSidebarTab: "explorer",
     });
   });
 
@@ -67,12 +94,61 @@ describe("App", () => {
     });
   });
 
-  it("renders TabBar, Toolbar, and PaneSplit when ready", () => {
+  it("renders full 3-column AppShell layout with Titlebar, LeftSidebar, Workbench, RightSidebar, and StatusBar when ready", () => {
     const { container } = render(<App />);
 
+    expect(container.querySelector(".app-shell")).not.toBeNull();
+    expect(container.querySelector(".titlebar")).not.toBeNull();
+    expect(container.querySelector(".left-sidebar")).not.toBeNull();
+    expect(container.querySelector(".app-main")).not.toBeNull();
     expect(container.querySelector(".tab-bar")).not.toBeNull();
     expect(container.querySelector(".toolbar")).not.toBeNull();
+    expect(container.querySelector(".terminal-workbench")).not.toBeNull();
     expect(container.querySelector(".pane-root")).not.toBeNull();
+    expect(container.querySelector(".right-sidebar")).not.toBeNull();
+    expect(container.querySelector(".status-bar")).not.toBeNull();
+  });
+
+  it("toggles left sidebar with Ctrl+B shortcut", () => {
+    render(<App />);
+
+    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+  });
+
+  it("toggles right sidebar with Ctrl+Shift+B shortcut", () => {
+    render(<App />);
+
+    expect(useTerminalStore.getState().rightSidebarOpen).toBe(true);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "b",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(useTerminalStore.getState().rightSidebarOpen).toBe(false);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "B",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(useTerminalStore.getState().rightSidebarOpen).toBe(true);
   });
 
   it("creates a new tab on Ctrl+T or Cmd+T", async () => {
