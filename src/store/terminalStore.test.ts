@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useTerminalStore } from "./terminalStore";
 import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
+import * as fsTransport from "../lib/fs/transport";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -24,6 +25,13 @@ vi.mock("../lib/workspace/transport", () => ({
   loadPresets: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../lib/fs/transport", () => ({
+  readDir: vi.fn().mockResolvedValue([]),
+  readFile: vi.fn().mockResolvedValue(""),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+  createFile: vi.fn().mockResolvedValue(undefined),
+}));
+
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
 const ptyWriteMock = vi.mocked(transport.ptyWrite);
@@ -37,11 +45,15 @@ const saveRecentsMock = vi.mocked(workspaceTransport.saveRecents);
 const loadRecentsMock = vi.mocked(workspaceTransport.loadRecents);
 const savePresetsMock = vi.mocked(workspaceTransport.savePresets);
 const loadPresetsMock = vi.mocked(workspaceTransport.loadPresets);
+const readFileMock = vi.mocked(fsTransport.readFile);
+const writeFileMock = vi.mocked(fsTransport.writeFile);
 
 describe("terminalStore", () => {
   beforeEach(() => {
     saveLayoutMock.mockResolvedValue(undefined);
     loadLayoutMock.mockResolvedValue(null);
+    readFileMock.mockResolvedValue("");
+    writeFileMock.mockResolvedValue(undefined);
     useTerminalStore.setState({
       sessions: {},
       tabs: [{ id: "tab-1", layout: { type: "leaf", id: "" }, focusedPath: [] }],
@@ -65,6 +77,10 @@ describe("terminalStore", () => {
       historyIndex: -1,
       devicePreset: "responsive",
       detectedPorts: [],
+      editorTabs: [],
+      activeEditorPath: null,
+      editorViewMode: "edit",
+      pendingAiDiff: null,
     });
     vi.clearAllMocks();
   });
@@ -1881,6 +1897,199 @@ describe("terminalStore", () => {
       scanOutputForPorts("Server listening on http://127.0.0.1:8080");
       const updatedPorts = useTerminalStore.getState().detectedPorts;
       expect(updatedPorts.some((p) => p.port === 8080)).toBe(true);
+    });
+  });
+
+  describe("Editor store state and actions", () => {
+    it("opens a file with provided content and sets active tab", async () => {
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/App.tsx", "const a = 1;");
+      const state = useTerminalStore.getState();
+      expect(state.editorTabs.length).toBe(1);
+      expect(state.editorTabs[0]).toEqual({
+        path: "D:/oppa/src/App.tsx",
+        name: "App.tsx",
+        content: "const a = 1;",
+        originalContent: "const a = 1;",
+        isDirty: false,
+        language: "typescript",
+        isMarkdown: false,
+      });
+      expect(state.activeEditorPath).toBe("D:/oppa/src/App.tsx");
+      expect(state.editorViewMode).toBe("edit");
+    });
+
+    it("opens a file by reading from disk if content is omitted", async () => {
+      readFileMock.mockResolvedValueOnce("fn main() { println!(\"hello\"); }");
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src-tauri/src/main.rs");
+      expect(readFileMock).toHaveBeenCalledWith("D:/oppa/src-tauri/src/main.rs");
+      const state = useTerminalStore.getState();
+      expect(state.editorTabs.length).toBe(1);
+      expect(state.editorTabs[0].content).toBe("fn main() { println!(\"hello\"); }");
+      expect(state.editorTabs[0].originalContent).toBe("fn main() { println!(\"hello\"); }");
+      expect(state.editorTabs[0].language).toBe("rust");
+      expect(state.editorTabs[0].isDirty).toBe(false);
+      expect(state.activeEditorPath).toBe("D:/oppa/src-tauri/src/main.rs");
+    });
+
+    it("focuses existing tab when opening a file that is already open", async () => {
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/App.tsx", "const a = 1;");
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/index.ts", "const b = 2;");
+      expect(useTerminalStore.getState().activeEditorPath).toBe("D:/oppa/src/index.ts");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(2);
+
+      // Re-open first file
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/App.tsx");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(2);
+      expect(useTerminalStore.getState().activeEditorPath).toBe("D:/oppa/src/App.tsx");
+    });
+
+    it("sets isMarkdown and editorViewMode to markdown-split for markdown files", async () => {
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/README.md", "# Title");
+      const state = useTerminalStore.getState();
+      expect(state.editorTabs[0].isMarkdown).toBe(true);
+      expect(state.editorTabs[0].language).toBe("markdown");
+      expect(state.editorViewMode).toBe("markdown-split");
+    });
+
+    it("detects programming languages accurately from file extensions", async () => {
+      const { openFileInEditor } = useTerminalStore.getState();
+      await openFileInEditor("file.py", "x = 1");
+      await openFileInEditor("file.json", "{}");
+      await openFileInEditor("file.html", "<div></div>");
+      await openFileInEditor("file.css", "body {}");
+      await openFileInEditor("file.toml", "[pkg]");
+      await openFileInEditor("file.yaml", "key: val");
+      await openFileInEditor("file.sh", "#!/bin/sh");
+      await openFileInEditor("file.go", "package main");
+
+      const tabs = useTerminalStore.getState().editorTabs;
+      expect(tabs.find((t) => t.path === "file.py")?.language).toBe("python");
+      expect(tabs.find((t) => t.path === "file.json")?.language).toBe("json");
+      expect(tabs.find((t) => t.path === "file.html")?.language).toBe("html");
+      expect(tabs.find((t) => t.path === "file.css")?.language).toBe("css");
+      expect(tabs.find((t) => t.path === "file.toml")?.language).toBe("toml");
+      expect(tabs.find((t) => t.path === "file.yaml")?.language).toBe("yaml");
+      expect(tabs.find((t) => t.path === "file.sh")?.language).toBe("shell");
+      expect(tabs.find((t) => t.path === "file.go")?.language).toBe("go");
+    });
+
+    it("updates tab content and tracks isDirty state", async () => {
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/App.tsx", "initial");
+      expect(useTerminalStore.getState().editorTabs[0].isDirty).toBe(false);
+
+      useTerminalStore.getState().updateEditorContent("D:/oppa/src/App.tsx", "modified");
+      expect(useTerminalStore.getState().editorTabs[0].content).toBe("modified");
+      expect(useTerminalStore.getState().editorTabs[0].isDirty).toBe(true);
+
+      // Reverting back to original clears isDirty
+      useTerminalStore.getState().updateEditorContent("D:/oppa/src/App.tsx", "initial");
+      expect(useTerminalStore.getState().editorTabs[0].content).toBe("initial");
+      expect(useTerminalStore.getState().editorTabs[0].isDirty).toBe(false);
+    });
+
+    it("saves active file via writeFile and clears isDirty flag", async () => {
+      await useTerminalStore.getState().openFileInEditor("D:/oppa/src/App.tsx", "initial");
+      useTerminalStore.getState().updateEditorContent("D:/oppa/src/App.tsx", "saved content");
+      expect(useTerminalStore.getState().editorTabs[0].isDirty).toBe(true);
+
+      await useTerminalStore.getState().saveActiveFile();
+      expect(writeFileMock).toHaveBeenCalledWith("D:/oppa/src/App.tsx", "saved content");
+      const tab = useTerminalStore.getState().editorTabs[0];
+      expect(tab.isDirty).toBe(false);
+      expect(tab.originalContent).toBe("saved content");
+      expect(tab.content).toBe("saved content");
+    });
+
+    it("saveActiveFile does nothing if no active file", async () => {
+      await useTerminalStore.getState().saveActiveFile();
+      expect(writeFileMock).not.toHaveBeenCalled();
+    });
+
+    it("closes an active tab and selects adjacent tab", async () => {
+      await useTerminalStore.getState().openFileInEditor("tab1.ts", "1");
+      await useTerminalStore.getState().openFileInEditor("tab2.ts", "2");
+      await useTerminalStore.getState().openFileInEditor("tab3.ts", "3");
+      expect(useTerminalStore.getState().activeEditorPath).toBe("tab3.ts");
+
+      useTerminalStore.getState().closeEditorTab("tab3.ts");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(2);
+      expect(useTerminalStore.getState().activeEditorPath).toBe("tab2.ts");
+
+      useTerminalStore.getState().closeEditorTab("tab1.ts");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(1);
+      expect(useTerminalStore.getState().activeEditorPath).toBe("tab2.ts");
+
+      useTerminalStore.getState().closeEditorTab("tab2.ts");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(0);
+      expect(useTerminalStore.getState().activeEditorPath).toBeNull();
+    });
+
+    it("closing a non-active tab does not switch activeEditorPath", async () => {
+      await useTerminalStore.getState().openFileInEditor("tab1.ts", "1");
+      await useTerminalStore.getState().openFileInEditor("tab2.ts", "2");
+      useTerminalStore.getState().setActiveEditorTab("tab2.ts");
+
+      useTerminalStore.getState().closeEditorTab("tab1.ts");
+      expect(useTerminalStore.getState().editorTabs.length).toBe(1);
+      expect(useTerminalStore.getState().activeEditorPath).toBe("tab2.ts");
+    });
+
+    it("setActiveEditorTab sets activeEditorPath", async () => {
+      await useTerminalStore.getState().openFileInEditor("tab1.ts", "1");
+      await useTerminalStore.getState().openFileInEditor("tab2.ts", "2");
+      useTerminalStore.getState().setActiveEditorTab("tab1.ts");
+      expect(useTerminalStore.getState().activeEditorPath).toBe("tab1.ts");
+    });
+
+    it("stages AI diff, opens tab if needed, and switches to diff mode", () => {
+      useTerminalStore.getState().stageAiDiff("D:/oppa/src/App.tsx", "const x = 1;", "const x = 2;", "Update x");
+      const state = useTerminalStore.getState();
+      expect(state.pendingAiDiff).toEqual({
+        path: "D:/oppa/src/App.tsx",
+        original: "const x = 1;",
+        modified: "const x = 2;",
+        summary: "Update x",
+      });
+      expect(state.editorViewMode).toBe("diff");
+      expect(state.activeEditorPath).toBe("D:/oppa/src/App.tsx");
+      expect(state.editorTabs.length).toBe(1);
+      expect(state.editorTabs[0].content).toBe("const x = 1;");
+    });
+
+    it("accepts AI diff by saving modified content to disk and switching to edit mode", async () => {
+      useTerminalStore.getState().stageAiDiff("D:/oppa/src/App.tsx", "const x = 1;", "const x = 2;", "Update x");
+      await useTerminalStore.getState().acceptAiDiff();
+
+      expect(writeFileMock).toHaveBeenCalledWith("D:/oppa/src/App.tsx", "const x = 2;");
+      const state = useTerminalStore.getState();
+      expect(state.pendingAiDiff).toBeNull();
+      expect(state.editorViewMode).toBe("edit");
+      expect(state.editorTabs[0].content).toBe("const x = 2;");
+      expect(state.editorTabs[0].originalContent).toBe("const x = 2;");
+      expect(state.editorTabs[0].isDirty).toBe(false);
+    });
+
+    it("rejects AI diff by clearing pendingAiDiff and restoring edit mode without modifying content", () => {
+      useTerminalStore.getState().stageAiDiff("D:/oppa/src/App.tsx", "const x = 1;", "const x = 2;", "Update x");
+      useTerminalStore.getState().rejectAiDiff();
+
+      expect(writeFileMock).not.toHaveBeenCalled();
+      const state = useTerminalStore.getState();
+      expect(state.pendingAiDiff).toBeNull();
+      expect(state.editorViewMode).toBe("edit");
+      expect(state.editorTabs[0].content).toBe("const x = 1;");
+    });
+
+    it("setEditorViewMode updates editorViewMode", () => {
+      useTerminalStore.getState().setEditorViewMode("markdown-preview");
+      expect(useTerminalStore.getState().editorViewMode).toBe("markdown-preview");
+      useTerminalStore.getState().setEditorViewMode("diff");
+      expect(useTerminalStore.getState().editorViewMode).toBe("diff");
+    });
+
+    it("supports setting appMode to editor", () => {
+      useTerminalStore.getState().setAppMode("editor");
+      expect(useTerminalStore.getState().activeAppMode).toBe("editor");
     });
   });
 });

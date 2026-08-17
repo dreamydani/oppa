@@ -33,6 +33,7 @@ import type {
   RecentWorkspace,
   WorkspacePreset,
 } from "../lib/workspace/transport";
+import { readFile, writeFile } from "../lib/fs/transport";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
@@ -50,8 +51,98 @@ export interface WorkspaceConfig {
 
 export type SessionStatus = "running" | "exited" | "error";
 
-export type AppMode = "terminal" | "browser";
+export type AppMode = "terminal" | "browser" | "editor";
 export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
+
+export type EditorViewMode = "edit" | "diff" | "markdown-preview" | "markdown-split";
+
+export interface EditorTab {
+  path: string;
+  name: string;
+  content: string;
+  originalContent: string;
+  isDirty: boolean;
+  language: string;
+  isMarkdown: boolean;
+}
+
+export interface PendingAiDiff {
+  path: string;
+  original: string;
+  modified: string;
+  summary?: string;
+  isInline?: boolean;
+}
+
+export function detectEditorLanguage(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  switch (ext) {
+    case "ts":
+    case "tsx":
+    case "mts":
+    case "cts":
+      return "typescript";
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "javascript";
+    case "rs":
+      return "rust";
+    case "py":
+    case "pyw":
+      return "python";
+    case "json":
+      return "json";
+    case "html":
+    case "htm":
+      return "html";
+    case "css":
+      return "css";
+    case "scss":
+      return "scss";
+    case "less":
+      return "less";
+    case "md":
+    case "markdown":
+      return "markdown";
+    case "toml":
+      return "toml";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell";
+    case "go":
+      return "go";
+    case "c":
+    case "h":
+      return "c";
+    case "cpp":
+    case "cc":
+    case "cxx":
+    case "hpp":
+      return "cpp";
+    case "sql":
+      return "sql";
+    case "xml":
+    case "svg":
+      return "xml";
+    case "diff":
+    case "patch":
+      return "diff";
+    default:
+      return "plaintext";
+  }
+}
+
+function getFileName(filePath: string): string {
+  const normalized = filePath.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
 
 export interface DetectedPort {
   port: number;
@@ -190,6 +281,19 @@ export interface TerminalState {
   addDetectedPort: (portInfo: { port: number; url: string; title?: string; timestamp?: number }) => void;
   clearDetectedPorts: () => void;
   scanOutputForPorts: (text: string) => void;
+  editorTabs: EditorTab[];
+  activeEditorPath: string | null;
+  editorViewMode: EditorViewMode;
+  pendingAiDiff: PendingAiDiff | null;
+  openFileInEditor: (path: string, content?: string) => Promise<void>;
+  closeEditorTab: (path: string) => void;
+  setActiveEditorTab: (path: string) => void;
+  updateEditorContent: (path: string, content: string) => void;
+  saveActiveFile: () => Promise<void>;
+  stageAiDiff: (path: string, original: string, modified: string, summary?: string) => void;
+  acceptAiDiff: () => Promise<void>;
+  rejectAiDiff: () => void;
+  setEditorViewMode: (mode: EditorViewMode) => void;
 }
 
 function getSyncedTabs(state: TerminalState): TabState[] {
@@ -253,6 +357,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   historyIndex: -1,
   devicePreset: "responsive",
   detectedPorts: [],
+  editorTabs: [],
+  activeEditorPath: null,
+  editorViewMode: "edit",
+  pendingAiDiff: null,
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -1122,4 +1230,157 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
     }
   },
+
+  openFileInEditor: async (path: string, content?: string) => {
+    const state = get();
+    const existing = state.editorTabs.find((t) => t.path === path);
+    if (existing) {
+      set({
+        activeEditorPath: path,
+        editorViewMode: existing.isMarkdown ? "markdown-split" : "edit",
+      });
+      return;
+    }
+
+    let fileContent = content;
+    if (fileContent === undefined) {
+      fileContent = await readFile(path);
+    }
+
+    const isMarkdown = path.endsWith(".md") || path.endsWith(".markdown");
+    const newTab: EditorTab = {
+      path,
+      name: getFileName(path),
+      content: fileContent,
+      originalContent: fileContent,
+      isDirty: false,
+      language: detectEditorLanguage(path),
+      isMarkdown,
+    };
+
+    set((s) => ({
+      editorTabs: [...s.editorTabs, newTab],
+      activeEditorPath: path,
+      editorViewMode: isMarkdown ? "markdown-split" : "edit",
+    }));
+  },
+
+  closeEditorTab: (path: string) => {
+    set((state) => {
+      const idx = state.editorTabs.findIndex((t) => t.path === path);
+      if (idx === -1) return state;
+
+      const remaining = state.editorTabs.filter((t) => t.path !== path);
+      let activePath = state.activeEditorPath;
+
+      if (activePath === path) {
+        if (remaining.length === 0) {
+          activePath = null;
+        } else {
+          const nextIdx = Math.min(Math.max(0, idx), remaining.length - 1);
+          activePath = remaining[nextIdx].path;
+        }
+      }
+
+      return {
+        editorTabs: remaining,
+        activeEditorPath: activePath,
+      };
+    });
+  },
+
+  setActiveEditorTab: (path: string) => set({ activeEditorPath: path }),
+
+  updateEditorContent: (path: string, content: string) => {
+    set((state) => ({
+      editorTabs: state.editorTabs.map((t) =>
+        t.path === path
+          ? {
+              ...t,
+              content,
+              isDirty: content !== t.originalContent,
+            }
+          : t,
+      ),
+    }));
+  },
+
+  saveActiveFile: async () => {
+    const { activeEditorPath, editorTabs } = get();
+    if (!activeEditorPath) return;
+    const activeTab = editorTabs.find((t) => t.path === activeEditorPath);
+    if (!activeTab) return;
+
+    await writeFile(activeTab.path, activeTab.content);
+    set((state) => ({
+      editorTabs: state.editorTabs.map((t) =>
+        t.path === activeEditorPath
+          ? {
+              ...t,
+              isDirty: false,
+              originalContent: t.content,
+            }
+          : t,
+      ),
+    }));
+  },
+
+  stageAiDiff: (path: string, original: string, modified: string, summary?: string) => {
+    const state = get();
+    const existing = state.editorTabs.find((t) => t.path === path);
+    const isMarkdown = path.endsWith(".md") || path.endsWith(".markdown");
+
+    let tabs = state.editorTabs;
+    if (!existing) {
+      const newTab: EditorTab = {
+        path,
+        name: getFileName(path),
+        content: original,
+        originalContent: original,
+        isDirty: false,
+        language: detectEditorLanguage(path),
+        isMarkdown,
+      };
+      tabs = [...tabs, newTab];
+    }
+
+    set({
+      editorTabs: tabs,
+      activeEditorPath: path,
+      pendingAiDiff: { path, original, modified, summary },
+      editorViewMode: "diff",
+    });
+  },
+
+  acceptAiDiff: async () => {
+    const { pendingAiDiff } = get();
+    if (!pendingAiDiff) return;
+
+    const { path, modified } = pendingAiDiff;
+    await writeFile(path, modified);
+
+    set((state) => ({
+      pendingAiDiff: null,
+      editorViewMode: "edit",
+      editorTabs: state.editorTabs.map((t) =>
+        t.path === path
+          ? {
+              ...t,
+              content: modified,
+              originalContent: modified,
+              isDirty: false,
+            }
+          : t,
+      ),
+    }));
+  },
+
+  rejectAiDiff: () => {
+    set({
+      pendingAiDiff: null,
+      editorViewMode: "edit",
+    });
+  },
+
+  setEditorViewMode: (mode: EditorViewMode) => set({ editorViewMode: mode }),
 }));
