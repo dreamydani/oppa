@@ -1,16 +1,16 @@
 /* CSS Theme Variables */
 :root {
-  --bg-window: #1e1f24;
-  --bg-sidebar: #21242b;
-  --bg-terminal: #1b1d22;
-  --bg-card-active: #323846;
-  --bg-card-hover: #282c36;
-  --border-divider: #2b303c;
-  --border-active: #3e4451;
-  --text-primary: #e6edf3;
-  --text-muted: #8b949e;
+  --bg-window: var(--background, #141414);
+  --bg-sidebar: var(--sidebar, #212120);
+  --bg-terminal: var(--background, #141414);
+  --bg-card-active: var(--card, #282827);
+  --bg-card-hover: var(--muted, #2e2e2d);
+  --border-divider: var(--border, rgba(255, 255, 255, 0.07));
+  --border-active: var(--ring, rgba(255, 255, 255, 0.20));
+  --text-primary: var(--foreground, #ededec);
+  --text-muted: var(--muted-foreground, #9e9e9a);
   --accent-blue: #58a6ff;
-  --destructive: #f85149;
+  --destructive: var(--destructive, #e05252);
   --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'SF Mono', Consolas, 'Cascadia Code', Menlo, monospace;
 }
@@ -304,7 +304,7 @@ body,
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background-color: #151820;
+  background-color: #1b1b1a;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -313,7 +313,7 @@ body,
 }
 
 .tab-card.active .tab-card-avatar {
-  background-color: #1a1e28;
+  background-color: #212120;
   color: var(--text-primary);
 }
 
@@ -598,7 +598,7 @@ body,
 }
 
 .pane-divider:hover {
-  background-color: var(--accent-blue);
+  background-color: #4a4a48;
 }
 
 /* ==========================================================================
@@ -639,7 +639,7 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  background-color: var(--bg-sidebar);
+  background-color: var(--bg-card-active);
   border: 1px solid var(--border-divider);
   border-radius: 6px;
   padding: 4px 6px;

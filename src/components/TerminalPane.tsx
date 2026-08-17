@@ -59,7 +59,12 @@ export function TerminalPane({ id }: { id: string }) {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: "Menlo, Consolas, monospace",
-      theme: { background: "#0d1117" },
+      theme: {
+        background: "#141414",
+        foreground: "#ededec",
+        cursor: "#ededec",
+        selectionBackground: "rgba(255, 255, 255, 0.15)",
+      },
       allowProposedApi: true,
     });
     termRef.current = term;
