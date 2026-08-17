@@ -124,7 +124,7 @@ export function TerminalPane({ id }: { id: string }) {
       return true;
     });
 
-    let flushTimer: NodeJS.Timeout | null = null;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const flushScrollback = () => {
       const buffer = serializeAddonRef.current?.serialize();
       if (buffer) {
