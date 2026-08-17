@@ -26,9 +26,14 @@ const cleanupStaleScrollbacksMock = vi.mocked(transport.cleanupStaleScrollbacks)
 
 describe("terminalStore", () => {
   beforeEach(() => {
+    saveLayoutMock.mockResolvedValue(undefined);
+    loadLayoutMock.mockResolvedValue(null);
     useTerminalStore.setState({
       sessions: {},
+      tabs: [{ id: "tab-1", layout: { type: "leaf", id: "" }, focusedPath: [] }],
+      activeTabId: "tab-1",
       layout: { type: "leaf", id: "" },
+      focusedPath: [],
       serializers: {},
       restoredScrollbacks: {},
       ready: false,
@@ -636,13 +641,20 @@ describe("terminalStore", () => {
       const json = saveLayoutMock.mock.calls[0][0];
       const parsed = JSON.parse(json);
       expect(parsed).toEqual({
-        layout: {
-          type: "split",
-          dir: "h",
-          ratio: 0.4,
-          a: { type: "leaf", id: "a" },
-          b: { type: "leaf", id: "b" },
-        },
+        tabs: [
+          {
+            id: "tab-1",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.4,
+              a: { type: "leaf", id: "a" },
+              b: { type: "leaf", id: "b" },
+            },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-1",
         sessions: [
           { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
           { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
@@ -827,6 +839,327 @@ describe("terminalStore", () => {
       await expect(useTerminalStore.getState().loadLayout()).rejects.toThrow();
       expect(ptySpawnMock).not.toHaveBeenCalled();
       expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
+    });
+  });
+
+  describe("multi-tab management", () => {
+    beforeEach(() => {
+      ptySpawnMock.mockResolvedValue("s1");
+    });
+
+    describe("createTab", () => {
+      it("creates a new tab with a fresh session, sets it active, and appends to tabs", async () => {
+        ptySpawnMock.mockResolvedValueOnce("s-new");
+        const tabId = await useTerminalStore.getState().createTab();
+        expect(tabId).toBeDefined();
+        const state = useTerminalStore.getState();
+        expect(state.activeTabId).toBe(tabId);
+        const createdTab = state.tabs.find((t) => t.id === tabId);
+        expect(createdTab).toBeDefined();
+        expect(createdTab?.layout).toEqual({ type: "leaf", id: "s-new" });
+        expect(createdTab?.focusedPath).toEqual([]);
+        expect(state.layout).toEqual({ type: "leaf", id: "s-new" });
+        expect(state.sessions["s-new"]).toBeDefined();
+      });
+
+      it("forwards cwd when creating a tab", async () => {
+        ptySpawnMock.mockResolvedValueOnce("s-cwd");
+        await useTerminalStore.getState().createTab("D:\\my-project");
+        expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\my-project" });
+        expect(useTerminalStore.getState().sessions["s-cwd"]?.cwd).toBe("D:\\my-project");
+      });
+
+      it("preserves existing tabs when creating a new tab", async () => {
+        useTerminalStore.setState({
+          tabs: [
+            { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          ],
+          activeTabId: "tab-1",
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          },
+        });
+        ptySpawnMock.mockResolvedValueOnce("s2");
+        const tab2Id = await useTerminalStore.getState().createTab();
+        const { tabs, activeTabId } = useTerminalStore.getState();
+        expect(tabs).toHaveLength(2);
+        expect(tabs[0].id).toBe("tab-1");
+        expect(tabs[1].id).toBe(tab2Id);
+        expect(activeTabId).toBe(tab2Id);
+      });
+    });
+
+    describe("selectTab", () => {
+      it("switches active tab and updates top-level layout and focusedPath", () => {
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        const tab2 = {
+          id: "t2",
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s2" },
+            b: { type: "leaf", id: "s3" },
+          } as const,
+          focusedPath: [1],
+        };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+        });
+
+        useTerminalStore.getState().selectTab("t2");
+        const state = useTerminalStore.getState();
+        expect(state.activeTabId).toBe("t2");
+        expect(state.layout).toEqual(tab2.layout);
+        expect(state.focusedPath).toEqual([1]);
+      });
+
+      it("no-ops if tabId does not exist", () => {
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+        });
+        useTerminalStore.getState().selectTab("non-existent");
+        expect(useTerminalStore.getState().activeTabId).toBe("t1");
+      });
+    });
+
+    describe("renameTab", () => {
+      it("updates the title of the target tab", () => {
+        useTerminalStore.setState({
+          tabs: [
+            { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          ],
+          activeTabId: "t1",
+        });
+        useTerminalStore.getState().renameTab("t1", "Backend Server");
+        expect(useTerminalStore.getState().tabs[0].title).toBe("Backend Server");
+      });
+    });
+
+    describe("closeTab", () => {
+      it("closes active tab, terminates sessions, deletes scrollbacks, and activates adjacent tab", async () => {
+        ptyKillMock.mockResolvedValue(undefined);
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        const tab2 = { id: "t2", layout: { type: "leaf", id: "s2" } as const, focusedPath: [] };
+        const tab3 = { id: "t3", layout: { type: "leaf", id: "s3" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2, tab3],
+          activeTabId: "t2",
+          layout: tab2.layout,
+          focusedPath: tab2.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+            s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+            s3: { id: "s3", title: "s3", status: "running", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().closeTab("t2");
+        expect(ptyKillMock).toHaveBeenCalledWith("s2");
+        expect(deleteScrollbackMock).toHaveBeenCalledWith("s2");
+
+        const state = useTerminalStore.getState();
+        expect(state.tabs.map((t) => t.id)).toEqual(["t1", "t3"]);
+        expect(state.activeTabId).toBe("t3");
+        expect(state.sessions["s2"]).toBeUndefined();
+        expect(state.sessions["s1"]).toBeDefined();
+        expect(state.sessions["s3"]).toBeDefined();
+      });
+
+      it("closes background tab without switching active tab", async () => {
+        ptyKillMock.mockResolvedValue(undefined);
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        const tab2 = { id: "t2", layout: { type: "leaf", id: "s2" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+            s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().closeTab("t2");
+        expect(ptyKillMock).toHaveBeenCalledWith("s2");
+        const state = useTerminalStore.getState();
+        expect(state.tabs.map((t) => t.id)).toEqual(["t1"]);
+        expect(state.activeTabId).toBe("t1");
+      });
+
+      it("resets to a fresh empty tab when the last tab is closed", async () => {
+        ptyKillMock.mockResolvedValue(undefined);
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().closeTab("t1");
+        expect(ptyKillMock).toHaveBeenCalledWith("s1");
+        const state = useTerminalStore.getState();
+        expect(state.tabs).toHaveLength(1);
+        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "" });
+        expect(state.sessions).toEqual({});
+      });
+    });
+
+    describe("split isolation across tabs", () => {
+      it("splitPane modifies only the active tab layout", async () => {
+        ptySpawnMock.mockResolvedValue("s-split");
+        const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        const tab2 = { id: "t2", layout: { type: "leaf", id: "s2" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+            s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().splitPane("h");
+        const state = useTerminalStore.getState();
+        expect(state.tabs[0].layout).toEqual({
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "s1" },
+          b: { type: "leaf", id: "s-split" },
+        });
+        // Tab 2 must be untouched
+        expect(state.tabs[1].layout).toEqual({ type: "leaf", id: "s2" });
+      });
+
+      it("closePane in active tab leaves background tab panes intact", async () => {
+        ptyKillMock.mockResolvedValue(undefined);
+        const tab1 = {
+          id: "t1",
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s1" },
+            b: { type: "leaf", id: "s2" },
+          } as const,
+          focusedPath: [1],
+        };
+        const tab2 = { id: "t2", layout: { type: "leaf", id: "s3" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2],
+          activeTabId: "t1",
+          layout: tab1.layout,
+          focusedPath: tab1.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+            s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+            s3: { id: "s3", title: "s3", status: "running", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().closePane();
+        expect(ptyKillMock).toHaveBeenCalledWith("s2");
+        const state = useTerminalStore.getState();
+        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "s1" });
+        expect(state.tabs[1].layout).toEqual({ type: "leaf", id: "s3" });
+        expect(state.sessions["s3"]).toBeDefined();
+        expect(state.sessions["s2"]).toBeUndefined();
+      });
+    });
+
+    describe("multi-tab persistence", () => {
+      beforeEach(() => {
+        useTerminalStore.setState({ ready: true });
+      });
+
+      it("saveLayout serializes all tabs, activeTabId, and sessions", async () => {
+        const tab1 = { id: "t1", title: "Tab 1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
+        const tab2 = { id: "t2", title: "Tab 2", layout: { type: "leaf", id: "s2" } as const, focusedPath: [] };
+        useTerminalStore.setState({
+          tabs: [tab1, tab2],
+          activeTabId: "t2",
+          layout: tab2.layout,
+          focusedPath: tab2.focusedPath,
+          sessions: {
+            s1: { id: "s1", title: "s1", status: "running", cwd: "C:\\a", cols: 80, rows: 24 },
+            s2: { id: "s2", title: "s2", status: "running", cwd: "C:\\b", cols: 80, rows: 24 },
+          },
+        });
+
+        await useTerminalStore.getState().saveLayout();
+        expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+        const parsed = JSON.parse(saveLayoutMock.mock.calls[0][0]);
+        expect(parsed.activeTabId).toBe("t2");
+        expect(parsed.tabs).toHaveLength(2);
+        expect(parsed.tabs[0].title).toBe("Tab 1");
+        expect(parsed.tabs[1].title).toBe("Tab 2");
+        expect(parsed.sessions).toHaveLength(2);
+      });
+
+      it("loadLayout restores multiple tabs, remapping session IDs across all tabs", async () => {
+        loadLayoutMock.mockResolvedValue(
+          JSON.stringify({
+            tabs: [
+              { id: "t1", title: "Tab One", layout: { type: "leaf", id: "old-1" }, focusedPath: [] },
+              { id: "t2", title: "Tab Two", layout: { type: "leaf", id: "old-2" }, focusedPath: [] },
+            ],
+            activeTabId: "t2",
+            sessions: [
+              { id: "old-1", title: "s1", status: "running", cwd: "C:\\a", cols: 80, rows: 24 },
+              { id: "old-2", title: "s2", status: "running", cwd: "C:\\b", cols: 80, rows: 24 },
+            ],
+          }),
+        );
+        ptySpawnMock
+          .mockResolvedValueOnce("new-1")
+          .mockResolvedValueOnce("new-2");
+
+        await useTerminalStore.getState().loadLayout();
+        const state = useTerminalStore.getState();
+        expect(state.tabs).toHaveLength(2);
+        expect(state.tabs[0].id).toBe("t1");
+        expect(state.tabs[0].title).toBe("Tab One");
+        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "new-1" });
+        expect(state.tabs[1].id).toBe("t2");
+        expect(state.tabs[1].title).toBe("Tab Two");
+        expect(state.tabs[1].layout).toEqual({ type: "leaf", id: "new-2" });
+        expect(state.activeTabId).toBe("t2");
+        expect(state.layout).toEqual({ type: "leaf", id: "new-2" });
+      });
+
+      it("loadLayout promotes legacy single-layout snapshot into tabs[0]", async () => {
+        loadLayoutMock.mockResolvedValue(
+          JSON.stringify({
+            layout: { type: "leaf", id: "legacy-1" },
+            sessions: [
+              { id: "legacy-1", title: "legacy", status: "running", cwd: "C:\\legacy", cols: 80, rows: 24 },
+            ],
+          }),
+        );
+        ptySpawnMock.mockResolvedValueOnce("new-legacy");
+
+        await useTerminalStore.getState().loadLayout();
+        const state = useTerminalStore.getState();
+        expect(state.tabs).toHaveLength(1);
+        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "new-legacy" });
+        expect(state.activeTabId).toBe(state.tabs[0].id);
+        expect(state.layout).toEqual({ type: "leaf", id: "new-legacy" });
+      });
     });
   });
 });

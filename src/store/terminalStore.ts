@@ -39,10 +39,18 @@ export interface SessionInfo {
   rows: number;
 }
 
-// Monotonic counter for synthetic error-session ids. Avoids crypto.randomUUID
-// (not available in insecure/non-secure contexts) and stays unique within the
-// session without depending on a global UUID source.
+export interface TabState {
+  id: string;
+  title?: string;
+  layout: Layout;
+  focusedPath: Path;
+}
+
+// Monotonic counter for synthetic error-session ids and tab ids. Avoids
+// crypto.randomUUID (not available in insecure/non-secure contexts) and stays
+// unique within the session without depending on a global UUID source.
 let nextErrorId = 0;
+let nextTabId = 1;
 
 export const DEFAULT_COLS = 80;
 export const DEFAULT_ROWS = 24;
@@ -64,8 +72,10 @@ function leafIds(tree: Layout): string[] {
   return [...leafIds(tree.a), ...leafIds(tree.b)];
 }
 
-interface TerminalState {
+export interface TerminalState {
   sessions: Record<string, SessionInfo>;
+  tabs: TabState[];
+  activeTabId: string;
   layout: Layout;
   focusedPath: Path;
   serializers: Record<string, () => string>;
@@ -85,8 +95,13 @@ interface TerminalState {
   setSessionStatus: (id: string, status: SessionStatus) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
   substituteSessionId: (from: string, to: string) => void;
+  createTab: (cwd?: string) => Promise<string>;
+  closeTab: (tabId?: string) => Promise<void>;
+  selectTab: (tabId: string) => void;
+  renameTab: (tabId: string, title: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
+  setSplitRatio?: (path: Path, ratio: number) => void;
   splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
   closePane: (path?: Path) => Promise<void>;
   focusPane: (path: Path) => void;
@@ -95,8 +110,44 @@ interface TerminalState {
   loadLayout: () => Promise<void>;
 }
 
+function getSyncedTabs(state: TerminalState): TabState[] {
+  const activeId = state.activeTabId || "tab-1";
+  if (state.tabs && state.tabs.length > 0) {
+    return state.tabs.map((t) =>
+      t.id === activeId
+        ? {
+            ...t,
+            layout: state.layout ?? t.layout,
+            focusedPath: state.focusedPath ?? t.focusedPath,
+          }
+        : t,
+    );
+  }
+  return [
+    {
+      id: activeId,
+      layout: state.layout ?? { type: "leaf", id: "" },
+      focusedPath: state.focusedPath ?? [],
+    },
+  ];
+}
+
+function getActiveTab(state: TerminalState): TabState {
+  const tabs = getSyncedTabs(state);
+  const activeId = state.activeTabId || tabs[0].id;
+  return tabs.find((t) => t.id === activeId) ?? tabs[0];
+}
+
+const initialTab: TabState = {
+  id: "tab-1",
+  layout: { type: "leaf", id: "" },
+  focusedPath: [],
+};
+
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
+  tabs: [initialTab],
+  activeTabId: "tab-1",
   layout: { type: "leaf", id: "" },
   focusedPath: [],
   serializers: {},
@@ -233,29 +284,154 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
-  // Replace every occurrence of leaf id `from` with `to` in the layout tree.
-  // SessionLeaf uses this to bind a resolved spawn id to its placeholder
-  // after the layout may have changed (split/close) while the spawn was in
-  // flight. A no-op when `from` no longer occurs.
+  // Replace every occurrence of leaf id `from` with `to` in the layout trees across all tabs.
   substituteSessionId: (from, to) => {
     set((state) => {
-      const layout = substituteLeafId(state.layout, from, to);
-      return layout === state.layout ? state : { layout };
+      let changed = false;
+      const syncedTabs = getSyncedTabs(state);
+      const tabs = syncedTabs.map((tab) => {
+        const nextLayout = substituteLeafId(tab.layout, from, to);
+        if (nextLayout !== tab.layout) {
+          changed = true;
+          return { ...tab, layout: nextLayout };
+        }
+        return tab;
+      });
+      const topLayout = substituteLeafId(state.layout, from, to);
+      if (!changed && topLayout === state.layout) return state;
+      const activeTab = tabs.find((t) => t.id === state.activeTabId) || tabs[0];
+      return {
+        tabs,
+        layout: activeTab ? activeTab.layout : topLayout,
+      };
     });
   },
 
-  setLayout: (layout) => set({ layout }),
+  createTab: async (cwd) => {
+    const sessionId = await get().spawnSession(cwd);
+    const tabId = `tab-${++nextTabId}`;
+    const newTab: TabState = {
+      id: tabId,
+      layout: { type: "leaf", id: sessionId },
+      focusedPath: [],
+    };
+    set((state) => {
+      const currentTabs = getSyncedTabs(state);
+      const tabs = [...currentTabs, newTab];
+      return {
+        tabs,
+        activeTabId: tabId,
+        layout: newTab.layout,
+        focusedPath: newTab.focusedPath,
+      };
+    });
+    void get().saveLayout().catch(() => {});
+    return tabId;
+  },
+
+  closeTab: async (tabId) => {
+    const state = get();
+    const targetId = tabId ?? state.activeTabId;
+    const currentTabs = getSyncedTabs(state);
+    const targetTab = currentTabs.find((t) => t.id === targetId);
+    if (!targetTab) return;
+
+    const sessionIds = leafIds(targetTab.layout);
+    for (const sId of sessionIds) {
+      if (sId) {
+        if (get().sessions[sId]) {
+          await get().killSession(sId);
+        }
+        void deleteScrollback(sId).catch(() => {});
+      }
+    }
+
+    const sessions = { ...get().sessions };
+    for (const sId of sessionIds) {
+      if (sId) {
+        delete sessions[sId];
+      }
+    }
+
+    const remainingTabs = currentTabs.filter((t) => t.id !== targetId);
+
+    if (remainingTabs.length === 0) {
+      const freshTabId = `tab-${++nextTabId}`;
+      const freshTab: TabState = {
+        id: freshTabId,
+        layout: { type: "leaf", id: "" },
+        focusedPath: [],
+      };
+      set({
+        sessions,
+        tabs: [freshTab],
+        activeTabId: freshTabId,
+        layout: freshTab.layout,
+        focusedPath: [],
+      });
+    } else {
+      if (targetId === state.activeTabId) {
+        const targetIdx = currentTabs.findIndex((t) => t.id === targetId);
+        const nextIdx = Math.min(Math.max(0, targetIdx), remainingTabs.length - 1);
+        const nextActiveTab = remainingTabs[nextIdx];
+        set({
+          sessions,
+          tabs: remainingTabs,
+          activeTabId: nextActiveTab.id,
+          layout: nextActiveTab.layout,
+          focusedPath: nextActiveTab.focusedPath,
+        });
+      } else {
+        const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
+        set({
+          sessions,
+          tabs: remainingTabs,
+          layout: activeTab.layout,
+          focusedPath: activeTab.focusedPath,
+        });
+      }
+    }
+    void get().saveLayout().catch(() => {});
+  },
+
+  selectTab: (tabId) => {
+    const state = get();
+    const currentTabs = getSyncedTabs(state);
+    const tab = currentTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    set({
+      tabs: currentTabs,
+      activeTabId: tab.id,
+      layout: tab.layout,
+      focusedPath: tab.focusedPath,
+    });
+  },
+
+  renameTab: (tabId, title) => {
+    set((state) => {
+      const currentTabs = getSyncedTabs(state);
+      const tabs = currentTabs.map((t) => (t.id === tabId ? { ...t, title } : t));
+      return { tabs };
+    });
+    void get().saveLayout().catch(() => {});
+  },
+
+  setLayout: (layout) =>
+    set((state) => {
+      const activeId = state.activeTabId || "tab-1";
+      const tabs = getSyncedTabs(state).map((t) => (t.id === activeId ? { ...t, layout } : t));
+      return { tabs, layout };
+    }),
 
   // The drag divider in PaneSplit: set the ratio of the split at `path`.
-  // The tree is immutable, so walk down rebuilding the spine; a path into a
-  // leaf (or past the end of the tree) leaves the tree untouched.
   setRatio: (path, ratio) => {
-    const tree = get().layout;
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const tree = activeTab.layout;
     const clamped = Math.min(1, Math.max(0, ratio));
     const rebuild = (node: Layout, steps: Path): Layout => {
       if (node.type === "leaf") return node;
       if (steps.length === 0) {
-        // This split is the target: update its ratio and stop descending.
         return node.ratio === clamped ? node : { ...node, ratio: clamped };
       }
       const [head, ...rest] = steps;
@@ -273,33 +449,47 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
     const next = rebuild(tree, path);
     if (next === tree) return;
-    set({ layout: next });
+    const activeId = state.activeTabId || activeTab.id;
+    const tabs = getSyncedTabs(state).map((t) =>
+      t.id === activeId ? { ...t, layout: next } : t,
+    );
+    set({ tabs, layout: next });
     void get().saveLayout().catch(() => {});
   },
 
-  // Split the pane at `path` (defaults to the focused pane): spawn a new
-  // session for the fresh leaf, rebuild the tree, and focus the new leaf.
+  setSplitRatio: (path, ratio) => {
+    get().setRatio(path, ratio);
+  },
+
+  // Split the pane at `path` in the active tab (defaults to active tab focused pane).
   splitPane: async (dir, path) => {
-    const target = path ?? get().focusedPath;
-    const tree = get().layout;
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const target = path ?? activeTab.focusedPath;
+    const tree = activeTab.layout;
     const focusedId = focus(tree, target);
     const currentCwd = get().sessions[focusedId]?.cwd;
     const id = await get().spawnSession(currentCwd);
+    const nextLayout = split(dir, tree, target, id);
+    const nextFocusedPath = [...target, 1];
+    const activeId = state.activeTabId || activeTab.id;
+    const tabs = getSyncedTabs(state).map((t) =>
+      t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
+    );
     set({
-      layout: split(dir, get().layout, target, id),
-      focusedPath: [...target, 1],
+      tabs,
+      layout: nextLayout,
+      focusedPath: nextFocusedPath,
     });
-    // Persist immediately so a crash/close never loses the arrangement.
     void get().saveLayout().catch(() => {});
   },
 
-  // Close the pane at `path` (defaults to the focused pane): kill its session
-  // if it has one, prune the leaf from the tree (collapsing empty splits), and
-  // focus the leftmost remaining leaf. Closing the last pane resets to a fresh
-  // empty leaf.
+  // Close the pane at `path` in the active tab (defaults to active tab focused pane).
   closePane: async (path) => {
-    const target = path ?? get().focusedPath;
-    const tree = get().layout;
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const target = path ?? activeTab.focusedPath;
+    const tree = activeTab.layout;
     const removedId = focus(tree, target);
     const next = remove(tree, target);
     if (get().sessions[removedId]) {
@@ -308,57 +498,76 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (removedId) {
       void deleteScrollback(removedId).catch(() => {});
     }
-    // The removed leaf id is gone from the tree: drop its session too so
-    // killed sessions do not accumulate in the store forever.
     const sessions = { ...get().sessions };
     delete sessions[removedId];
-    if (next === null) {
-      set({ sessions, layout: { type: "leaf", id: "" }, focusedPath: [] });
-    } else {
-      set({ sessions, layout: next, focusedPath: firstLeafPath(next) });
-    }
-    // Persist immediately so the arrangement is never stale on close.
+    const nextLayout: Layout = next === null ? { type: "leaf", id: "" } : next;
+    const nextFocusedPath: Path = next === null ? [] : firstLeafPath(next);
+    const activeId = state.activeTabId || activeTab.id;
+    const tabs = getSyncedTabs(state).map((t) =>
+      t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
+    );
+    set({
+      sessions,
+      tabs,
+      layout: nextLayout,
+      focusedPath: nextFocusedPath,
+    });
     void get().saveLayout().catch(() => {});
   },
 
-  focusPane: (path) => set({ focusedPath: path }),
+  focusPane: (path) =>
+    set((state) => {
+      const activeId = state.activeTabId || "tab-1";
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId ? { ...t, focusedPath: path } : t,
+      );
+      return { tabs, focusedPath: path };
+    }),
 
-  // Move focus to a sibling pane. Interpretation: left/right travel through
-  // horizontal ("h") splits, up/down through vertical ("v") splits. Walk the
-  // focused path from the deepest ancestor up and use the NEAREST split whose
-  // dir matches the movement axis; if the focused leaf is already on the
-  // destination side of that split (e.g. pressing right while on the right
-  // side), try the next ancestor up. No matching ancestor → no-op. The target
-  // lands on the first leaf of the destination child, so the focused path
-  // always points at a leaf. This is intentionally simple; it does not handle
-  // non-rectangular neighborhoods, which is out of scope for v1.
+  // Move focus to a sibling pane in the active tab.
   moveFocus: (dir) => {
-    const tree = get().layout;
-    const path = get().focusedPath;
-    if (path.length === 0) return; // single root leaf: no sibling
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const tree = activeTab.layout;
+    const path = activeTab.focusedPath;
+    if (path.length === 0) return;
     const target = dir === "left" || dir === "up" ? 0 : 1;
     const axis = dir === "left" || dir === "right" ? "h" : "v";
     for (let i = path.length - 1; i >= 0; i--) {
       const ancestor = nodeAt(tree, path.slice(0, i));
       if (ancestor.type !== "split" || ancestor.dir !== axis) continue;
-      if (path[i] === target) continue; // already on the destination side
+      if (path[i] === target) continue;
       const destChild = path[i] === 0 ? ancestor.b : ancestor.a;
+      const newFocusedPath = [
+        ...path.slice(0, i),
+        path[i] === 0 ? 1 : 0,
+        ...firstLeafPath(destChild),
+      ];
+      const activeId = state.activeTabId || activeTab.id;
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId ? { ...t, focusedPath: newFocusedPath } : t,
+      );
       set({
-        focusedPath: [...path.slice(0, i), path[i] === 0 ? 1 : 0, ...firstLeafPath(destChild)],
+        tabs,
+        focusedPath: newFocusedPath,
       });
       return;
     }
   },
 
-  // Persist the current pane layout, session state, and active scrollbacks.
+  // Persist the current multi-tab layout, session state, and active scrollbacks.
   saveLayout: async () => {
-    // Guard: a beforeunload during the startup restore must not overwrite the
-    // last good save with a near-empty snapshot. Once loadLayout has settled
-    // (ready=true), every save reflects a fully restored layout.
     if (!get().ready) return;
-    const { layout, sessions, serializers } = get();
+    const { activeTabId, sessions, serializers } = get();
+    const currentTabs = getSyncedTabs(get());
     const snapshot = {
-      layout,
+      tabs: currentTabs.map((t) => ({
+        id: t.id,
+        ...(t.title !== undefined ? { title: t.title } : {}),
+        layout: t.layout,
+        focusedPath: t.focusedPath,
+      })),
+      activeTabId: activeTabId || currentTabs[0]?.id || "tab-1",
       sessions: Object.values(sessions).map((s) => ({
         id: s.id,
         title: s.title,
@@ -378,31 +587,84 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     await cleanupStaleScrollbacks(Object.keys(sessions));
   },
 
-  // Restore a saved layout by re-spawning a fresh shell for every saved leaf,
-  // preloading previous scrollback snapshots, and migrating them to new ids.
+  // Restore a saved multi-tab (or legacy single-tab) layout.
   loadLayout: async () => {
     try {
       const saved = await transportLoadLayout();
       if (!saved) return;
       const parsed = JSON.parse(saved) as {
-        layout: Layout;
-        sessions: SessionInfo[];
+        tabs?: TabState[];
+        activeTabId?: string;
+        layout?: Layout;
+        sessions?: SessionInfo[];
       };
-      const byId = new Map(parsed.sessions.map((s) => [s.id, s]));
+      const byId = new Map((parsed.sessions ?? []).map((s) => [s.id, s]));
       const remap: Record<string, string> = {};
-      for (const oldId of leafIds(parsed.layout)) {
-        if (oldId === "") continue; // empty fresh-start leaf: nothing to spawn
-        const newId = await get().spawnSession(byId.get(oldId)?.cwd);
-        remap[oldId] = newId;
 
-        const prev = await loadScrollback(oldId);
-        if (prev) {
-          get().setRestoredScrollback(newId, prev);
-          await saveScrollback(newId, prev);
-          await deleteScrollback(oldId);
+      if (Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+        for (const tab of parsed.tabs) {
+          for (const oldId of leafIds(tab.layout)) {
+            if (oldId === "" || remap[oldId]) continue;
+            const newId = await get().spawnSession(byId.get(oldId)?.cwd);
+            remap[oldId] = newId;
+
+            const prev = await loadScrollback(oldId);
+            if (prev) {
+              get().setRestoredScrollback(newId, prev);
+              await saveScrollback(newId, prev);
+              await deleteScrollback(oldId);
+            }
+          }
         }
+
+        const restoredTabs: TabState[] = parsed.tabs.map((tab) => {
+          const remappedLayout = remapLeafIds(tab.layout, remap);
+          return {
+            id: tab.id,
+            ...(tab.title !== undefined ? { title: tab.title } : {}),
+            layout: remappedLayout,
+            focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
+          };
+        });
+
+        const activeTabId =
+          parsed.activeTabId && restoredTabs.some((t) => t.id === parsed.activeTabId)
+            ? parsed.activeTabId
+            : restoredTabs[0].id;
+        const activeTab = restoredTabs.find((t) => t.id === activeTabId) ?? restoredTabs[0];
+
+        set({
+          tabs: restoredTabs,
+          activeTabId,
+          layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
+          focusedPath: activeTab ? activeTab.focusedPath : [],
+        });
+      } else if (parsed.layout) {
+        for (const oldId of leafIds(parsed.layout)) {
+          if (oldId === "") continue;
+          const newId = await get().spawnSession(byId.get(oldId)?.cwd);
+          remap[oldId] = newId;
+
+          const prev = await loadScrollback(oldId);
+          if (prev) {
+            get().setRestoredScrollback(newId, prev);
+            await saveScrollback(newId, prev);
+            await deleteScrollback(oldId);
+          }
+        }
+        const remappedLayout = remapLeafIds(parsed.layout, remap);
+        const defaultTab: TabState = {
+          id: "tab-1",
+          layout: remappedLayout,
+          focusedPath: firstLeafPath(remappedLayout),
+        };
+        set({
+          tabs: [defaultTab],
+          activeTabId: defaultTab.id,
+          layout: remappedLayout,
+          focusedPath: defaultTab.focusedPath,
+        });
       }
-      set({ layout: remapLeafIds(parsed.layout, remap) });
     } finally {
       set({ ready: true });
     }
