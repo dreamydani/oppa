@@ -59,6 +59,12 @@ describe("terminalStore", () => {
       rightSidebarTab: "explorer",
       isWorkspaceLauncherOpen: false,
       maximizedSessionId: null,
+      activeAppMode: "terminal",
+      browserUrl: "",
+      browserHistory: [],
+      historyIndex: -1,
+      devicePreset: "responsive",
+      detectedPorts: [],
     });
     vi.clearAllMocks();
   });
@@ -1764,6 +1770,117 @@ describe("terminalStore", () => {
       expect(bgTab?.title).toBe("frontend");
       expect(bgTab?.isWizard).toBe(false);
       expect(bgTab?.layout).toEqual({ type: "leaf", id: "bg-1" });
+    });
+  });
+
+  describe("Browser store state and port detection", () => {
+    it("initializes activeAppMode to terminal and provides browser navigation actions", () => {
+      const { activeAppMode, setAppMode, navigateBrowser, browserUrl, browserGoBack, browserGoForward, browserReload } =
+        useTerminalStore.getState();
+      expect(activeAppMode).toBe("terminal");
+      expect(browserUrl).toBe("");
+      expect(useTerminalStore.getState().browserHistory).toEqual([]);
+      expect(useTerminalStore.getState().historyIndex).toBe(-1);
+
+      setAppMode("browser");
+      expect(useTerminalStore.getState().activeAppMode).toBe("browser");
+
+      navigateBrowser("http://localhost:5173");
+      expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
+      expect(useTerminalStore.getState().browserHistory).toEqual(["http://localhost:5173"]);
+      expect(useTerminalStore.getState().historyIndex).toBe(0);
+
+      navigateBrowser("https://github.com");
+      expect(useTerminalStore.getState().browserUrl).toBe("https://github.com");
+      expect(useTerminalStore.getState().browserHistory).toEqual([
+        "http://localhost:5173",
+        "https://github.com",
+      ]);
+      expect(useTerminalStore.getState().historyIndex).toBe(1);
+
+      browserGoBack();
+      expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
+      expect(useTerminalStore.getState().historyIndex).toBe(0);
+
+      // Going back at start of history does nothing
+      browserGoBack();
+      expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
+      expect(useTerminalStore.getState().historyIndex).toBe(0);
+
+      browserGoForward();
+      expect(useTerminalStore.getState().browserUrl).toBe("https://github.com");
+      expect(useTerminalStore.getState().historyIndex).toBe(1);
+
+      // Going forward at end of history does nothing
+      browserGoForward();
+      expect(useTerminalStore.getState().browserUrl).toBe("https://github.com");
+      expect(useTerminalStore.getState().historyIndex).toBe(1);
+
+      // Navigating after going back truncates forward history
+      browserGoBack();
+      navigateBrowser("https://developer.mozilla.org");
+      expect(useTerminalStore.getState().browserUrl).toBe("https://developer.mozilla.org");
+      expect(useTerminalStore.getState().browserHistory).toEqual([
+        "http://localhost:5173",
+        "https://developer.mozilla.org",
+      ]);
+      expect(useTerminalStore.getState().historyIndex).toBe(1);
+
+      // Reload does not corrupt history
+      browserReload();
+      expect(useTerminalStore.getState().browserUrl).toBe("https://developer.mozilla.org");
+      expect(useTerminalStore.getState().historyIndex).toBe(1);
+    });
+
+    it("handles device presets (responsive, iphone, ipad, desktop)", () => {
+      const { setDevicePreset } = useTerminalStore.getState();
+      expect(useTerminalStore.getState().devicePreset).toBe("responsive");
+
+      setDevicePreset("iphone");
+      expect(useTerminalStore.getState().devicePreset).toBe("iphone");
+
+      setDevicePreset("ipad");
+      expect(useTerminalStore.getState().devicePreset).toBe("ipad");
+
+      setDevicePreset("desktop");
+      expect(useTerminalStore.getState().devicePreset).toBe("desktop");
+
+      setDevicePreset("responsive");
+      expect(useTerminalStore.getState().devicePreset).toBe("responsive");
+    });
+
+    it("tracks detected localhost ports from addDetectedPort and clearDetectedPorts", () => {
+      const { addDetectedPort, clearDetectedPorts } = useTerminalStore.getState();
+      expect(useTerminalStore.getState().detectedPorts).toEqual([]);
+
+      addDetectedPort({ port: 5173, url: "http://localhost:5173", title: "Vite Dev Server", timestamp: 1000 });
+      expect(useTerminalStore.getState().detectedPorts).toEqual([
+        { port: 5173, url: "http://localhost:5173", title: "Vite Dev Server", timestamp: 1000 },
+      ]);
+
+      // Adding existing port updates it rather than duplicating
+      addDetectedPort({ port: 5173, url: "http://localhost:5173", title: "Vite App", timestamp: 2000 });
+      expect(useTerminalStore.getState().detectedPorts).toEqual([
+        { port: 5173, url: "http://localhost:5173", title: "Vite App", timestamp: 2000 },
+      ]);
+
+      addDetectedPort({ port: 3000, url: "http://localhost:3000" });
+      expect(useTerminalStore.getState().detectedPorts.length).toBe(2);
+
+      clearDetectedPorts();
+      expect(useTerminalStore.getState().detectedPorts).toEqual([]);
+    });
+
+    it("scans output text and auto-registers localhost ports", () => {
+      const { scanOutputForPorts } = useTerminalStore.getState();
+      scanOutputForPorts("  VITE v5.4.1  ready in 240 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: http://192.168.1.5:5173/\n");
+
+      const ports = useTerminalStore.getState().detectedPorts;
+      expect(ports.some((p) => p.port === 5173)).toBe(true);
+
+      scanOutputForPorts("Server listening on http://127.0.0.1:8080");
+      const updatedPorts = useTerminalStore.getState().detectedPorts;
+      expect(updatedPorts.some((p) => p.port === 8080)).toBe(true);
     });
   });
 });

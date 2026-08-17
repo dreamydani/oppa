@@ -50,6 +50,16 @@ export interface WorkspaceConfig {
 
 export type SessionStatus = "running" | "exited" | "error";
 
+export type AppMode = "terminal" | "browser";
+export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
+
+export interface DetectedPort {
+  port: number;
+  url: string;
+  title: string;
+  timestamp: number;
+}
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -109,6 +119,12 @@ export interface TerminalState {
   // startup; the UI stays hidden until then so a restore never races the
   // placeholder auto-spawn in SessionLeaf.
   ready: boolean;
+  activeAppMode: AppMode;
+  browserUrl: string;
+  browserHistory: string[];
+  historyIndex: number;
+  devicePreset: DevicePreset;
+  detectedPorts: DetectedPort[];
   registerSerializer: (id: string, fn: () => string) => void;
   unregisterSerializer: (id: string) => void;
   cacheScrollback: (id: string, buffer: string) => void;
@@ -165,6 +181,15 @@ export interface TerminalState {
   launchCustomWorkspace: (config: WorkspaceConfig) => Promise<string>;
   addRecentWorkspace: (recent: RecentWorkspace) => Promise<void>;
   saveWorkspacePreset: (preset: WorkspacePreset) => Promise<void>;
+  setAppMode: (mode: AppMode) => void;
+  navigateBrowser: (url: string) => void;
+  browserGoBack: () => void;
+  browserGoForward: () => void;
+  browserReload: () => void;
+  setDevicePreset: (preset: DevicePreset) => void;
+  addDetectedPort: (portInfo: { port: number; url: string; title?: string; timestamp?: number }) => void;
+  clearDetectedPorts: () => void;
+  scanOutputForPorts: (text: string) => void;
 }
 
 function getSyncedTabs(state: TerminalState): TabState[] {
@@ -222,6 +247,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   wizardStep: 1,
   recentWorkspaces: [],
   workspacePresets: [],
+  activeAppMode: "terminal",
+  browserUrl: "",
+  browserHistory: [],
+  historyIndex: -1,
+  devicePreset: "responsive",
+  detectedPorts: [],
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -1006,5 +1037,89 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
     void get().saveLayout().catch(() => {});
     return tabId;
+  },
+
+  setAppMode: (mode) => set({ activeAppMode: mode }),
+
+  navigateBrowser: (url) => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      set({ browserUrl: "", browserHistory: [], historyIndex: -1 });
+      return;
+    }
+    set((state) => {
+      const currentHistory = state.browserHistory.slice(0, state.historyIndex + 1);
+      const newHistory = [...currentHistory, trimmed];
+      return {
+        browserUrl: trimmed,
+        browserHistory: newHistory,
+        historyIndex: newHistory.length - 1,
+      };
+    });
+  },
+
+  browserGoBack: () => {
+    set((state) => {
+      if (state.historyIndex <= 0) return state;
+      const nextIndex = state.historyIndex - 1;
+      return {
+        historyIndex: nextIndex,
+        browserUrl: state.browserHistory[nextIndex] ?? state.browserUrl,
+      };
+    });
+  },
+
+  browserGoForward: () => {
+    set((state) => {
+      if (state.historyIndex >= state.browserHistory.length - 1) return state;
+      const nextIndex = state.historyIndex + 1;
+      return {
+        historyIndex: nextIndex,
+        browserUrl: state.browserHistory[nextIndex] ?? state.browserUrl,
+      };
+    });
+  },
+
+  browserReload: () => {
+    const { browserUrl } = get();
+    if (browserUrl) {
+      set({ browserUrl });
+    }
+  },
+
+  setDevicePreset: (preset) => set({ devicePreset: preset }),
+
+  addDetectedPort: (portInfo) => {
+    set((state) => {
+      const title = portInfo.title ?? `Port ${portInfo.port}`;
+      const timestamp = portInfo.timestamp ?? Date.now();
+      const entry: DetectedPort = {
+        port: portInfo.port,
+        url: portInfo.url,
+        title,
+        timestamp,
+      };
+      const existingIndex = state.detectedPorts.findIndex((p) => p.port === portInfo.port);
+      if (existingIndex >= 0) {
+        const updated = [...state.detectedPorts];
+        updated[existingIndex] = entry;
+        return { detectedPorts: updated };
+      }
+      return { detectedPorts: [...state.detectedPorts, entry] };
+    });
+  },
+
+  clearDetectedPorts: () => set({ detectedPorts: [] }),
+
+  scanOutputForPorts: (text: string) => {
+    const portRegex = /(?:https?:\/\/)?(?:localhost|127\.0\.0\.1):([0-9]{2,5})/gi;
+    let match: RegExpExecArray | null;
+    while ((match = portRegex.exec(text)) !== null) {
+      const port = parseInt(match[1], 10);
+      if (port > 0 && port <= 65535) {
+        const url = `http://localhost:${port}`;
+        get().addDetectedPort({ port, url, title: `Localhost :${port}`, timestamp: Date.now() });
+      }
+    }
   },
 }));
