@@ -67,6 +67,7 @@ export interface TabState {
   title?: string;
   layout: Layout;
   focusedPath: Path;
+  isWizard?: boolean;
 }
 
 // Monotonic counter for synthetic error-session ids and tab ids. Avoids
@@ -159,6 +160,8 @@ export interface TerminalState {
   closeSetupWizard: () => void;
   setWizardStep: (step: 1 | 2 | 3) => void;
   loadWizardData: () => Promise<void>;
+  createWizardTab: () => string;
+  launchWorkspaceForTab: (tabId: string, config: WorkspaceConfig) => Promise<void>;
   launchCustomWorkspace: (config: WorkspaceConfig) => Promise<string>;
   addRecentWorkspace: (recent: RecentWorkspace) => Promise<void>;
   saveWorkspacePreset: (preset: WorkspacePreset) => Promise<void>;
@@ -689,6 +692,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       tabs: currentTabs.map((t) => ({
         id: t.id,
         ...(t.title !== undefined ? { title: t.title } : {}),
+        ...(t.isWizard !== undefined ? { isWizard: t.isWizard } : {}),
         layout: t.layout,
         focusedPath: t.focusedPath,
       })),
@@ -747,6 +751,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           return {
             id: tab.id,
             ...(tab.title !== undefined ? { title: tab.title } : {}),
+            ...(tab.isWizard !== undefined ? { isWizard: tab.isWizard } : {}),
             layout: remappedLayout,
             focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
           };
@@ -865,6 +870,86 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     } catch {
       // Best-effort persistence
     }
+  },
+
+  createWizardTab: () => {
+    const tabId = `tab-${++nextTabId}`;
+    const newTab: TabState = {
+      id: tabId,
+      title: "New Workspace",
+      isWizard: true,
+      layout: { type: "leaf", id: "" },
+      focusedPath: [],
+    };
+    set((state) => {
+      const currentTabs = getSyncedTabs(state);
+      const tabs = [...currentTabs, newTab];
+      return {
+        tabs,
+        activeTabId: tabId,
+        layout: newTab.layout,
+        focusedPath: newTab.focusedPath,
+      };
+    });
+    void get().saveLayout().catch(() => {});
+    return tabId;
+  },
+
+  launchWorkspaceForTab: async (tabId, config) => {
+    const count = Math.max(1, config.terminalCount || 1);
+    const sessionIds: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = await get().spawnSession(config.cwd, config.shell);
+      sessionIds.push(id);
+      if (config.commands && config.commands[i] && config.commands[i].trim()) {
+        const cmd = config.commands[i].trim();
+        void ptyWrite(id, `${cmd}\n`).catch(() => {});
+      }
+    }
+
+    const layout = createGridLayout(count, sessionIds);
+
+    let title = config.name?.trim();
+    if (!title && config.cwd) {
+      const normalized = config.cwd.replace(/[\\/]+$/, "");
+      const parts = normalized.split(/[\\/]/);
+      title = parts[parts.length - 1] || config.cwd;
+    }
+    if (!title) {
+      title = `Workspace ${tabId.replace("tab-", "")}`;
+    }
+
+    const targetFocusedPath = firstLeafPath(layout);
+
+    set((state) => {
+      const currentTabs = getSyncedTabs(state);
+      const tabs = currentTabs.map((t) =>
+        t.id === tabId
+          ? {
+              ...t,
+              title,
+              isWizard: false,
+              layout,
+              focusedPath: targetFocusedPath,
+            }
+          : t,
+      );
+      const isActive = state.activeTabId === tabId;
+      return {
+        tabs,
+        ...(isActive ? { layout, focusedPath: targetFocusedPath } : {}),
+      };
+    });
+
+    const recentEntry: RecentWorkspace = {
+      name: title,
+      path: config.cwd || "",
+      terminal_count: count,
+      last_opened: Date.now(),
+    };
+    await get().addRecentWorkspace(recentEntry);
+
+    void get().saveLayout().catch(() => {});
   },
 
   launchCustomWorkspace: async (config) => {

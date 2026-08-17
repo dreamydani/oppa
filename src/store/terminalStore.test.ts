@@ -1634,6 +1634,137 @@ describe("terminalStore", () => {
       const activeTab = state.tabs.find((t) => t.id === tabId);
       expect(activeTab?.title).toBe("my-app");
     });
+
+    it("createWizardTab appends a new tab with isWizard=true and activates it", () => {
+      useTerminalStore.setState({
+        tabs: [{ id: "tab-1", title: "Shell", layout: { type: "leaf", id: "s-1" }, focusedPath: [] }],
+        activeTabId: "tab-1",
+        ready: true,
+      });
+
+      const wizardTabId = useTerminalStore.getState().createWizardTab();
+      const state = useTerminalStore.getState();
+
+      expect(state.activeTabId).toBe(wizardTabId);
+      expect(state.tabs).toHaveLength(2);
+
+      const wizardTab = state.tabs.find((t) => t.id === wizardTabId);
+      expect(wizardTab).toBeDefined();
+      expect(wizardTab?.title).toBe("New Workspace");
+      expect(wizardTab?.isWizard).toBe(true);
+      expect(wizardTab?.layout).toEqual({ type: "leaf", id: "" });
+      expect(wizardTab?.focusedPath).toEqual([]);
+      expect(state.layout).toEqual({ type: "leaf", id: "" });
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("selectTab allows switching between terminal tabs and wizard tabs", () => {
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-1", title: "Terminal", layout: { type: "leaf", id: "s-1" }, focusedPath: [] },
+          { id: "tab-2", title: "New Workspace", isWizard: true, layout: { type: "leaf", id: "" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s-1" },
+        focusedPath: [],
+      });
+
+      useTerminalStore.getState().selectTab("tab-2");
+      let state = useTerminalStore.getState();
+      expect(state.activeTabId).toBe("tab-2");
+      expect(state.layout).toEqual({ type: "leaf", id: "" });
+
+      useTerminalStore.getState().selectTab("tab-1");
+      state = useTerminalStore.getState();
+      expect(state.activeTabId).toBe("tab-1");
+      expect(state.layout).toEqual({ type: "leaf", id: "s-1" });
+    });
+
+    it("launchWorkspaceForTab spawns sessions, updates tab layout, title, recents, and sets isWizard=false", async () => {
+      ptySpawnMock
+        .mockResolvedValueOnce("w-1")
+        .mockResolvedValueOnce("w-2");
+
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-1", title: "Shell", layout: { type: "leaf", id: "s-1" }, focusedPath: [] },
+          { id: "tab-2", title: "New Workspace", isWizard: true, layout: { type: "leaf", id: "" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-2",
+        layout: { type: "leaf", id: "" },
+        focusedPath: [],
+        ready: true,
+      });
+
+      await useTerminalStore.getState().launchWorkspaceForTab("tab-2", {
+        name: "Backend Service",
+        cwd: "D:\\repos\\backend",
+        terminalCount: 2,
+        shell: "powershell.exe",
+        commands: ["pnpm start", "pnpm test"],
+      });
+
+      expect(ptySpawnMock).toHaveBeenCalledTimes(2);
+      expect(ptySpawnMock).toHaveBeenCalledWith({
+        cwd: "D:\\repos\\backend",
+        shell: "powershell.exe",
+      });
+
+      expect(ptyWriteMock).toHaveBeenCalledWith("w-1", "pnpm start\n");
+      expect(ptyWriteMock).toHaveBeenCalledWith("w-2", "pnpm test\n");
+
+      const state = useTerminalStore.getState();
+      const launchedTab = state.tabs.find((t) => t.id === "tab-2");
+      expect(launchedTab).toBeDefined();
+      expect(launchedTab?.title).toBe("Backend Service");
+      expect(launchedTab?.isWizard).toBe(false);
+      expect(launchedTab?.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "w-1" },
+        b: { type: "leaf", id: "w-2" },
+      });
+
+      // Active tab layout should sync since tab-2 was active
+      expect(state.layout).toEqual(launchedTab?.layout);
+      expect(state.recentWorkspaces[0]).toMatchObject({
+        name: "Backend Service",
+        path: "D:\\repos\\backend",
+        terminal_count: 2,
+      });
+      expect(saveRecentsMock).toHaveBeenCalled();
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("launchWorkspaceForTab for a background tab updates that tab without disturbing active tab layout", async () => {
+      ptySpawnMock.mockResolvedValueOnce("bg-1");
+
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-1", title: "Active Tab", layout: { type: "leaf", id: "active-s" }, focusedPath: [] },
+          { id: "tab-2", title: "New Workspace", isWizard: true, layout: { type: "leaf", id: "" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "active-s" },
+        focusedPath: [],
+        ready: true,
+      });
+
+      await useTerminalStore.getState().launchWorkspaceForTab("tab-2", {
+        cwd: "D:\\repos\\frontend",
+        terminalCount: 1,
+      });
+
+      const state = useTerminalStore.getState();
+      expect(state.activeTabId).toBe("tab-1");
+      expect(state.layout).toEqual({ type: "leaf", id: "active-s" });
+
+      const bgTab = state.tabs.find((t) => t.id === "tab-2");
+      expect(bgTab?.title).toBe("frontend");
+      expect(bgTab?.isWizard).toBe(false);
+      expect(bgTab?.layout).toEqual({ type: "leaf", id: "bg-1" });
+    });
   });
 });
 
