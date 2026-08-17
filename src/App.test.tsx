@@ -16,6 +16,10 @@ vi.mock("./lib/pty/transport", () => ({
   onPtyExit: vi.fn().mockResolvedValue(vi.fn()),
   saveLayout: vi.fn().mockResolvedValue(undefined),
   loadLayout: vi.fn().mockResolvedValue(null),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

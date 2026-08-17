@@ -6,6 +6,10 @@ import {
   ptyAck,
   saveLayout as transportSaveLayout,
   loadLayout as transportLoadLayout,
+  saveScrollback,
+  loadScrollback,
+  deleteScrollback,
+  cleanupStaleScrollbacks,
 } from "../lib/pty/transport";
 import {
   split,
@@ -64,10 +68,16 @@ interface TerminalState {
   sessions: Record<string, SessionInfo>;
   layout: Layout;
   focusedPath: Path;
+  serializers: Record<string, () => string>;
+  restoredScrollbacks: Record<string, string>;
   // True once the persisted layout has been loaded (or failed to load) on
   // startup; the UI stays hidden until then so a restore never races the
   // placeholder auto-spawn in SessionLeaf.
   ready: boolean;
+  registerSerializer: (id: string, fn: () => string) => void;
+  unregisterSerializer: (id: string) => void;
+  setRestoredScrollback: (id: string, data: string) => void;
+  clearRestoredScrollback: (id: string) => void;
   spawnSession: (cwd?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
@@ -89,7 +99,33 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
   layout: { type: "leaf", id: "" },
   focusedPath: [],
+  serializers: {},
+  restoredScrollbacks: {},
   ready: false,
+
+  registerSerializer: (id, fn) =>
+    set((state) => ({
+      serializers: { ...state.serializers, [id]: fn },
+    })),
+
+  unregisterSerializer: (id) =>
+    set((state) => {
+      const serializers = { ...state.serializers };
+      delete serializers[id];
+      return { serializers };
+    }),
+
+  setRestoredScrollback: (id, data) =>
+    set((state) => ({
+      restoredScrollbacks: { ...state.restoredScrollbacks, [id]: data },
+    })),
+
+  clearRestoredScrollback: (id) =>
+    set((state) => {
+      const restoredScrollbacks = { ...state.restoredScrollbacks };
+      delete restoredScrollbacks[id];
+      return { restoredScrollbacks };
+    }),
 
   spawnSession: async (cwd) => {
     try {
@@ -269,6 +305,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (get().sessions[removedId]) {
       await get().killSession(removedId);
     }
+    if (removedId) {
+      void deleteScrollback(removedId).catch(() => {});
+    }
     // The removed leaf id is gone from the tree: drop its session too so
     // killed sessions do not accumulate in the store forever.
     const sessions = { ...get().sessions };
@@ -311,16 +350,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
   },
 
-  // Persist the current pane layout + session state (NOT scrollback) so the
-  // next launch can restore the same arrangement of fresh shells. Serialized
-  // sessions carry only the metadata needed to re-spawn: id, title, status,
-  // cwd, cols, rows.
+  // Persist the current pane layout, session state, and active scrollbacks.
   saveLayout: async () => {
     // Guard: a beforeunload during the startup restore must not overwrite the
     // last good save with a near-empty snapshot. Once loadLayout has settled
     // (ready=true), every save reflects a fully restored layout.
     if (!get().ready) return;
-    const { layout, sessions } = get();
+    const { layout, sessions, serializers } = get();
     const snapshot = {
       layout,
       sessions: Object.values(sessions).map((s) => ({
@@ -333,15 +369,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       })),
     };
     await transportSaveLayout(JSON.stringify(snapshot));
+    for (const s of Object.values(sessions)) {
+      const buffer = serializers[s.id]?.();
+      if (buffer) {
+        await saveScrollback(s.id, buffer);
+      }
+    }
+    await cleanupStaleScrollbacks(Object.keys(sessions));
   },
 
-  // Restore a saved layout by re-spawning a FRESH shell for every saved leaf
-  // (scrollback is deliberately not persisted — a restored session is a new
-  // shell in the same pane layout + cwd) and rebuilding the tree with the new
-  // ids. Saved ids from a previous run are stale, so every saved leaf is
-  // spawned in depth-first order and its id remapped to the fresh session id;
-  // a leaf whose spawn fails keeps an inline error session. The store is
-  // marked ready in all outcomes so the UI can render even when restore fails.
+  // Restore a saved layout by re-spawning a fresh shell for every saved leaf,
+  // preloading previous scrollback snapshots, and migrating them to new ids.
   loadLayout: async () => {
     try {
       const saved = await transportLoadLayout();
@@ -354,7 +392,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const remap: Record<string, string> = {};
       for (const oldId of leafIds(parsed.layout)) {
         if (oldId === "") continue; // empty fresh-start leaf: nothing to spawn
-        remap[oldId] = await get().spawnSession(byId.get(oldId)?.cwd);
+        const newId = await get().spawnSession(byId.get(oldId)?.cwd);
+        remap[oldId] = newId;
+
+        const prev = await loadScrollback(oldId);
+        if (prev) {
+          get().setRestoredScrollback(newId, prev);
+          await saveScrollback(newId, prev);
+          await deleteScrollback(oldId);
+        }
       }
       set({ layout: remapLeafIds(parsed.layout, remap) });
     } finally {

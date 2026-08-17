@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -33,6 +34,9 @@ export function TerminalPane({ id }: { id: string }) {
   const session = useTerminalStore((s) => s.sessions[id]);
   const ackSession = useTerminalStore((s) => s.ackSession);
   const resizeSession = useTerminalStore((s) => s.resizeSession);
+  const registerSerializer = useTerminalStore((s) => s.registerSerializer);
+  const unregisterSerializer = useTerminalStore((s) => s.unregisterSerializer);
+  const clearRestoredScrollback = useTerminalStore((s) => s.clearRestoredScrollback);
 
   const handleLinkClick = useCallback((_event: MouseEvent, uri: string) => {
     openUrl(uri).catch(() => {
@@ -62,15 +66,26 @@ export function TerminalPane({ id }: { id: string }) {
     const unicode11 = new Unicode11Addon();
     const search = new SearchAddon();
     const webLinks = new WebLinksAddon(handleLinkClick);
+    const serialize = new SerializeAddon();
 
     term.loadAddon(fit);
     term.loadAddon(unicode11);
     term.unicode.activeVersion = "11";
     term.loadAddon(search);
     term.loadAddon(webLinks);
+    term.loadAddon(serialize);
     searchAddonRef.current = search;
 
+    registerSerializer(id, () => serialize.serialize());
+
     term.open(containerRef.current!);
+
+    const restoredScrollback = useTerminalStore.getState().restoredScrollbacks[id];
+    if (restoredScrollback) {
+      term.write(restoredScrollback);
+      term.writeln("\r\n\x1b[2m── [Session Restored] ──────────────────────────────────────\x1b[0m\r\n");
+      clearRestoredScrollback(id);
+    }
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -144,6 +159,7 @@ export function TerminalPane({ id }: { id: string }) {
     ro.observe(containerRef.current!);
 
     return () => {
+      unregisterSerializer(idRef.current);
       disposed = true;
       ro.disconnect();
       unsubs.forEach((u) => u());
@@ -151,7 +167,17 @@ export function TerminalPane({ id }: { id: string }) {
       termRef.current = null;
       searchAddonRef.current = null;
     };
-  }, [id, status, ackSession, resizeSession, handleLinkClick, closeSearch]);
+  }, [
+    id,
+    status,
+    ackSession,
+    resizeSession,
+    handleLinkClick,
+    closeSearch,
+    registerSerializer,
+    unregisterSerializer,
+    clearRestoredScrollback,
+  ]);
 
   if (!session) {
     return <div className="terminal-pane" />;

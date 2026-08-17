@@ -9,18 +9,28 @@ vi.mock("../lib/pty/transport", () => ({
   ptyAck: vi.fn().mockResolvedValue(undefined),
   saveLayout: vi.fn(),
   loadLayout: vi.fn(),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
 }));
 
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
 const saveLayoutMock = vi.mocked(transport.saveLayout);
 const loadLayoutMock = vi.mocked(transport.loadLayout);
+const saveScrollbackMock = vi.mocked(transport.saveScrollback);
+const loadScrollbackMock = vi.mocked(transport.loadScrollback);
+const deleteScrollbackMock = vi.mocked(transport.deleteScrollback);
+const cleanupStaleScrollbacksMock = vi.mocked(transport.cleanupStaleScrollbacks);
 
 describe("terminalStore", () => {
   beforeEach(() => {
     useTerminalStore.setState({
       sessions: {},
       layout: { type: "leaf", id: "" },
+      serializers: {},
+      restoredScrollbacks: {},
       ready: false,
     });
     vi.clearAllMocks();
@@ -133,6 +143,21 @@ describe("terminalStore", () => {
     });
     useTerminalStore.getState().updateSessionCwd("nonexistent", "C:\\new");
     expect(useTerminalStore.getState().sessions["nonexistent"]).toBeUndefined();
+  });
+
+  it("registerSerializer and unregisterSerializer manage active serializers", () => {
+    const fn = () => "test-buffer";
+    useTerminalStore.getState().registerSerializer("abc", fn);
+    expect(useTerminalStore.getState().serializers["abc"]).toBe(fn);
+    useTerminalStore.getState().unregisterSerializer("abc");
+    expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
+  });
+
+  it("setRestoredScrollback and clearRestoredScrollback manage restored scrollback state", () => {
+    useTerminalStore.getState().setRestoredScrollback("abc", "restored content");
+    expect(useTerminalStore.getState().restoredScrollbacks["abc"]).toBe("restored content");
+    useTerminalStore.getState().clearRestoredScrollback("abc");
+    expect(useTerminalStore.getState().restoredScrollbacks["abc"]).toBeUndefined();
   });
 
   it("setLayout replaces the layout tree", () => {
@@ -310,6 +335,26 @@ describe("terminalStore", () => {
     await useTerminalStore.getState().closePane();
     expect(ptyKillMock).toHaveBeenCalledWith("a");
     expect(useTerminalStore.getState().sessions).toEqual({});
+  });
+
+  it("closePane prunes scrollback from disk via deleteScrollback", async () => {
+    ptyKillMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+        b: { id: "b", title: "b", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      focusedPath: [0],
+    });
+    await useTerminalStore.getState().closePane();
+    expect(deleteScrollbackMock).toHaveBeenCalledWith("a");
   });
 
   it("closePane re-focuses the depth-first leftmost remaining leaf via firstLeafPath", async () => {
@@ -605,6 +650,33 @@ describe("terminalStore", () => {
       });
     });
 
+    it("captures active serializer buffers and cleans up stale scrollbacks", async () => {
+      useTerminalStore.setState({
+        sessions: {
+          a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+          b: { id: "b", title: "b", status: "running", cols: 80, rows: 24 },
+          c: { id: "c", title: "c", status: "exited", cols: 80, rows: 24 },
+        },
+        serializers: {
+          a: () => "buffer-a-content",
+          b: () => "",
+        },
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+      });
+      await useTerminalStore.getState().saveLayout();
+      expect(saveScrollbackMock).toHaveBeenCalledWith("a", "buffer-a-content");
+      expect(saveScrollbackMock).not.toHaveBeenCalledWith("b", expect.anything());
+      expect(cleanupStaleScrollbacksMock).toHaveBeenCalledWith(
+        expect.arrayContaining(["a", "b", "c"]),
+      );
+    });
+
     it("propagates transport failures instead of swallowing them", async () => {
       saveLayoutMock.mockRejectedValue(new Error("disk full"));
       await expect(useTerminalStore.getState().saveLayout()).rejects.toThrow(
@@ -695,6 +767,41 @@ describe("terminalStore", () => {
       expect(Object.keys(sessions)).toEqual(["new-left", "new-top", "new-right"]);
       expect(sessions["new-left"].cwd).toBe("C:\\a");
       expect(JSON.stringify(layout)).not.toContain("old-");
+    });
+
+    it("restores saved scrollbacks, sets restored state, and migrates snapshot on disk", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "old-1" },
+            b: { type: "leaf", id: "old-2" },
+          },
+          sessions: [
+            { id: "old-1", title: "s1", status: "running", cwd: "C:\\a", cols: 80, rows: 24 },
+            { id: "old-2", title: "s2", status: "running", cwd: "C:\\b", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock
+        .mockResolvedValueOnce("new-1")
+        .mockResolvedValueOnce("new-2");
+      loadScrollbackMock.mockImplementation(async (id) => {
+        if (id === "old-1") return "scrollback-1";
+        return null;
+      });
+
+      await useTerminalStore.getState().loadLayout();
+
+      expect(loadScrollbackMock).toHaveBeenCalledWith("old-1");
+      expect(loadScrollbackMock).toHaveBeenCalledWith("old-2");
+      expect(useTerminalStore.getState().restoredScrollbacks["new-1"]).toBe("scrollback-1");
+      expect(useTerminalStore.getState().restoredScrollbacks["new-2"]).toBeUndefined();
+      expect(saveScrollbackMock).toHaveBeenCalledWith("new-1", "scrollback-1");
+      expect(deleteScrollbackMock).toHaveBeenCalledWith("old-1");
+      expect(deleteScrollbackMock).not.toHaveBeenCalledWith("old-2");
     });
 
     it("keeps a leaf as an error session when its spawn fails", async () => {

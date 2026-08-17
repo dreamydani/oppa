@@ -29,6 +29,7 @@ const xtermState = vi.hoisted(() => ({
 const addonState = vi.hoisted(() => ({
   unicode11Instances: [] as unknown[],
   searchInstances: [] as unknown[],
+  serializeInstances: [] as { serialize: ReturnType<typeof vi.fn> }[],
   webLinksInstances: [] as { handler?: (event: MouseEvent, uri: string) => void }[],
   webglInstances: [] as { onContextLoss: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; contextLossCallback?: () => void }[],
   canvasInstances: [] as unknown[],
@@ -85,6 +86,16 @@ vi.mock("@xterm/addon-search", () => {
     }
   }
   return { SearchAddon: MockSearchAddon };
+});
+
+vi.mock("@xterm/addon-serialize", () => {
+  class MockSerializeAddon {
+    serialize = vi.fn().mockReturnValue("mocked-serialized-buffer");
+    constructor() {
+      addonState.serializeInstances.push(this);
+    }
+  }
+  return { SerializeAddon: MockSerializeAddon };
 });
 
 vi.mock("@xterm/addon-web-links", () => {
@@ -158,6 +169,7 @@ describe("TerminalPane", () => {
     xtermState.instances.length = 0;
     addonState.unicode11Instances.length = 0;
     addonState.searchInstances.length = 0;
+    addonState.serializeInstances.length = 0;
     addonState.webLinksInstances.length = 0;
     addonState.webglInstances.length = 0;
     addonState.canvasInstances.length = 0;
@@ -168,6 +180,8 @@ describe("TerminalPane", () => {
         abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
       },
       layout: { type: "leaf", id: "abc" },
+      serializers: {},
+      restoredScrollbacks: {},
     });
     vi.stubGlobal(
       "ResizeObserver",
@@ -424,7 +438,7 @@ describe("TerminalPane", () => {
     expect(unlistenData).toHaveBeenCalledTimes(1);
   });
 
-  it("loads Unicode11Addon, SearchAddon, WebLinksAddon, and WebglAddon and activates unicode 11", async () => {
+  it("loads Unicode11Addon, SearchAddon, WebLinksAddon, SerializeAddon, and WebglAddon and activates unicode 11", async () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
@@ -432,8 +446,36 @@ describe("TerminalPane", () => {
     expect(term().unicode.activeVersion).toBe("11");
     expect(addonState.searchInstances.length).toBe(1);
     expect(addonState.webLinksInstances.length).toBe(1);
+    expect(addonState.serializeInstances.length).toBe(1);
     expect(addonState.webglInstances.length).toBe(1);
-    expect(term().loadAddon).toHaveBeenCalledTimes(5); // fit, unicode11, search, webLinks, webgl
+    expect(term().loadAddon).toHaveBeenCalledTimes(6); // fit, unicode11, search, webLinks, serialize, webgl
+  });
+
+  it("registers serializer in store on mount and unregisters on unmount", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const serializer = useTerminalStore.getState().serializers["abc"];
+    expect(serializer).toBeDefined();
+    expect(serializer?.()).toBe("mocked-serialized-buffer");
+
+    unmount();
+    expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
+  });
+
+  it("replays restored scrollback, prints Session Restored banner, and clears restored state on mount", async () => {
+    useTerminalStore.setState({
+      restoredScrollbacks: { abc: "saved lines\r\n" },
+    });
+
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(term().write).toHaveBeenCalledWith("saved lines\r\n");
+    expect(term().writeln).toHaveBeenCalledWith(
+      "\r\n\x1b[2m── [Session Restored] ──────────────────────────────────────\x1b[0m\r\n",
+    );
+    expect(useTerminalStore.getState().restoredScrollbacks["abc"]).toBeUndefined();
   });
 
   it("opens search overlay with selected text when Ctrl+F or Cmd+F is pressed in terminal", async () => {

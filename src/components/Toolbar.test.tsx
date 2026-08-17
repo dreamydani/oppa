@@ -10,6 +10,12 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn(),
+  saveLayout: vi.fn().mockResolvedValue(undefined),
+  loadLayout: vi.fn().mockResolvedValue(null),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
 }));
