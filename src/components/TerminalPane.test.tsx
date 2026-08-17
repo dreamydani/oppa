@@ -142,6 +142,7 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyKill: vi.fn().mockResolvedValue(undefined),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
 }));
@@ -151,6 +152,7 @@ const ptyWriteMock = vi.mocked(transport.ptyWrite);
 const ptyResizeMock = vi.mocked(transport.ptyResize);
 const ptyAckMock = vi.mocked(transport.ptyAck);
 const ptyKillMock = vi.mocked(transport.ptyKill);
+const saveScrollbackMock = vi.mocked(transport.saveScrollback);
 const onPtyDataMock = vi.mocked(transport.onPtyData);
 const onPtyExitMock = vi.mocked(transport.onPtyExit);
 const openUrlMock = vi.mocked(opener.openUrl);
@@ -203,6 +205,7 @@ describe("TerminalPane", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   function term() {
@@ -470,6 +473,52 @@ describe("TerminalPane", () => {
 
     unmount();
     expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
+    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
+  });
+
+  it("debounces saving scrollback to disk and caching in store after terminal write parsed events", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    vi.useFakeTimers();
+    expect(saveScrollbackMock).not.toHaveBeenCalled();
+
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+
+    // Before 500ms debounce
+    vi.advanceTimersByTime(400);
+    expect(saveScrollbackMock).not.toHaveBeenCalled();
+
+    // Another parsed event resets debounce timer
+    parsedHandler();
+    vi.advanceTimersByTime(400);
+    expect(saveScrollbackMock).not.toHaveBeenCalled();
+
+    // After remaining time
+    vi.advanceTimersByTime(100);
+    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
+  });
+
+  it("flushes scrollback immediately to disk and cancels pending debounce timer on unmount", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    vi.useFakeTimers();
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+
+    expect(saveScrollbackMock).not.toHaveBeenCalled();
+
+    unmount();
+    expect(saveScrollbackMock).toHaveBeenCalledTimes(1);
+    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
+
+    // Advancing timers should not cause another saveScrollback call
+    vi.advanceTimersByTime(1000);
+    expect(saveScrollbackMock).toHaveBeenCalledTimes(1);
   });
 
   it("replays restored scrollback, prints Session Restored banner, and clears restored state on mount", async () => {

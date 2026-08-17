@@ -13,6 +13,7 @@ import {
   ptyWrite,
   onPtyData,
   onPtyExit,
+  saveScrollback,
 } from "../lib/pty/transport";
 import { useTerminalStore } from "../store/terminalStore";
 import { TerminalSearch } from "./TerminalSearch";
@@ -123,11 +124,22 @@ export function TerminalPane({ id }: { id: string }) {
       return true;
     });
 
+    let flushTimer: NodeJS.Timeout | null = null;
+    const flushScrollback = () => {
+      const buffer = serializeAddonRef.current?.serialize();
+      if (buffer) {
+        useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
+        void saveScrollback(idRef.current, buffer).catch(() => {});
+      }
+    };
+
     term.onWriteParsed(() => {
       if (parsedRef.current > 0) {
         ackSession(idRef.current, parsedRef.current);
         parsedRef.current = 0;
       }
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(flushScrollback, 500);
     });
 
     onPtyData((p) => {
@@ -161,10 +173,11 @@ export function TerminalPane({ id }: { id: string }) {
     ro.observe(containerRef.current!);
 
     return () => {
-      const buffer = serializeAddonRef.current?.serialize();
-      if (buffer) {
-        useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
       }
+      flushScrollback();
       unregisterSerializer(idRef.current);
       disposed = true;
       ro.disconnect();
