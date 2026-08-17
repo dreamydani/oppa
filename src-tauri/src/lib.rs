@@ -1,4 +1,4 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod browser;
 mod fs;
 mod git;
 mod layout;
@@ -24,6 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
+        .manage(browser::manager::BrowserManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::commands::pty_spawn,
             pty::commands::pty_write,
@@ -43,6 +44,15 @@ pub fn run() {
             workspace_presets::load_recents,
             workspace_presets::save_presets,
             workspace_presets::load_presets,
+            browser::commands::browser_open,
+            browser::commands::browser_navigate,
+            browser::commands::browser_set_bounds,
+            browser::commands::browser_hide,
+            browser::commands::browser_show,
+            browser::commands::browser_go_back,
+            browser::commands::browser_go_forward,
+            browser::commands::browser_reload,
+            browser::commands::browser_open_devtools,
             confirm_save_complete,
         ])
         .setup(move |app| {
