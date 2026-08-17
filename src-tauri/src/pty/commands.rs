@@ -129,6 +129,38 @@ pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<String> {
     pty_list_impl(&manager)
 }
 
+#[tauri::command]
+pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), String> {
+    use tauri::Manager;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.save(&id, &data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_scrollback(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.load(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_scrollback(app: AppHandle, id: String) -> Result<(), String> {
+    use tauri::Manager;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.delete(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Result<(), String> {
+    use tauri::Manager;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.cleanup_stale(&active_ids).map_err(|e| e.to_string())
+}
+
 /// Shared body of `pty_list`: the session ids in registration order. Kept as
 /// a plain function so tests can exercise the real logic without a Tauri
 /// `State` guard (which would drag Tauri's runtime into the test binary and
