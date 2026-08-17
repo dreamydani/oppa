@@ -73,6 +73,7 @@ interface TerminalState {
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
+  updateSessionCwd: (id: string, cwd: string) => void;
   substituteSessionId: (from: string, to: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
@@ -182,6 +183,20 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
+  updateSessionCwd: (id, cwd) => {
+    set((state) => {
+      const session = state.sessions[id];
+      if (!session) return state;
+      if (session.cwd === cwd) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [id]: { ...session, cwd },
+        },
+      };
+    });
+  },
+
   // Replace every occurrence of leaf id `from` with `to` in the layout tree.
   // SessionLeaf uses this to bind a resolved spawn id to its placeholder
   // after the layout may have changed (split/close) while the spawn was in
@@ -230,7 +245,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   // session for the fresh leaf, rebuild the tree, and focus the new leaf.
   splitPane: async (dir, path) => {
     const target = path ?? get().focusedPath;
-    const id = await get().spawnSession();
+    const tree = get().layout;
+    const focusedId = focus(tree, target);
+    const currentCwd = get().sessions[focusedId]?.cwd;
+    const id = await get().spawnSession(currentCwd);
     set({
       layout: split(dir, get().layout, target, id),
       focusedPath: [...target, 1],

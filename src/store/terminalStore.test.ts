@@ -117,6 +117,24 @@ describe("terminalStore", () => {
     expect(useTerminalStore.getState().sessions["abc"].status).toBe("exited");
   });
 
+  it("updateSessionCwd updates a session's live cwd", () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cwd: "C:\\old", cols: 80, rows: 24 },
+      },
+    });
+    useTerminalStore.getState().updateSessionCwd("abc", "C:\\new");
+    expect(useTerminalStore.getState().sessions["abc"].cwd).toBe("C:\\new");
+  });
+
+  it("updateSessionCwd does nothing if the session does not exist", () => {
+    useTerminalStore.setState({
+      sessions: {},
+    });
+    useTerminalStore.getState().updateSessionCwd("nonexistent", "C:\\new");
+    expect(useTerminalStore.getState().sessions["nonexistent"]).toBeUndefined();
+  });
+
   it("setLayout replaces the layout tree", () => {
     const split = {
       type: "split",
@@ -149,9 +167,35 @@ describe("terminalStore", () => {
     expect(sessions["s1"]).toBeDefined();
   });
 
-  it("splitPane splits at an explicit path", async () => {
+  it("splitPane inherits live cwd from the focused session", async () => {
     ptySpawnMock.mockResolvedValue("s2");
     useTerminalStore.setState({
+      sessions: {
+        root: { id: "root", title: "root", status: "running", cwd: "D:\\oppa\\project", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "root" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().splitPane("v");
+    expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\oppa\\project" });
+    const { layout, focusedPath } = useTerminalStore.getState();
+    expect(layout).toEqual({
+      type: "split",
+      dir: "v",
+      ratio: 0.5,
+      a: { type: "leaf", id: "root" },
+      b: { type: "leaf", id: "s2" },
+    });
+    expect(focusedPath).toEqual([1]);
+  });
+
+  it("splitPane splits at an explicit path and inherits that leaf's cwd", async () => {
+    ptySpawnMock.mockResolvedValue("s2");
+    useTerminalStore.setState({
+      sessions: {
+        x: { id: "x", title: "x", status: "running", cwd: "C:\\path\\x", cols: 80, rows: 24 },
+        y: { id: "y", title: "y", status: "running", cwd: "C:\\path\\y", cols: 80, rows: 24 },
+      },
       layout: {
         type: "split",
         dir: "h",
@@ -162,6 +206,7 @@ describe("terminalStore", () => {
       focusedPath: [1],
     });
     await useTerminalStore.getState().splitPane("v", [0]);
+    expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "C:\\path\\x" });
     const { layout, focusedPath } = useTerminalStore.getState();
     expect(layout).toEqual({
       type: "split",

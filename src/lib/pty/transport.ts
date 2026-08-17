@@ -12,6 +12,10 @@ export interface PtyExitPayload {
   code: number | null;
   error?: string;
 }
+export interface PtyCwdPayload {
+  id: string;
+  cwd: string;
+}
 
 // Type alias (not interface) so it satisfies InvokeArgs' index signature.
 export type PtySpawnOptions = {
@@ -55,4 +59,7 @@ export async function onPtyData(cb: (p: PtyDataPayload) => void) {
 }
 export async function onPtyExit(cb: (p: PtyExitPayload) => void) {
   return listen<PtyExitPayload>("pty:exit", (e) => cb(e.payload));
+}
+export async function onPtyCwd(cb: (p: PtyCwdPayload) => void) {
+  return listen<PtyCwdPayload>("pty:cwd", (e) => cb(e.payload));
 }

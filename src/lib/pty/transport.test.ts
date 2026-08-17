@@ -12,6 +12,7 @@ import {
   loadLayout,
   onPtyData,
   onPtyExit,
+  onPtyCwd,
 } from "./transport";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -114,5 +115,19 @@ describe("pty transport", () => {
     }) => void;
     handler({ payload: { id: "abc", code: 0 } });
     expect(cb).toHaveBeenCalledWith({ id: "abc", code: 0 });
+  });
+
+  it("onPtyCwd subscribes to pty:cwd and forwards the payload", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onPtyCwd(cb);
+    expect(listenMock).toHaveBeenCalledWith("pty:cwd", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { id: string; cwd: string };
+    }) => void;
+    handler({ payload: { id: "abc", cwd: "C:\\work" } });
+    expect(cb).toHaveBeenCalledWith({ id: "abc", cwd: "C:\\work" });
+    expect(result).toBe(unlisten);
   });
 });

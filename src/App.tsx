@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { PaneSplit } from "./components/PaneSplit";
 import { Toolbar } from "./components/Toolbar";
 import { useTerminalStore } from "./store/terminalStore";
-import { confirmSaveComplete } from "./lib/pty/transport";
+import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
@@ -31,6 +31,16 @@ function App() {
       // pane (loadLayout still marks the store ready).
     });
   }, [loadLayout]);
+
+  // Subscribe to live PTY CWD updates and keep session CWD in sync.
+  useEffect(() => {
+    const unlistenPromise = onPtyCwd((p) => {
+      useTerminalStore.getState().updateSessionCwd(p.id, p.cwd);
+    });
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   // Persist the layout + session state on window close. Best-effort: a failed
   // save must not block the app from quitting.
