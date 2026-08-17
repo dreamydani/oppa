@@ -756,6 +756,13 @@
   line-height: 1.5;
 }
 
+.editor-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
 .editor-empty-create-btn {
   display: inline-flex;
   align-items: center;
@@ -774,3 +781,68 @@
 .editor-empty-create-btn:hover {
   opacity: 0.9;
 }
+
+.editor-empty-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--foreground, #ededec);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-sm, 4px);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.editor-empty-secondary-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.editor-quick-files {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 480px;
+}
+
+.editor-quick-files-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint, #71717a);
+}
+
+.editor-quick-files-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.editor-quick-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--muted-foreground, #9e9e9a);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-quick-file-chip:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--foreground, #ededec);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+

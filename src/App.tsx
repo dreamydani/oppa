@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
-import { RightSidebar } from "./components/RightSidebar";
+import { RightSidebar } from "./components/right-sidebar/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
 import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";

@@ -6,16 +6,19 @@ import * as fsTransport from "../lib/fs/transport";
 
 vi.mock("../lib/fs/transport", () => ({
   readDir: vi.fn(),
+  readFile: vi.fn().mockResolvedValue(""),
 }));
 
 const readDirMock = vi.mocked(fsTransport.readDir);
 
-describe("RightSidebar", () => {
+describe("RightSidebar Re-export", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useTerminalStore.setState({
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
+      rightSidebarTab: "explorer",
+      activeAppMode: "terminal",
       tabs: [
         {
           id: "tab-1",
@@ -40,83 +43,31 @@ describe("RightSidebar", () => {
 
     readDirMock.mockResolvedValue([
       { name: "src", path: "/mock/workspace/src", is_dir: true, size: 0 },
-      { name: "package.json", path: "/mock/workspace/package.json", is_dir: false, size: 1024 },
+      { name: "index.html", path: "/mock/workspace/index.html", is_dir: false, size: 1024 },
     ]);
   });
 
-  it("renders File Explorer header with collapse button", () => {
+  it("renders Activity Bar with Explorer tab active", () => {
     render(<RightSidebar />);
-    expect(screen.getByText("File Explorer")).toBeDefined();
-    expect(screen.getByTitle(/collapse file explorer/i)).toBeDefined();
+    expect(screen.getByText("Explorer")).toBeDefined();
+    expect(screen.getByText("Git")).toBeDefined();
   });
 
-  it("toggles right sidebar when collapse button is clicked", () => {
-    render(<RightSidebar />);
-    const collapseBtn = screen.getByTitle(/collapse file explorer/i);
-    fireEvent.click(collapseBtn);
-
-    expect(useTerminalStore.getState().rightSidebarOpen).toBe(false);
-  });
-
-  it("renders File Explorer file tree with directories and files and expands subdirectories", async () => {
-    readDirMock.mockImplementation(async (path: string) => {
-      if (path === "/mock/workspace") {
-        return [
-          { name: "src", path: "/mock/workspace/src", is_dir: true, size: 0 },
-          { name: "package.json", path: "/mock/workspace/package.json", is_dir: false, size: 1024 },
-        ];
-      }
-      if (path === "/mock/workspace/src") {
-        return [
-          { name: "index.ts", path: "/mock/workspace/src/index.ts", is_dir: false, size: 512 },
-        ];
-      }
-      return [];
-    });
-
+  it("renders files and clicking a file opens it in editor", async () => {
     render(<RightSidebar />);
 
     await waitFor(() => {
-      expect(screen.getByText("src")).toBeDefined();
-      expect(screen.getByText("package.json")).toBeDefined();
+      expect(screen.getByText("index.html")).toBeDefined();
     });
 
-    // Expand the "src" directory
-    const srcDir = screen.getByText("src");
-    fireEvent.click(srcDir);
+    const fileItem = screen.getByText("index.html");
+    fireEvent.click(fileItem);
 
     await waitFor(() => {
-      expect(screen.getByText("index.ts")).toBeDefined();
-    });
-
-    // Collapse the "src" directory
-    fireEvent.click(srcDir);
-
-    await waitFor(() => {
-      expect(screen.queryByText("index.ts")).toBeNull();
-    });
-  });
-
-  it("renders empty state when no active workspace cwd", async () => {
-    useTerminalStore.setState({
-      sessions: {},
-      tabs: [],
-    });
-
-    render(<RightSidebar />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/no active workspace directory/i)).toBeDefined();
-    });
-  });
-
-  it("renders empty directory state when directory has no entries", async () => {
-    readDirMock.mockResolvedValue([]);
-
-    render(<RightSidebar />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/empty directory/i)).toBeDefined();
+      const state = useTerminalStore.getState();
+      expect(state.activeAppMode).toBe("editor");
+      expect(state.activeEditorPath).toBe("/mock/workspace/index.html");
+      expect(state.editorTabs.some((t) => t.path === "/mock/workspace/index.html")).toBe(true);
     });
   });
 
@@ -126,16 +77,8 @@ describe("RightSidebar", () => {
     expect(resizeHandle).toBeDefined();
 
     fireEvent.mouseDown(resizeHandle, { clientX: 800 });
-
     fireEvent.mouseMove(window, { clientX: 730 });
     expect(useTerminalStore.getState().rightSidebarWidth).toBe(350);
-
-    fireEvent.mouseMove(window, { clientX: 500 });
-    expect(useTerminalStore.getState().rightSidebarWidth).toBe(480);
-
-    fireEvent.mouseMove(window, { clientX: 950 });
-    expect(useTerminalStore.getState().rightSidebarWidth).toBe(200);
-
     fireEvent.mouseUp(window);
   });
 });

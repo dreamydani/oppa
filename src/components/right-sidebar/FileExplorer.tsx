@@ -12,6 +12,7 @@ interface TreeNodeProps {
   depth: number;
   expandedPaths: Set<string>;
   dirChildren: Record<string, FileEntry[]>;
+  activeEditorPath: string | null;
   onToggleDir: (dirPath: string) => void;
   onOpenFile: (filePath: string) => void;
 }
@@ -21,16 +22,18 @@ function FileTreeNode({
   depth,
   expandedPaths,
   dirChildren,
+  activeEditorPath,
   onToggleDir,
   onOpenFile,
 }: TreeNodeProps): React.ReactElement {
   const isExpanded = expandedPaths.has(entry.path);
+  const isSelected = !entry.is_dir && activeEditorPath === entry.path;
   const children = dirChildren[entry.path] ?? [];
 
   return (
     <div className="file-tree-node">
       <div
-        className="file-tree-item"
+        className={`file-tree-item ${isSelected ? "selected" : ""}`}
         style={{ paddingLeft: `${depth * 14 + 8}px` }}
         onClick={() => {
           if (entry.is_dir) {
@@ -68,6 +71,7 @@ function FileTreeNode({
               depth={depth + 1}
               expandedPaths={expandedPaths}
               dirChildren={dirChildren}
+              activeEditorPath={activeEditorPath}
               onToggleDir={onToggleDir}
               onOpenFile={onOpenFile}
             />
@@ -79,9 +83,15 @@ function FileTreeNode({
 }
 
 export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.ReactElement {
-  const cwd = useTerminalStore((s) => s.getActiveCwd());
+  const activeCwd = useTerminalStore((s) => s.getActiveCwd());
+  const sessions = useTerminalStore((s) => s.sessions);
+  const activeEditorPath = useTerminalStore((s) => s.activeEditorPath);
   const openFileInEditor = useTerminalStore((s) => s.openFileInEditor);
   const setAppMode = useTerminalStore((s) => s.setAppMode);
+
+  // Use active session cwd or fallback to any session cwd
+  const cwd = activeCwd || Object.values(sessions).find((s) => Boolean(s?.cwd))?.cwd;
+
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [dirChildren, setDirChildren] = useState<Record<string, FileEntry[]>>({});
@@ -169,6 +179,7 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
             depth={0}
             expandedPaths={expandedPaths}
             dirChildren={dirChildren}
+            activeEditorPath={activeEditorPath}
             onToggleDir={handleToggleDir}
             onOpenFile={handleOpenFile}
           />
