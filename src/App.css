@@ -184,31 +184,25 @@ body,
 }
 
 .left-sidebar-top {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-divider);
+  padding: 10px 12px;
 }
 
 .sidebar-search-strip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .sidebar-search-box {
   display: flex;
   align-items: center;
   gap: 6px;
-  background-color: var(--bg-terminal);
-  border: 1px solid var(--border-divider);
+  background-color: transparent;
+  border: none;
   border-radius: 4px;
-  padding: 4px 8px;
+  padding: 4px 0;
   flex: 1;
   min-width: 0;
-  transition: border-color 0.15s ease;
-}
-
-.sidebar-search-box:focus-within {
-  border-color: var(--accent-blue);
 }
 
 .sidebar-search-icon {
@@ -233,7 +227,7 @@ body,
 
 .sidebar-icon-btn {
   background: transparent;
-  border: 1px solid var(--border-divider);
+  border: none;
   color: var(--text-muted);
   width: 26px;
   height: 26px;
@@ -243,23 +237,21 @@ body,
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .sidebar-icon-btn:hover {
   background-color: var(--bg-card-hover);
   color: var(--text-primary);
-  border-color: var(--border-active);
 }
 
 .left-sidebar-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: 4px 10px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
 .left-sidebar-body::-webkit-scrollbar,
@@ -269,28 +261,29 @@ body,
 
 .left-sidebar-body::-webkit-scrollbar-thumb,
 .right-sidebar-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
 .tab-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
 }
 
+/* Warp-style session cards */
 .tab-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border-radius: 6px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
   background-color: transparent;
   color: var(--text-muted);
-  border: 1px solid transparent;
+  border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   user-select: none;
 }
@@ -303,48 +296,65 @@ body,
 .tab-card.active {
   background-color: var(--bg-card-active);
   color: var(--text-primary);
-  border-color: var(--border-active);
-  font-weight: 500;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
-.tab-card-main {
+/* Dark rounded avatar badge */
+.tab-card-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background-color: #151820;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-
-.tab-card-icon {
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  color: var(--text-muted);
 }
 
-.tab-card.active .tab-card-icon {
+.tab-card.active .tab-card-avatar {
+  background-color: #1a1e28;
   color: var(--text-primary);
 }
 
-.tab-card-info {
+/* Content column: title row + cwd row */
+.tab-card-content {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
-  gap: 1px;
+  gap: 2px;
+}
+
+.tab-card-row-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tab-card-app-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--accent-blue);
+}
+
+.tab-card.active .tab-card-app-icon {
+  color: var(--accent-blue);
 }
 
 .tab-card-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: inherit;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .tab-card-cwd {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -368,9 +378,9 @@ body,
   background: transparent;
   border: none;
   color: var(--text-muted);
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -378,7 +388,6 @@ body,
   opacity: 0;
   transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
-  margin-left: 4px;
 }
 
 .tab-card:hover .tab-card-close {
@@ -388,83 +397,6 @@ body,
 .tab-card-close:hover {
   background-color: rgba(255, 255, 255, 0.1);
   color: var(--destructive);
-}
-
-.left-sidebar-section {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-divider);
-}
-
-.sidebar-section-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  margin-bottom: 6px;
-  padding: 0 4px;
-}
-
-.section-icon {
-  color: var(--text-muted);
-}
-
-.project-folder-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  color: var(--text-muted);
-  background-color: var(--bg-terminal);
-  border: 1px solid var(--border-divider);
-  font-size: 11px;
-  overflow: hidden;
-}
-
-.project-folder-icon {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.project-folder-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.left-sidebar-footer {
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-divider);
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.sidebar-footer-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.sidebar-footer-btn:hover {
-  background-color: var(--bg-card-hover);
-  color: var(--text-primary);
 }
 
 /* ==========================================================================

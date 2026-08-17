@@ -67,17 +67,15 @@ describe("LeftSidebar", () => {
     });
   });
 
-  it("renders search strip, tab cards, project folder section, and settings footer", () => {
+  it("renders search strip and tab cards with avatar badges", () => {
     render(<LeftSidebar />);
 
     expect(screen.getByPlaceholderText(/search tabs/i)).toBeDefined();
     expect(screen.getByTitle("New Tab")).toBeDefined();
     expect(screen.getByText("oppa-alpha")).toBeDefined();
     expect(screen.getByText("oppa-beta")).toBeDefined();
-    expect(screen.getByText("/home/user/projects/repo-root")).toBeDefined();
-    expect(screen.getByText(/project folder/i)).toBeDefined();
-    expect(screen.getByText("repo-root", { selector: ".project-folder-name" })).toBeDefined();
-    expect(screen.getByTitle("Settings")).toBeDefined();
+    // CWD is shortened to ~/last-two-segments
+    expect(screen.getByText("~/projects/repo-root")).toBeDefined();
   });
 
   it("filters tab cards based on search query", () => {
@@ -178,14 +176,8 @@ describe("LeftSidebar", () => {
     expect(useTerminalStore.getState().leftSidebarWidth).toBe(420);
 
     fireEvent.mouseMove(window, { clientX: 100 });
-    expect(useTerminalStore.getState().leftSidebarWidth).toBe(180);
+    expect(useTerminalStore.getState().leftSidebarWidth).toBe(200);
 
     fireEvent.mouseUp(window);
-  });
-
-  it("displays current active project folder name in project folder section", () => {
-    render(<LeftSidebar />);
-
-    expect(screen.getByText("repo-root", { selector: ".project-folder-name" })).toBeDefined();
   });
 });

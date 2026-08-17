@@ -5,12 +5,10 @@ import {
   SearchIcon,
   PlusIcon,
   TerminalIcon,
-  FolderIcon,
-  SettingsIcon,
   CloseIcon,
 } from "./icons/MinimalIcons";
 
-const MIN_SIDEBAR_WIDTH = 180;
+const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 420;
 
 export function LeftSidebar(): React.ReactElement | null {
@@ -23,7 +21,6 @@ export function LeftSidebar(): React.ReactElement | null {
   const renameTab = useTerminalStore((s) => s.renameTab);
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
-  const getActiveCwd = useTerminalStore((s) => s.getActiveCwd);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -83,6 +80,13 @@ export function LeftSidebar(): React.ReactElement | null {
     };
   };
 
+  // Shorten CWD for display (e.g. D:\oppa\oppa -> ~/oppa)
+  const shortenCwd = (cwd: string): string => {
+    const parts = cwd.split(/[/\\]/).filter(Boolean);
+    if (parts.length <= 2) return `~/${parts.join("/")}`;
+    return `~/${parts.slice(-2).join("/")}`;
+  };
+
   const filteredTabs = useMemo(() => {
     if (!searchQuery.trim()) return tabs;
     const q = searchQuery.toLowerCase().trim();
@@ -116,11 +120,6 @@ export function LeftSidebar(): React.ReactElement | null {
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
   };
-
-  const activeCwd = getActiveCwd();
-  const projectFolderName = activeCwd
-    ? activeCwd.split(/[/\\]/).filter(Boolean).pop() || activeCwd
-    : "No Folder Opened";
 
   return (
     <aside className="left-sidebar" style={{ width: leftSidebarWidth }}>
@@ -166,12 +165,16 @@ export function LeftSidebar(): React.ReactElement | null {
                   handleStartRename(tab.id, tab.title || title)
                 }
               >
-                <div className="tab-card-main">
-                  <div className="tab-card-icon">
-                    <TerminalIcon size={14} />
-                  </div>
+                {/* Workspace avatar badge */}
+                <div className="tab-card-avatar">
+                  <TerminalIcon size={14} />
+                </div>
 
-                  <div className="tab-card-info">
+                <div className="tab-card-content">
+                  <div className="tab-card-row-top">
+                    <span className="tab-card-app-icon">
+                      <TerminalIcon size={12} />
+                    </span>
                     {isEditing ? (
                       <input
                         ref={editInputRef}
@@ -184,18 +187,16 @@ export function LeftSidebar(): React.ReactElement | null {
                         aria-label="Rename tab"
                       />
                     ) : (
-                      <>
-                        <span className="tab-card-title" title={title}>
-                          {title}
-                        </span>
-                        {cwd && (
-                          <span className="tab-card-cwd" title={cwd}>
-                            {cwd}
-                          </span>
-                        )}
-                      </>
+                      <span className="tab-card-title" title={title}>
+                        {title}
+                      </span>
                     )}
                   </div>
+                  {cwd && (
+                    <span className="tab-card-cwd" title={cwd}>
+                      {shortenCwd(cwd)}
+                    </span>
+                  )}
                 </div>
 
                 <button
@@ -214,28 +215,6 @@ export function LeftSidebar(): React.ReactElement | null {
             );
           })}
         </div>
-
-        <div className="left-sidebar-section project-folder-section">
-          <div className="sidebar-section-header">
-            <FolderIcon size={13} className="section-icon" />
-            <span>PROJECT FOLDER</span>
-          </div>
-          <div className="project-folder-item" title={activeCwd || undefined}>
-            <FolderIcon size={14} className="project-folder-icon" />
-            <span className="project-folder-name">{projectFolderName}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="left-sidebar-footer">
-        <button
-          type="button"
-          className="sidebar-footer-btn"
-          title="Settings"
-          aria-label="Settings"
-        >
-          <SettingsIcon size={16} />
-        </button>
       </div>
 
       <div
@@ -247,3 +226,4 @@ export function LeftSidebar(): React.ReactElement | null {
     </aside>
   );
 }
+
