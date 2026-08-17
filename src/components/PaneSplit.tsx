@@ -11,6 +11,12 @@ function ratioOf(tree: Layout): number {
   return tree.type === "split" ? tree.ratio : 1;
 }
 
+// True when `id` is present as a leaf anywhere in `tree`.
+function containsSession(tree: Layout, id: string): boolean {
+  if (tree.type === "leaf") return tree.id === id;
+  return containsSession(tree.a, id) || containsSession(tree.b, id);
+}
+
 // Recursive renderer for the layout tree: leaves become session-backed
 // terminal panes, splits become flex rows/columns with a draggable divider.
 export function PaneSplit() {
@@ -18,6 +24,17 @@ export function PaneSplit() {
   const focusedPath = useTerminalStore((s) => s.focusedPath);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const setRatio = useTerminalStore((s) => s.setRatio);
+  const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
+
+  if (maximizedSessionId && containsSession(layout, maximizedSessionId)) {
+    return (
+      <div className="pane-root">
+        <div className="pane-leaf maximized focused">
+          <SessionLeaf id={maximizedSessionId} path={[]} />
+        </div>
+      </div>
+    );
+  }
 
   const renderNode = (node: Layout, path: Path): React.ReactNode => {
     if (node.type === "leaf") {
@@ -27,7 +44,7 @@ export function PaneSplit() {
           className={`pane-leaf${path.join(".") === focusedPath.join(".") ? " focused" : ""}`}
           onMouseDown={() => focusPane(path)}
         >
-          <SessionLeaf id={node.id} />
+          <SessionLeaf id={node.id} path={path} />
         </div>
       );
     }

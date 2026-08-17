@@ -16,11 +16,13 @@ import {
   saveScrollback,
 } from "../lib/pty/transport";
 import { useTerminalStore } from "../store/terminalStore";
+import type { Path } from "../store/terminalStore";
 import { TerminalSearch } from "./TerminalSearch";
+import { TerminalPaneHeader } from "./TerminalPaneHeader";
 
 // Renders the terminal view for ONE store session with WebGL acceleration,
 // Unicode 11 width calculation, clickable web links, and in-pane search overlay.
-export function TerminalPane({ id }: { id: string }) {
+export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -45,6 +47,12 @@ export function TerminalPane({ id }: { id: string }) {
       window.open(uri, "_blank", "noopener,noreferrer");
     });
   }, []);
+
+  const handleClear = useCallback(() => {
+    termRef.current?.clear();
+    useTerminalStore.getState().cacheScrollback(id, "");
+    void saveScrollback(id, "").catch(() => {});
+  }, [id]);
 
   const closeSearch = useCallback(() => {
     setIsSearchOpen(false);
@@ -221,6 +229,7 @@ export function TerminalPane({ id }: { id: string }) {
       className="terminal-pane-wrapper"
       style={{ position: "relative", width: "100%", height: "100%" }}
     >
+      <TerminalPaneHeader id={id} path={path} onClear={handleClear} />
       {isSearchOpen && searchAddonRef.current && (
         <TerminalSearch
           searchAddon={searchAddonRef.current}

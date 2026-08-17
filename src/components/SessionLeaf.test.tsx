@@ -6,8 +6,8 @@ import { SessionLeaf } from "./SessionLeaf";
 import * as transport from "../lib/pty/transport";
 
 vi.mock("./TerminalPane", () => ({
-  TerminalPane: ({ id }: { id: string }) => (
-    <div className="terminal-pane" data-testid={id} />
+  TerminalPane: ({ id, path }: { id: string; path?: number[] }) => (
+    <div className="terminal-pane" data-testid={id} data-path={path?.join(".")} />
   ),
 }));
 
@@ -217,5 +217,16 @@ describe("SessionLeaf", () => {
     expect(JSON.stringify(layout)).not.toContain('"id":""');
     expect(useTerminalStore.getState().sessions["s1"]).toBeDefined();
     expect(useTerminalStore.getState().sessions["other"]).toBeDefined();
+  });
+
+  it("passes path prop through to TerminalPane", () => {
+    useTerminalStore.setState({
+      sessions: { s1: running("s1") },
+      layout: { type: "leaf", id: "s1" },
+    });
+
+    const { container } = render(<SessionLeaf id="s1" path={[0, 1]} />);
+    const pane = container.querySelector(".terminal-pane");
+    expect(pane?.getAttribute("data-path")).toBe("0.1");
   });
 });

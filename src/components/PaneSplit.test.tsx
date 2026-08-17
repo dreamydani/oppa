@@ -8,8 +8,8 @@ import * as transport from "../lib/pty/transport";
 // wiring is covered by its own suite. Mocking it here keeps the layout
 // tests focused on panes/divider/focus.
 vi.mock("./TerminalPane", () => ({
-  TerminalPane: ({ id }: { id: string }) => (
-    <div className="terminal-pane" data-session-id={id} />
+  TerminalPane: ({ id, path }: { id: string; path?: number[] }) => (
+    <div className="terminal-pane" data-session-id={id} data-path={path?.join(".")} />
   ),
 }));
 
@@ -240,5 +240,65 @@ describe("PaneSplit", () => {
     const panes = container.querySelectorAll(".terminal-pane");
     fireEvent.mouseDown(panes[1]!);
     expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+  });
+
+  it("passes path to session leaves in split hierarchy", () => {
+    setSessions(["a", "b"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+    });
+
+    const { container } = render(<PaneSplit />);
+    const panes = container.querySelectorAll(".terminal-pane");
+    expect(panes[0]?.getAttribute("data-path")).toBe("0");
+    expect(panes[1]?.getAttribute("data-path")).toBe("1");
+  });
+
+  it("renders only the maximized leaf when maximizedSessionId is active in layout", () => {
+    setSessions(["a", "b"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      maximizedSessionId: "b",
+    });
+
+    const { container } = render(<PaneSplit />);
+    const panes = container.querySelectorAll(".terminal-pane");
+    expect(panes).toHaveLength(1);
+    expect(panes[0]?.getAttribute("data-session-id")).toBe("b");
+    expect(container.querySelector(".pane-divider")).toBeNull();
+    const leaf = container.querySelector(".pane-leaf");
+    expect(leaf?.className).toContain("maximized");
+    expect(leaf?.className).toContain("focused");
+  });
+
+  it("falls back to normal split layout when maximizedSessionId does not exist in layout", () => {
+    setSessions(["a", "b"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+      maximizedSessionId: "nonexistent",
+    });
+
+    const { container } = render(<PaneSplit />);
+    const panes = container.querySelectorAll(".terminal-pane");
+    expect(panes).toHaveLength(2);
+    expect(container.querySelector(".pane-divider")).not.toBeNull();
   });
 });

@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useTerminalStore } from "../store/terminalStore";
+import type { Path } from "../store/terminalStore";
 import { TerminalPane } from "./TerminalPane";
 
 // A leaf in the layout tree guarantees a live session: if the leaf id has no
 // session in the store yet (a fresh root `""` or a placeholder from a future
 // persisted-layout restore), spawn one and swap the leaf id to the real
 // session id. Rendering the terminal is delegated to TerminalPane.
-export function SessionLeaf({ id }: { id: string }) {
+export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
   const session = useTerminalStore((s) => s.sessions[id]);
   const spawnSession = useTerminalStore((s) => s.spawnSession);
   const substituteSessionId = useTerminalStore((s) => s.substituteSessionId);
@@ -33,7 +34,7 @@ export function SessionLeaf({ id }: { id: string }) {
     });
   }, [id, session, spawnSession, substituteSessionId]);
 
-  if (session) return <TerminalPane id={session.id} />;
+  if (session) return <TerminalPane id={session.id} path={path} />;
 
   // Placeholder while the spawn is in flight (or the leaf has no session yet).
   return (

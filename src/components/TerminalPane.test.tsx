@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
@@ -14,6 +14,7 @@ const xtermState = vi.hoisted(() => ({
     unicode: { activeVersion: string };
     write: ReturnType<typeof vi.fn>;
     writeln: ReturnType<typeof vi.fn>;
+    clear: ReturnType<typeof vi.fn>;
     onData: ReturnType<typeof vi.fn>;
     onWriteParsed: ReturnType<typeof vi.fn>;
     open: ReturnType<typeof vi.fn>;
@@ -44,6 +45,7 @@ vi.mock("@xterm/xterm", () => {
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
     write = vi.fn();
     writeln = vi.fn();
+    clear = vi.fn();
     open = vi.fn();
     loadAddon = vi.fn();
     attachCustomKeyEventHandler = vi.fn((fn: (event: KeyboardEvent) => boolean) => {
@@ -620,5 +622,44 @@ describe("TerminalPane", () => {
 
     webLinksInstance.handler?.({} as MouseEvent, "https://example.com");
     expect(openUrlMock).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("renders TerminalPaneHeader at the top of the terminal pane wrapper", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "my-custom-title", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const header = container.querySelector(".terminal-pane-header");
+    expect(header).not.toBeNull();
+    expect(header?.textContent).toContain("my-custom-title");
+  });
+
+  it("clears terminal buffer and cached scrollback when Clear Scrollback is invoked from header menu", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+      },
+      cachedScrollbacks: {
+        abc: "existing buffer",
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    // Open More Options dropdown menu
+    const moreBtn = screen.getByRole("button", { name: /more options/i });
+    fireEvent.click(moreBtn);
+
+    // Click "Clear Scrollback"
+    const clearBtn = screen.getByText("Clear Scrollback");
+    fireEvent.click(clearBtn);
+
+    expect(term().clear).toHaveBeenCalled();
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("");
+    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "");
   });
 });
