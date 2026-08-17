@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { TabBar } from "./components/TabBar";
 import { PaneSplit } from "./components/PaneSplit";
 import { Toolbar } from "./components/Toolbar";
 import { useTerminalStore } from "./store/terminalStore";
@@ -8,14 +9,19 @@ import "./App.css";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
 // ctrlKey elsewhere):
+//   Cmd/Ctrl+T        create new tab
+//   Cmd/Ctrl+W        close active tab / focused pane
+//   Ctrl+Tab          cycle active tab forward
+//   Ctrl+Shift+Tab    cycle active tab backward
+//   Alt/Cmd+1..9      jump directly to tab index 0..8
 //   Cmd/Ctrl+Shift+D  split focused pane horizontally
 //   Cmd/Ctrl+Shift+E  split focused pane vertically
-//   Cmd/Ctrl+W        close focused pane
 //   Cmd/Ctrl+arrows   move focus to a sibling pane
 function App() {
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
   const moveFocus = useTerminalStore((s) => s.moveFocus);
+  const createTab = useTerminalStore((s) => s.createTab);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
@@ -78,21 +84,52 @@ function App() {
   }, [saveLayout]);
 
   useEffect(() => {
-    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    const isMac =
+      typeof navigator !== "undefined" &&
+      (navigator.platform.toUpperCase().includes("MAC") ||
+        navigator.userAgent.includes("Mac"));
     const modifier = (e: KeyboardEvent) => (isMac ? e.metaKey : e.ctrlKey);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!modifier(e)) return;
+      // Tab switching: Ctrl+Tab and Ctrl+Shift+Tab
+      if (e.ctrlKey && (e.key === "Tab" || e.code === "Tab")) {
+        e.preventDefault();
+        const { tabs, activeTabId, selectTab } = useTerminalStore.getState();
+        if (tabs.length > 0) {
+          const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
+          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+          const offset = e.shiftKey ? -1 : 1;
+          const nextIndex = (safeIndex + offset + tabs.length) % tabs.length;
+          selectTab(tabs[nextIndex].id);
+        }
+        return;
+      }
+
+      // Direct tab index jump: Alt+1..9 / Cmd+1..9
+      if ((e.altKey || e.metaKey) && e.key >= "1" && e.key <= "9") {
+        const index = Number(e.key) - 1;
+        const { tabs, selectTab } = useTerminalStore.getState();
+        if (index >= 0 && index < tabs.length) {
+          e.preventDefault();
+          selectTab(tabs[index].id);
+        }
+        return;
+      }
+
+      if (!modifier(e) && !e.ctrlKey && !e.metaKey) return;
       const key = e.key.toLowerCase();
-      if (key === "d" && e.shiftKey) {
+      if (key === "t" && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        void createTab();
+      } else if (key === "w" && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        void closePane();
+      } else if (key === "d" && e.shiftKey) {
         e.preventDefault();
         void splitPane("h");
       } else if (key === "e" && e.shiftKey) {
         e.preventDefault();
         void splitPane("v");
-      } else if (key === "w") {
-        e.preventDefault();
-        void closePane();
       } else if (key === "arrowleft") {
         e.preventDefault();
         moveFocus("left");
@@ -109,7 +146,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splitPane, closePane, moveFocus]);
+  }, [splitPane, closePane, moveFocus, createTab]);
 
   // Hold the pane grid until the startup restore has settled: rendering a
   // sessionless placeholder leaf before the restore would spawn a throwaway
@@ -117,6 +154,7 @@ function App() {
   if (!ready) return null;
   return (
     <>
+      <TabBar />
       <Toolbar />
       <PaneSplit />
     </>

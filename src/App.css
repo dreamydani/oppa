@@ -5,8 +5,134 @@ body,
   margin: 0;
 }
 
+#root {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+.tab-bar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  user-select: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+}
+
+.tab-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #161b22;
+  color: #8b949e;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  cursor: pointer;
+  max-width: 180px;
+  height: 26px;
+  box-sizing: border-box;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tab-item:hover {
+  background: #21262d;
+  color: #c9d1d9;
+}
+
+.tab-item.active {
+  background: #21262d;
+  color: #ffffff;
+  border-color: #388bfd;
+  font-weight: 500;
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.tab-rename-input {
+  background: #0d1117;
+  color: #ffffff;
+  border: 1px solid #388bfd;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  width: 100px;
+}
+
+.tab-close-btn {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-close-btn:hover {
+  background: #30363d;
+  color: #f85149;
+}
+
+.tab-add-btn {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.tab-add-btn:hover {
+  background: #30363d;
+  border-color: #388bfd;
+}
+
 .pane-root {
-  height: calc(100vh - 36px);
+  flex: 1;
+  min-height: 0;
   width: 100vw;
   display: flex;
   flex-direction: column;

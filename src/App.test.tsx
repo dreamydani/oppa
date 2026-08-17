@@ -26,6 +26,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+vi.mock("./components/TerminalPane", () => ({
+  TerminalPane: ({ id }: { id: string }) => (
+    <div className="terminal-pane" data-session-id={id} />
+  ),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,5 +65,282 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(unlisten).toHaveBeenCalled();
     });
+  });
+
+  it("renders TabBar, Toolbar, and PaneSplit when ready", () => {
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".tab-bar")).not.toBeNull();
+    expect(container.querySelector(".toolbar")).not.toBeNull();
+    expect(container.querySelector(".pane-root")).not.toBeNull();
+  });
+
+  it("creates a new tab on Ctrl+T or Cmd+T", async () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+    });
+
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "t", ctrlKey: true, bubbles: true }),
+    );
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().tabs).toHaveLength(2);
+    });
+  });
+
+  it("closes focused pane or active tab on Ctrl+W", async () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s1" },
+            b: { type: "leaf", id: "s2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "w", ctrlKey: true, bubbles: true }),
+    );
+
+    await vi.waitFor(() => {
+      const activeTab = useTerminalStore.getState().tabs[0];
+      expect(activeTab.layout.type).toBe("leaf");
+    });
+  });
+
+  it("cycles active tab with Ctrl+Tab and Ctrl+Shift+Tab", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-2",
+          layout: { type: "leaf", id: "s2" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-3",
+          layout: { type: "leaf", id: "s3" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+        s3: { id: "s3", title: "s3", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    // Cycle forward: tab-1 -> tab-2
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
+
+    // Cycle forward: tab-2 -> tab-3
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-3");
+
+    // Cycle forward wrap: tab-3 -> tab-1
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
+
+    // Cycle backward: tab-1 -> tab-3
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-3");
+  });
+
+  it("selects tab directly by index with Alt+1..9 or Cmd+1..9", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-2",
+          layout: { type: "leaf", id: "s2" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-3",
+          layout: { type: "leaf", id: "s3" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+        s3: { id: "s3", title: "s3", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    // Alt+2 -> tab-2
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "2", altKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
+
+    // Alt+3 -> tab-3
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "3", altKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-3");
+
+    // Alt+1 -> tab-1
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "1", altKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
+
+    // Out of bounds Alt+9 -> stays tab-1
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "9", altKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
+  });
+
+  it("triggers split horizontal and vertical shortcuts", async () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    // Ctrl+Shift+D -> horizontal split
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "d",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      const state = useTerminalStore.getState();
+      expect(state.layout.type).toBe("split");
+      if (state.layout.type === "split") {
+        expect(state.layout.dir).toBe("h");
+      }
+    });
+
+    // Ctrl+Shift+E -> vertical split
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "e",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      const state = useTerminalStore.getState();
+      expect(state.focusedPath.length).toBeGreaterThan(1);
+    });
+  });
+
+  it("triggers arrow focus navigation shortcuts", () => {
+    const splitLayout: any = {
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: { type: "leaf", id: "s1" },
+      b: { type: "leaf", id: "s2" },
+    };
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: splitLayout,
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      layout: splitLayout,
+      focusedPath: [0],
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    // Ctrl+ArrowRight -> moves focus to [1]
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+
+    // Ctrl+ArrowLeft -> moves focus back to [0]
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowLeft",
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
   });
 });
