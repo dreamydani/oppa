@@ -12,6 +12,8 @@ const xtermState = vi.hoisted(() => ({
     cols: number;
     rows: number;
     unicode: { activeVersion: string };
+    modes: { mouseTrackingMode: string; applicationCursorKeysMode: boolean };
+    buffer: { active: { type: string } };
     write: ReturnType<typeof vi.fn>;
     writeln: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
@@ -20,10 +22,12 @@ const xtermState = vi.hoisted(() => ({
     open: ReturnType<typeof vi.fn>;
     loadAddon: ReturnType<typeof vi.fn>;
     attachCustomKeyEventHandler: ReturnType<typeof vi.fn>;
+    attachCustomWheelEventHandler: ReturnType<typeof vi.fn>;
     getSelection: ReturnType<typeof vi.fn>;
     focus: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     customKeyHandler?: (event: KeyboardEvent) => boolean;
+    customWheelHandler?: (event: WheelEvent) => boolean;
   }[],
 }));
 
@@ -41,6 +45,8 @@ vi.mock("@xterm/xterm", () => {
     cols = 80;
     rows = 24;
     unicode = { activeVersion: "6" };
+    modes = { mouseTrackingMode: "none", applicationCursorKeysMode: false };
+    buffer = { active: { type: "normal" } };
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
     write = vi.fn();
@@ -51,10 +57,14 @@ vi.mock("@xterm/xterm", () => {
     attachCustomKeyEventHandler = vi.fn((fn: (event: KeyboardEvent) => boolean) => {
       this.customKeyHandler = fn;
     });
+    attachCustomWheelEventHandler = vi.fn((fn: (event: WheelEvent) => boolean) => {
+      this.customWheelHandler = fn;
+    });
     getSelection = vi.fn().mockReturnValue("");
     focus = vi.fn();
     dispose = vi.fn();
     customKeyHandler?: (event: KeyboardEvent) => boolean;
+    customWheelHandler?: (event: WheelEvent) => boolean;
     constructor() {
       xtermState.instances.push(this);
     }
@@ -661,5 +671,58 @@ describe("TerminalPane", () => {
     expect(term().clear).toHaveBeenCalled();
     expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("");
     expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "");
+  });
+
+  it("translates mouse wheel up and down to arrow keys when in alternate buffer mode", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const t = term();
+    t.buffer.active.type = "alternate";
+    t.modes.mouseTrackingMode = "none";
+    t.modes.applicationCursorKeysMode = false;
+
+    const wheelUpEvent = { deltaY: -16, deltaMode: 0 } as WheelEvent;
+    const handledUp = t.customWheelHandler?.(wheelUpEvent);
+    expect(handledUp).toBe(false);
+    expect(ptyWriteMock).toHaveBeenCalledWith("abc", "\x1b[A");
+
+    ptyWriteMock.mockClear();
+    const wheelDownEvent = { deltaY: 16, deltaMode: 0 } as WheelEvent;
+    const handledDown = t.customWheelHandler?.(wheelDownEvent);
+    expect(handledDown).toBe(false);
+    expect(ptyWriteMock).toHaveBeenCalledWith("abc", "\x1b[B");
+
+    // When application cursor keys mode is active
+    t.modes.applicationCursorKeysMode = true;
+    ptyWriteMock.mockClear();
+    t.customWheelHandler?.(wheelUpEvent);
+    expect(ptyWriteMock).toHaveBeenCalledWith("abc", "\x1bOA");
+  });
+
+  it("allows default xterm wheel handling when mouse tracking is active or in normal buffer", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const t = term();
+    // Normal buffer
+    t.buffer.active.type = "normal";
+    t.modes.mouseTrackingMode = "none";
+    expect(t.customWheelHandler?.({ deltaY: -16, deltaMode: 0 } as WheelEvent)).toBe(true);
+
+    // Mouse tracking active
+    t.buffer.active.type = "alternate";
+    t.modes.mouseTrackingMode = "vt200";
+    expect(t.customWheelHandler?.({ deltaY: -16, deltaMode: 0 } as WheelEvent)).toBe(true);
   });
 });

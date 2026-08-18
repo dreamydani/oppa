@@ -260,7 +260,7 @@ describe("PaneSplit", () => {
     expect(panes[1]?.getAttribute("data-path")).toBe("1");
   });
 
-  it("renders only the maximized leaf when maximizedSessionId is active in layout", () => {
+  it("renders the maximized leaf prominently while preserving background panes in DOM", () => {
     setSessions(["a", "b"]);
     useTerminalStore.setState({
       layout: {
@@ -275,12 +275,11 @@ describe("PaneSplit", () => {
 
     const { container } = render(<PaneSplit />);
     const panes = container.querySelectorAll(".terminal-pane");
-    expect(panes).toHaveLength(1);
-    expect(panes[0]?.getAttribute("data-session-id")).toBe("b");
+    expect(panes).toHaveLength(2);
     expect(container.querySelector(".pane-divider")).toBeNull();
-    const leaf = container.querySelector(".pane-leaf");
-    expect(leaf?.className).toContain("maximized");
-    expect(leaf?.className).toContain("focused");
+    const leaves = container.querySelectorAll(".pane-leaf");
+    expect(leaves[0].className).toContain("pane-hidden");
+    expect(leaves[1].className).toContain("maximized");
   });
 
   it("falls back to normal split layout when maximizedSessionId does not exist in layout", () => {

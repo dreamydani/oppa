@@ -26,22 +26,16 @@ export function PaneSplit() {
   const setRatio = useTerminalStore((s) => s.setRatio);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
 
-  if (maximizedSessionId && containsSession(layout, maximizedSessionId)) {
-    return (
-      <div className="pane-root">
-        <div className="pane-leaf maximized focused">
-          <SessionLeaf id={maximizedSessionId} path={[]} />
-        </div>
-      </div>
-    );
-  }
+  const isAnyMaximized = Boolean(maximizedSessionId && containsSession(layout, maximizedSessionId));
 
   const renderNode = (node: Layout, path: Path): React.ReactNode => {
     if (node.type === "leaf") {
+      const isMaximized = isAnyMaximized && node.id === maximizedSessionId;
+      const isHidden = isAnyMaximized && !isMaximized;
       return (
         <div
           key={path.join(".")}
-          className={`pane-leaf${path.join(".") === focusedPath.join(".") ? " focused" : ""}`}
+          className={`pane-leaf${path.join(".") === focusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}`}
           onMouseDown={() => focusPane(path)}
         >
           <SessionLeaf id={node.id} path={path} />
@@ -57,12 +51,14 @@ export function PaneSplit() {
         <div className="pane-child" style={childStyle(node, 0)}>
           {renderNode(node.a, [...path, 0])}
         </div>
-        <SplitDivider
-          path={path}
-          dir={node.dir}
-          ratio={ratioOf(node)}
-          setRatio={setRatio}
-        />
+        {!isAnyMaximized && (
+          <SplitDivider
+            path={path}
+            dir={node.dir}
+            ratio={ratioOf(node)}
+            setRatio={setRatio}
+          />
+        )}
         <div className="pane-child" style={childStyle(node, 1)}>
           {renderNode(node.b, [...path, 1])}
         </div>
@@ -71,7 +67,7 @@ export function PaneSplit() {
   };
 
   return (
-    <div className="pane-root">
+    <div className={`pane-root${isAnyMaximized ? " has-maximized-pane" : ""}`}>
       {renderNode(layout, [])}
     </div>
   );

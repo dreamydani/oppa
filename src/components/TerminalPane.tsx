@@ -67,6 +67,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: "Menlo, Consolas, monospace",
+      scrollback: 10000,
+      smoothScrollDuration: 0,
+      altClickMovesCursor: true,
       theme: {
         background: "#141414",
         foreground: "#ededec",
@@ -134,6 +137,56 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         closeSearch();
         return false;
       }
+      return true;
+    });
+
+    // Custom wheel handler:
+    // When running full-screen interactive CLI apps (opencode, claude, gemini, less, vim, etc.)
+    // in alternate screen buffer without mouse tracking, translate wheel up/down into
+    // cursor arrow key escape sequences so scrolling works smoothly.
+    let wheelDeltaAccumulator = 0;
+    term.attachCustomWheelEventHandler((event: WheelEvent) => {
+      // If mouse reporting mode is active, allow xterm's mouse event reporter to handle it
+      if (term.modes.mouseTrackingMode !== "none") {
+        return true;
+      }
+
+      // If in alternate buffer mode (full-screen CLI / TUI), translate wheel to Arrow keys
+      if (term.buffer.active.type === "alternate") {
+        if (event.deltaY === 0) return true;
+        const isUp = event.deltaY < 0;
+        const code = term.modes.applicationCursorKeysMode
+          ? (isUp ? "\x1bOA" : "\x1bOB")
+          : (isUp ? "\x1b[A" : "\x1b[B");
+
+        const delta = Math.abs(event.deltaY);
+        let lines = 1;
+        if (event.deltaMode === 1) {
+          // Line mode
+          lines = Math.max(1, Math.min(5, Math.round(delta)));
+        } else if (event.deltaMode === 2) {
+          // Page mode
+          lines = term.rows || 24;
+        } else {
+          // Pixel mode (trackpad / high-res wheel)
+          wheelDeltaAccumulator += delta;
+          const cellHeight = 16;
+          lines = Math.floor(wheelDeltaAccumulator / cellHeight);
+          if (lines >= 1) {
+            wheelDeltaAccumulator %= cellHeight;
+          } else {
+            lines = 1;
+            wheelDeltaAccumulator = 0;
+          }
+          lines = Math.min(5, Math.max(1, lines));
+        }
+
+        for (let i = 0; i < lines; i++) {
+          ptyWrite(idRef.current, code);
+        }
+        return false;
+      }
+
       return true;
     });
 
