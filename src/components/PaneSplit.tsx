@@ -20,57 +20,102 @@ function containsSession(tree: Layout, id: string): boolean {
 // Recursive renderer for the layout tree: leaves become session-backed
 // terminal panes, splits become flex rows/columns with a draggable divider.
 export function PaneSplit() {
+  const tabs = useTerminalStore((s) => s.tabs);
+  const activeTabId = useTerminalStore((s) => s.activeTabId);
   const layout = useTerminalStore((s) => s.layout);
   const focusedPath = useTerminalStore((s) => s.focusedPath);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const setRatio = useTerminalStore((s) => s.setRatio);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
 
-  const isAnyMaximized = Boolean(maximizedSessionId && containsSession(layout, maximizedSessionId));
+  const renderTree = (targetLayout: Layout, targetFocusedPath: Path, isTabActive: boolean) => {
+    const isAnyMaximized = Boolean(
+      isTabActive && maximizedSessionId && containsSession(targetLayout, maximizedSessionId),
+    );
 
-  const renderNode = (node: Layout, path: Path): React.ReactNode => {
-    if (node.type === "leaf") {
-      const isMaximized = isAnyMaximized && node.id === maximizedSessionId;
-      const isHidden = isAnyMaximized && !isMaximized;
+    const renderNode = (node: Layout, path: Path): React.ReactNode => {
+      if (node.type === "leaf") {
+        const isMaximized = isAnyMaximized && node.id === maximizedSessionId;
+        const isHidden = isAnyMaximized && !isMaximized;
+        return (
+          <div
+            key={path.join(".")}
+            className={`pane-leaf${isTabActive && path.join(".") === targetFocusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}`}
+            onMouseDown={() => {
+              if (isTabActive) focusPane(path);
+            }}
+          >
+            <SessionLeaf id={node.id} path={path} />
+          </div>
+        );
+      }
       return (
         <div
           key={path.join(".")}
-          className={`pane-leaf${path.join(".") === focusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}`}
-          onMouseDown={() => focusPane(path)}
+          className={`pane-split dir-${node.dir}`}
+          style={{ flexDirection: node.dir === "h" ? "row" : "column" }}
         >
-          <SessionLeaf id={node.id} path={path} />
+          <div className="pane-child" style={childStyle(node, 0)}>
+            {renderNode(node.a, [...path, 0])}
+          </div>
+          {!isAnyMaximized && (
+            <SplitDivider
+              path={path}
+              dir={node.dir}
+              ratio={ratioOf(node)}
+              setRatio={setRatio}
+            />
+          )}
+          <div className="pane-child" style={childStyle(node, 1)}>
+            {renderNode(node.b, [...path, 1])}
+          </div>
         </div>
       );
-    }
+    };
+
     return (
       <div
-        key={path.join(".")}
-        className={`pane-split dir-${node.dir}`}
-        style={{ flexDirection: node.dir === "h" ? "row" : "column" }}
+        className={`pane-root${isAnyMaximized ? " has-maximized-pane" : ""}`}
+        style={{
+          display: isTabActive ? "flex" : "none",
+          width: "100%",
+          height: "100%",
+        }}
       >
-        <div className="pane-child" style={childStyle(node, 0)}>
-          {renderNode(node.a, [...path, 0])}
-        </div>
-        {!isAnyMaximized && (
-          <SplitDivider
-            path={path}
-            dir={node.dir}
-            ratio={ratioOf(node)}
-            setRatio={setRatio}
-          />
-        )}
-        <div className="pane-child" style={childStyle(node, 1)}>
-          {renderNode(node.b, [...path, 1])}
-        </div>
+        {renderNode(targetLayout, [])}
       </div>
     );
   };
 
-  return (
-    <div className={`pane-root${isAnyMaximized ? " has-maximized-pane" : ""}`}>
-      {renderNode(layout, [])}
-    </div>
-  );
+  if (tabs.length > 1) {
+    return (
+      <>
+        {tabs.map((tab) => {
+          const isTabActive = tab.id === (activeTabId || tabs[0].id);
+          const tabLayout = isTabActive ? layout : tab.layout;
+          const tabFocusedPath = isTabActive ? focusedPath : tab.focusedPath;
+          return (
+            <div
+              key={tab.id}
+              className="tab-split-wrapper"
+              style={{
+                display: isTabActive ? "flex" : "none",
+                width: "100%",
+                height: "100%",
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+              }}
+            >
+              {renderTree(tabLayout, tabFocusedPath, isTabActive)}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  return renderTree(layout, focusedPath, true);
 }
 
 // `a` keeps `ratio` of the split's length, `b` the rest.

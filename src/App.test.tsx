@@ -495,7 +495,10 @@ describe("App", () => {
     const { container } = render(<App />);
 
     expect(container.querySelector(".main-viewport .browser-viewport")).not.toBeNull();
-    expect(container.querySelector(".pane-root")).toBeNull();
+    const browserWrapper = container.querySelector(".browser-viewport-view") as HTMLElement;
+    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
+    expect(browserWrapper.style.display).toBe("flex");
+    expect(terminalWrapper.style.display).toBe("none");
     expect(container.querySelector(".left-sidebar")).not.toBeNull();
     expect(container.querySelector(".right-sidebar")).not.toBeNull();
   });
@@ -506,23 +509,25 @@ describe("App", () => {
     });
     const { container } = render(<App />);
 
-    expect(container.querySelector(".pane-root")).not.toBeNull();
-    expect(container.querySelector(".browser-viewport")).toBeNull();
+    const browserWrapper = container.querySelector(".browser-viewport-view") as HTMLElement;
+    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
+    expect(terminalWrapper.style.display).toBe("flex");
+    expect(browserWrapper.style.display).toBe("none");
 
     // Switch to browser
     useTerminalStore.getState().setAppMode("browser");
 
     await vi.waitFor(() => {
-      expect(container.querySelector(".browser-viewport")).not.toBeNull();
-      expect(container.querySelector(".pane-root")).toBeNull();
+      expect(browserWrapper.style.display).toBe("flex");
+      expect(terminalWrapper.style.display).toBe("none");
     });
 
     // Switch back to terminal
     useTerminalStore.getState().setAppMode("terminal");
 
     await vi.waitFor(() => {
-      expect(container.querySelector(".pane-root")).not.toBeNull();
-      expect(container.querySelector(".browser-viewport")).toBeNull();
+      expect(terminalWrapper.style.display).toBe("flex");
+      expect(browserWrapper.style.display).toBe("none");
     });
   });
 
@@ -535,7 +540,10 @@ describe("App", () => {
     const { container } = render(<App />);
 
     expect(container.querySelector(".main-viewport .editor-viewport")).not.toBeNull();
-    expect(container.querySelector(".pane-root")).toBeNull();
+    const editorWrapper = container.querySelector(".editor-viewport-view") as HTMLElement;
+    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
+    expect(editorWrapper.style.display).toBe("flex");
+    expect(terminalWrapper.style.display).toBe("none");
     expect(container.querySelector(".left-sidebar")).not.toBeNull();
     expect(container.querySelector(".right-sidebar")).not.toBeNull();
   });
@@ -546,23 +554,25 @@ describe("App", () => {
     });
     const { container } = render(<App />);
 
-    expect(container.querySelector(".pane-root")).not.toBeNull();
-    expect(container.querySelector(".editor-viewport")).toBeNull();
+    const editorWrapper = container.querySelector(".editor-viewport-view") as HTMLElement;
+    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
+    expect(terminalWrapper.style.display).toBe("flex");
+    expect(editorWrapper.style.display).toBe("none");
 
     // Switch to editor
     useTerminalStore.getState().setAppMode("editor");
 
     await vi.waitFor(() => {
-      expect(container.querySelector(".editor-viewport")).not.toBeNull();
-      expect(container.querySelector(".pane-root")).toBeNull();
+      expect(editorWrapper.style.display).toBe("flex");
+      expect(terminalWrapper.style.display).toBe("none");
     });
 
     // Switch back to terminal
     useTerminalStore.getState().setAppMode("terminal");
 
     await vi.waitFor(() => {
-      expect(container.querySelector(".pane-root")).not.toBeNull();
-      expect(container.querySelector(".editor-viewport")).toBeNull();
+      expect(terminalWrapper.style.display).toBe("flex");
+      expect(editorWrapper.style.display).toBe("none");
     });
   });
 

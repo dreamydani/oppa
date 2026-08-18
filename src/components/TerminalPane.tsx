@@ -99,11 +99,15 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     term.open(containerRef.current!);
 
-    const restoredScrollback = useTerminalStore.getState().restoredScrollbacks[id];
+    const state = useTerminalStore.getState();
+    const restoredScrollback = state.restoredScrollbacks[id];
+    const cachedScrollback = state.cachedScrollbacks[id];
     if (restoredScrollback) {
       term.write(restoredScrollback);
       term.writeln("\r\n\x1b[2m── [Session Restored] ──────────────────────────────────────\x1b[0m\r\n");
       clearRestoredScrollback(id);
+    } else if (cachedScrollback) {
+      term.write(cachedScrollback);
     }
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback

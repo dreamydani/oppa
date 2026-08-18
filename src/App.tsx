@@ -191,13 +191,7 @@ function App() {
         <div className="soft-edge-right" />
         {leftSidebarOpen && <LeftSidebar />}
         <main className="main-viewport">
-          {activeAppMode === "editor" ? (
-            <EditorViewport />
-          ) : activeAppMode === "browser" ? (
-            <BrowserViewport />
-          ) : activeTab?.isWizard ? (
-            <WorkspaceSetupWizard tabId={activeTab.id} />
-          ) : !activeTab ? (
+          {!activeTab ? (
             <div className="empty-workspace-view" data-testid="empty-workspace-view">
               <div className="empty-workspace-card">
                 <div className="empty-workspace-icon">
@@ -228,8 +222,41 @@ function App() {
                 </div>
               </div>
             </div>
+          ) : activeTab.isWizard ? (
+            <WorkspaceSetupWizard tabId={activeTab.id} />
           ) : (
-            <PaneSplit />
+            <>
+              <div
+                className="viewport-view terminal-viewport-view"
+                style={{
+                  display: activeAppMode === "terminal" ? "flex" : "none",
+                  width: "100%",
+                  height: "100%",
+                }}
+              >
+                <PaneSplit />
+              </div>
+              <div
+                className="viewport-view browser-viewport-view"
+                style={{
+                  display: activeAppMode === "browser" ? "flex" : "none",
+                  width: "100%",
+                  height: "100%",
+                }}
+              >
+                <BrowserViewport />
+              </div>
+              <div
+                className="viewport-view editor-viewport-view"
+                style={{
+                  display: activeAppMode === "editor" ? "flex" : "none",
+                  width: "100%",
+                  height: "100%",
+                }}
+              >
+                <EditorViewport />
+              </div>
+            </>
           )}
         </main>
         {rightSidebarOpen && <RightSidebar />}

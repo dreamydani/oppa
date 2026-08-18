@@ -300,4 +300,25 @@ describe("PaneSplit", () => {
     expect(panes).toHaveLength(2);
     expect(container.querySelector(".pane-divider")).not.toBeNull();
   });
+
+  it("renders all open tabs with keep-alive visibility toggling active and inactive tab wrappers", () => {
+    setSessions(["s1", "s2"]);
+    useTerminalStore.setState({
+      tabs: [
+        { id: "tab-1", title: "Project 1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        { id: "tab-2", title: "Project 2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+      ],
+      activeTabId: "tab-1",
+      layout: { type: "leaf", id: "s1" },
+    });
+
+    const { container } = render(<PaneSplit />);
+    const tabWrappers = container.querySelectorAll(".tab-split-wrapper") as NodeListOf<HTMLElement>;
+    expect(tabWrappers).toHaveLength(2);
+    expect(tabWrappers[0].style.display).toBe("flex");
+    expect(tabWrappers[1].style.display).toBe("none");
+
+    const panes = container.querySelectorAll(".terminal-pane");
+    expect(panes).toHaveLength(2);
+  });
 });
