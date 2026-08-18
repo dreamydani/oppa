@@ -278,6 +278,7 @@ impl DaemonClient {
     }
 
     /// Take the session's test output receiver.
+    #[allow(dead_code)]
     pub fn take_output(&self, session_id: &str) -> Option<Receiver<Vec<u8>>> {
         self.out_rx_map.lock().remove(session_id)
     }

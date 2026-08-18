@@ -9,6 +9,7 @@ use std::sync::Arc;
 /// `powershell.exe` as the fallback. Elsewhere `$SHELL` is honored when set and
 /// non-empty; otherwise the first of `/bin/zsh`, `/bin/bash`, `/bin/sh` that
 /// actually exists is used.
+#[allow(dead_code)]
 pub fn default_shell() -> String {
     #[cfg(target_os = "windows")]
     {

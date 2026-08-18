@@ -27,12 +27,17 @@ impl PtyManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_socket_path(socket_path: &str) -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
+    }
+
+    pub fn next_id(&self) -> String {
+        (self.next_id.fetch_add(1, Ordering::SeqCst) + 1).to_string()
     }
 
     #[allow(dead_code)]
@@ -83,6 +88,7 @@ impl PtyManager {
     }
 
     /// Spawn a new shell session and return its id.
+    #[allow(dead_code)]
     pub fn spawn(
         &self,
         shell: Option<String>,
@@ -94,7 +100,7 @@ impl PtyManager {
         on_exit: Option<OnExit>,
         on_cwd: Option<OnCwd>,
     ) -> Result<String, String> {
-        let id = (self.next_id.fetch_add(1, Ordering::SeqCst) + 1).to_string();
+        let id = self.next_id();
         let client = self.get_client()?;
         client.register_callbacks(&id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(&id);
@@ -159,6 +165,7 @@ impl PtyManager {
     }
 
     /// Take output channel for test observation.
+    #[allow(dead_code)]
     pub fn take_output(&self, id: &str) -> Option<Receiver<Vec<u8>>> {
         self.get_client().ok().and_then(|c| c.take_output(id))
     }

@@ -11,6 +11,22 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
+/// Entry point when spawned with `--daemon`.
+pub fn run_daemon() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime for daemon");
+    rt.block_on(async {
+        let socket_path = pty::ipc_protocol::get_daemon_socket_path();
+        let server = pty::daemon_server::DaemonServer::new();
+        let cancel_token = pty::daemon_server::CancellationToken::new();
+        if let Err(e) = server.run_listener(&socket_path, cancel_token).await {
+            eprintln!("Daemon listener exited: {e}");
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Close-save handshake: the renderer saves the layout via an async
@@ -32,6 +48,7 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
+            pty::commands::pty_disconnect,
             pty::commands::save_scrollback,
             pty::commands::load_scrollback,
             pty::commands::delete_scrollback,
@@ -79,6 +96,9 @@ pub fn run() {
                             break;
                         }
                         std::thread::sleep(Duration::from_millis(25));
+                    }
+                    if let Some(manager) = window_clone.try_state::<PtyManager>() {
+                        let _ = manager.disconnect();
                     }
                     let _ = window_clone.destroy();
                 });

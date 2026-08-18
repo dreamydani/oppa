@@ -26,27 +26,42 @@ pub struct PtyCwdPayload {
     pub cwd: String,
 }
 
-/// Spawn a PTY session running `shell` (default: the platform's default
-/// shell, see [`crate::pty::session::default_shell`]) in `cwd` (default: the
-/// app's working directory) and return the new session id.
+/// Payload returned when spawning or attaching to a PTY session.
+#[derive(Clone, Serialize)]
+pub struct PtySpawnResultPayload {
+    pub id: String,
+    pub is_new: bool,
+    pub snapshot: Option<String>,
+    pub pid: u32,
+    pub cols: u16,
+    pub rows: u16,
+    pub cwd: Option<String>,
+}
+
+/// Spawn or reattach to a PTY session running in the background daemon.
 ///
 /// The emitter closures capture the `AppHandle` and forward output, exit, and
 /// cwd signals to the frontend as `pty:data` / `pty:exit` / `pty:cwd` events.
-/// The manager itself never sees the `AppHandle` (see `PtyManager::spawn`).
 #[tauri::command]
 pub fn pty_spawn(
     manager: State<'_, PtyManager>,
     app: AppHandle,
+    id: Option<String>,
     shell: Option<String>,
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
-) -> Result<String, String> {
+) -> Result<PtySpawnResultPayload, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
     let seq = AtomicU64::new(0);
 
     let config = crate::pty::shell_args::resolve_shell_launch_config(shell, cwd);
+
+    let session_id = match id {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => manager.next_id(),
+    };
 
     // `app` is moved into the on_data closure; the on_exit and on_cwd closures get their
     // own clones.
@@ -79,16 +94,26 @@ pub fn pty_spawn(
             let _ = on_cwd_app.emit("pty:cwd", payload);
         });
 
-    manager.spawn(
-        Some(config.program),
-        config.cwd,
+    let attach_res = manager.create_or_attach(
+        &session_id,
         cols,
         rows,
-        config.args,
+        config.cwd,
+        Some(config.program),
         Some(on_data),
         Some(on_exit),
         Some(on_cwd),
-    )
+    )?;
+
+    Ok(PtySpawnResultPayload {
+        id: session_id,
+        is_new: attach_res.is_new,
+        snapshot: attach_res.snapshot,
+        pid: attach_res.pid,
+        cols: attach_res.cols,
+        rows: attach_res.rows,
+        cwd: attach_res.cwd,
+    })
 }
 
 #[tauri::command]
@@ -127,6 +152,11 @@ pub fn pty_ack(
 #[tauri::command]
 pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<String> {
     pty_list_impl(&manager)
+}
+
+#[tauri::command]
+pub fn pty_disconnect(manager: State<'_, PtyManager>) -> Result<(), String> {
+    manager.disconnect()
 }
 
 #[tauri::command]
@@ -199,5 +229,25 @@ mod tests {
         assert!(json.contains("\"id\":\"session-123\""));
         assert!(json.contains("\"cwd\":\"C:\\\\projects\\\\oppa\""));
     }
-}
 
+    #[test]
+    fn pty_spawn_result_payload_serializes() {
+        let payload = PtySpawnResultPayload {
+            id: "s1".into(),
+            is_new: false,
+            snapshot: Some("screen content".into()),
+            pid: 12345,
+            cols: 80,
+            rows: 24,
+            cwd: Some("/test/cwd".into()),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"id\":\"s1\""));
+        assert!(json.contains("\"is_new\":false"));
+        assert!(json.contains("\"snapshot\":\"screen content\""));
+        assert!(json.contains("\"pid\":12345"));
+        assert!(json.contains("\"cols\":80"));
+        assert!(json.contains("\"rows\":24"));
+        assert!(json.contains("\"cwd\":\"/test/cwd\""));
+    }
+}

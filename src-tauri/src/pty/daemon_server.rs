@@ -1,6 +1,6 @@
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
-    CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
+    CreateOrAttachResult, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -399,6 +399,7 @@ pub async fn run_server_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pty::ipc_protocol::DaemonEvent;
     use std::time::Duration;
 
     #[tokio::test]

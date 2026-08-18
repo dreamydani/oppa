@@ -25,10 +25,12 @@ impl ScreenMirror {
         self.parser.set_size(rows, cols);
     }
 
+    #[allow(dead_code)]
     pub fn cols(&self) -> u16 {
         self.cols
     }
 
+    #[allow(dead_code)]
     pub fn rows(&self) -> u16 {
         self.rows
     }
