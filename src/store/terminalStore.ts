@@ -1036,6 +1036,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         cwd: s.cwd,
         cols: s.cols,
         rows: s.rows,
+        ...(s.personaId !== undefined && s.personaId !== null ? { personaId: s.personaId } : {}),
       })),
     };
     await transportSaveLayout(JSON.stringify(snapshot));
@@ -1075,7 +1076,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         for (const tab of parsed.tabs) {
           for (const oldId of leafIds(tab.layout)) {
             if (oldId === "" || remap[oldId]) continue;
-            const newId = await get().spawnSession(byId.get(oldId)?.cwd, undefined, oldId);
+            const savedSession = byId.get(oldId);
+            const newId = await get().spawnSession(
+              savedSession?.cwd,
+              undefined,
+              oldId,
+              savedSession?.personaId ?? undefined
+            );
             remap[oldId] = newId;
 
             const prev = await loadScrollback(oldId);
@@ -1117,7 +1124,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       } else if (parsed.layout) {
         for (const oldId of leafIds(parsed.layout)) {
           if (oldId === "") continue;
-          const newId = await get().spawnSession(byId.get(oldId)?.cwd, undefined, oldId);
+          const savedSession = byId.get(oldId);
+          const newId = await get().spawnSession(
+            savedSession?.cwd,
+            undefined,
+            oldId,
+            savedSession?.personaId ?? undefined
+          );
           remap[oldId] = newId;
 
           const prev = await loadScrollback(oldId);

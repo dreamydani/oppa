@@ -1422,6 +1422,49 @@ describe("terminalStore", () => {
         expect(state.activeTabId).toBe(state.tabs[0].id);
         expect(state.layout).toEqual({ type: "leaf", id: "new-legacy" });
       });
+
+      it("saveLayout persists personaId and loadLayout restores personaId to spawnSession", async () => {
+        useTerminalStore.setState({
+          ready: true,
+          tabs: [
+            {
+              id: "tab-p",
+              layout: { type: "leaf", id: "s-persisted" },
+              focusedPath: [],
+            },
+          ],
+          activeTabId: "tab-p",
+          sessions: {
+            "s-persisted": {
+              id: "s-persisted",
+              title: "Debugger Terminal",
+              status: "running",
+              cwd: "D:/oppa",
+              cols: 80,
+              rows: 24,
+              personaId: "debugger",
+            },
+          },
+        });
+
+        await useTerminalStore.getState().saveLayout();
+        const savedCalls = vi.mocked(transport.saveLayout).mock.calls;
+        expect(savedCalls.length).toBeGreaterThan(0);
+        const lastSaved = JSON.parse(savedCalls[savedCalls.length - 1][0]);
+        expect(lastSaved.sessions[0].personaId).toBe("debugger");
+
+        loadLayoutMock.mockResolvedValue(JSON.stringify(lastSaved));
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("s-persisted"));
+
+        await useTerminalStore.getState().loadLayout();
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "s-persisted",
+            persona_id: "debugger",
+          }),
+        );
+        expect(useTerminalStore.getState().sessions["s-persisted"].personaId).toBe("debugger");
+      });
     });
   });
 
