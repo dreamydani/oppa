@@ -32,15 +32,17 @@ describe("TitleBar", () => {
     expect(screen.getByLabelText("Toggle Right Sidebar")).toBeTruthy();
   });
 
-  it("renders 3-mode switcher tabs (browser, terminal, editor)", () => {
+  it("renders mode switcher tabs (browser, terminal, editor, context)", () => {
     const { container } = render(<TitleBar />);
     const browserTab = screen.getByText("browser");
     const terminalTab = screen.getByText(/terminal/);
     const editorTab = screen.getByText("editor");
+    const contextTab = screen.getByText("context");
 
     expect(browserTab).toBeTruthy();
     expect(terminalTab).toBeTruthy();
     expect(editorTab).toBeTruthy();
+    expect(contextTab).toBeTruthy();
 
     const pill = container.querySelector(".mode-switcher-pill");
     expect(pill).toBeTruthy();

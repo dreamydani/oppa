@@ -11,6 +11,7 @@ import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModa
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
+import { ContextStudio } from "./components/context/ContextStudio";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -281,6 +282,16 @@ function App() {
                 }}
               >
                 <EditorViewport />
+              </div>
+              <div
+                className="viewport-view context-viewport-view"
+                style={{
+                  display: activeAppMode === "context" ? "flex" : "none",
+                  width: "100%",
+                  height: "100%",
+                }}
+              >
+                <ContextStudio />
               </div>
             </>
           )}
