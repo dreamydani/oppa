@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Layout, Path } from "../store/terminalStore";
 import { SessionLeaf } from "./SessionLeaf";
-
-// The fraction of the split's length that `a` keeps. PaneSplit needs this
-// exact value to lay the divider out; reading it from the store via a
-// selector returns the same number.
-function ratioOf(tree: Layout): number {
-  return tree.type === "split" ? tree.ratio : 1;
-}
 
 // True when `id` is present as a leaf anywhere in `tree`.
 function containsSession(tree: Layout, id: string): boolean {
@@ -62,7 +55,6 @@ export function PaneSplit() {
             <SplitDivider
               path={path}
               dir={node.dir}
-              ratio={ratioOf(node)}
               setRatio={setRatio}
             />
           )}
@@ -135,53 +127,33 @@ function childStyle(node: Layout, index: 0 | 1) {
 function SplitDivider({
   path,
   dir,
-  ratio,
   setRatio,
 }: {
   path: Path;
   dir: "h" | "v";
-  ratio: number;
   setRatio: (path: Path, ratio: number) => void;
 }) {
-  const startRef = useRef({ start: 0, length: 1, ratio });
-
-  useEffect(() => {
-    startRef.current.ratio = ratio;
-  }, [ratio]);
-
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
-      // currentTarget is only valid during dispatch; the window-level
-      // handlers below need the divider and pointer id captured.
       const divider = e.currentTarget;
       const pointerId = e.pointerId;
-      // The divider spans the whole cross axis; use the pane's main axis for
-      // the drag distance.
-      const element = (divider.parentElement as HTMLElement | null)?.parentElement;
-      const length = element ? element.getBoundingClientRect()[dir === "h" ? "width" : "height"] : 1;
-      startRef.current = {
-        start: dir === "h" ? e.clientX : e.clientY,
-        length: Math.max(length, 1),
-        ratio,
-      };
+      const splitEl = divider.parentElement;
+      const rect = splitEl?.getBoundingClientRect();
+      const totalLength = rect ? (dir === "h" ? rect.width : rect.height) : 0;
+      const origin = rect ? (dir === "h" ? rect.left : rect.top) : 0;
 
-      // Pointer capture keeps the drag alive even when the cursor leaves the
-      // window, and guarantees a pointerup is delivered wherever the button
-      // is released — no window-level listeners that could leak.
       divider.setPointerCapture(pointerId);
 
       const onMove = (ev: PointerEvent) => {
-        const delta =
-          (dir === "h" ? ev.clientX : ev.clientY) - startRef.current.start;
-        const next = startRef.current.ratio + delta / startRef.current.length;
-        setRatio(path, Math.min(1, Math.max(0, next)));
+        if (totalLength > 0) {
+          const currentPos = dir === "h" ? ev.clientX : ev.clientY;
+          const next = Math.min(0.95, Math.max(0.05, (currentPos - origin) / totalLength));
+          setRatio(path, next);
+        }
       };
+
       const endDrag = () => {
-        // Release capture first. Browsers implicitly release capture when
-        // the window blurs, so releasing again can throw — ignore. Real
-        // browsers also fire a synthetic pointerup on release that re-enters
-        // endDrag; it is idempotent (guarded release + removeEventListener).
         try {
           divider.releasePointerCapture(pointerId);
         } catch {
@@ -191,14 +163,12 @@ function SplitDivider({
         window.removeEventListener("pointerup", endDrag);
         window.removeEventListener("blur", endDrag);
       };
+
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", endDrag);
-      // Releasing the button outside the window (or alt-tabbing away) may
-      // never deliver a pointerup; the window blur is the last resort that
-      // cleans the listeners up instead of leaking them.
       window.addEventListener("blur", endDrag);
     },
-    [dir, path, ratio, setRatio],
+    [dir, path, setRatio],
   );
 
   return (

@@ -135,7 +135,7 @@ describe("PaneSplit", () => {
     // The divider measures the split container (100px) to convert the cursor
     // delta into a ratio.
     vi.spyOn(
-      divider.parentElement!.parentElement!,
+      divider.parentElement!,
       "getBoundingClientRect",
     ).mockReturnValue({
       width: 100,
@@ -151,12 +151,12 @@ describe("PaneSplit", () => {
     const capture = vi.spyOn(divider, "setPointerCapture");
     const release = vi.spyOn(divider, "releasePointerCapture");
 
-    // Divider is 100px wide: dragging 25px to the right moves a's share to
-    // (50 + 25) / 100 = 0.75.
+    // Divider is 100px wide: dragging to x=75 moves a's share to
+    // (75 - 0) / 100 = 0.75.
     fireEvent.pointerDown(divider, { pointerId: 1, clientX: 50, buttons: 1 });
     expect(capture).toHaveBeenCalledWith(1);
-    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 75 });
-    fireEvent.pointerUp(divider, { pointerId: 1, clientX: 75 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 75 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 75 });
     expect(release).toHaveBeenCalledWith(1);
 
     const ratio = useTerminalStore.getState().layout;

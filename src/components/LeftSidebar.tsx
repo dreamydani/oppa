@@ -107,14 +107,13 @@ export function LeftSidebar(): React.ReactElement | null {
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = leftSidebarWidth;
+    const sidebarEl = (e.currentTarget as HTMLElement).closest(".left-sidebar");
+    const sidebarLeft = sidebarEl?.getBoundingClientRect().left ?? 0;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const delta = moveEvent.clientX - startX;
       const nextWidth = Math.max(
         MIN_SIDEBAR_WIDTH,
-        Math.min(MAX_SIDEBAR_WIDTH, startWidth + delta)
+        Math.min(MAX_SIDEBAR_WIDTH, moveEvent.clientX - sidebarLeft),
       );
       setLeftSidebarWidth(nextWidth);
     };
