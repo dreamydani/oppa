@@ -197,3 +197,24 @@ export function IconClose({ size = 14, className, ...props }: IconProps): ReactE
     </svg>
   );
 }
+
+export function IconServer({ size = 14, className, ...props }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+      <rect x="2" y="2.5" width="12" height="4.5" rx="1.5" />
+      <rect x="2" y="9" width="12" height="4.5" rx="1.5" />
+      <circle cx="4.5" cy="4.75" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="11.25" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconCopy({ size = 14, className, ...props }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+      <rect x="5" y="5" width="8.5" height="8.5" rx="1.5" />
+      <path d="M11 2.5H3.5C2.95 2.5 2.5 2.95 2.5 3.5V11" />
+    </svg>
+  );
+}
+

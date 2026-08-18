@@ -129,6 +129,28 @@
   gap: 8px;
 }
 
+.context-mcp-config-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  background-color: var(--ctx-surface);
+  color: var(--ctx-text-primary);
+  border: 1px solid var(--ctx-border);
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.context-mcp-config-btn:hover {
+  background-color: var(--ctx-surface-hover);
+  border-color: var(--ctx-border-strong);
+}
+
 .context-add-dropdown-container {
   position: relative;
 }

@@ -5,6 +5,7 @@ import { ContextTree } from "./ContextTree";
 import { ContextInspector } from "./ContextInspector";
 import { ContextStatusPanel } from "./ContextStatusPanel";
 import { PersonaModal } from "./PersonaModal";
+import { McpConfigModal } from "./McpConfigModal";
 import {
   IconSearch,
   IconPlus,
@@ -12,6 +13,7 @@ import {
   IconFile,
   IconPersona,
   IconChevronDown,
+  IconServer,
 } from "./ContextIcons";
 import type { ContextPage } from "../../lib/context/transport";
 import "./ContextStudio.css";
@@ -28,6 +30,7 @@ export function ContextStudio(): ReactElement {
   const getActiveCwd = useTerminalStore((s) => s.getActiveCwd);
 
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
+  const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
 
   // Load context on initial mount
@@ -96,6 +99,16 @@ export function ContextStudio(): ReactElement {
         </div>
 
         <div className="context-studio-actions">
+          <button
+            type="button"
+            className="context-mcp-config-btn"
+            onClick={() => setIsMcpModalOpen(true)}
+            aria-label="MCP Config"
+          >
+            <IconServer size={13} />
+            <span>MCP Config</span>
+          </button>
+
           <div className="context-add-dropdown-container">
             <button
               type="button"
@@ -149,6 +162,15 @@ export function ContextStudio(): ReactElement {
         <PersonaModal
           isOpen={isPersonaModalOpen}
           onClose={() => setIsPersonaModalOpen(false)}
+        />
+      )}
+
+      {/* MCP Configuration Modal */}
+      {isMcpModalOpen && (
+        <McpConfigModal
+          isOpen={isMcpModalOpen}
+          onClose={() => setIsMcpModalOpen(false)}
+          workspacePath={getActiveCwd()}
         />
       )}
     </div>

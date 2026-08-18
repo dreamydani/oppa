@@ -558,4 +558,17 @@ describe("Context Studio & Workbench Mode", () => {
       });
     });
   });
+
+  describe("MCP Config Modal Integration", () => {
+    it("renders MCP Config button and opens modal on click", () => {
+      render(<ContextStudio />);
+      const mcpBtn = screen.getByRole("button", { name: /mcp config/i });
+      expect(mcpBtn).toBeTruthy();
+
+      fireEvent.click(mcpBtn);
+      expect(screen.getByRole("dialog", { name: /mcp server configuration/i })).toBeTruthy();
+      expect(screen.getByText(/~[/\\]\.config[/\\]opencode[/\\]opencode\.json/i)).toBeTruthy();
+    });
+  });
 });
+
