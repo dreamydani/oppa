@@ -230,7 +230,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => setIsMenuOpen((prev) => !prev)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <MoreHorizontal size={13} strokeWidth={1.5} />
+          <MoreHorizontal size={12} strokeWidth={1.5} />
         </button>
 
         {isMenuOpen && (
@@ -299,7 +299,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={handleOpenInBrowser}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <Globe size={13} strokeWidth={1.5} />
+          <Globe size={12} strokeWidth={1.5} />
         </button>
 
         <button
@@ -310,9 +310,9 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onPointerDown={(e) => e.stopPropagation()}
         >
           {isMaximized ? (
-            <Minimize2 size={13} strokeWidth={1.5} />
+            <Minimize2 size={12} strokeWidth={1.5} />
           ) : (
-            <Maximize2 size={13} strokeWidth={1.5} />
+            <Maximize2 size={12} strokeWidth={1.5} />
           )}
         </button>
 
@@ -323,7 +323,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void splitPane("h", path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <SplitSquareHorizontal size={13} strokeWidth={1.5} />
+          <SplitSquareHorizontal size={12} strokeWidth={1.5} />
         </button>
 
         <button
@@ -333,7 +333,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void splitPane("v", path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <SplitSquareVertical size={13} strokeWidth={1.5} />
+          <SplitSquareVertical size={12} strokeWidth={1.5} />
         </button>
 
         <button
@@ -343,7 +343,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void closePane(path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <X size={13} strokeWidth={1.5} />
+          <X size={12} strokeWidth={1.5} />
         </button>
       </div>
     </div>

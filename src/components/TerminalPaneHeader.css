@@ -1,17 +1,18 @@
-/* Terminal Pane Header - Utilitarian Minimalism */
+/* Terminal Pane Header - Ultra-Compact Utilitarian Minimalism */
 
 .terminal-pane-header {
-  height: 32px;
-  min-height: 32px;
-  background-color: #121317;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  background-color: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
+  padding: 0 6px;
   user-select: none;
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 11px;
   flex-shrink: 0;
   box-sizing: border-box;
   position: relative;
@@ -21,7 +22,7 @@
 .terminal-pane-header-left {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   max-width: 200px;
   flex: 0 1 auto;
@@ -29,40 +30,40 @@
 }
 
 .terminal-pane-dot {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  background-color: #52525b;
+  background-color: #3f3f46;
   flex-shrink: 0;
 }
 
 .pane-leaf.focused .terminal-pane-dot {
-  background-color: var(--accent-cyan, #38bdf8);
+  background-color: #a1a1aa;
 }
 
 .terminal-pane-header-title,
 .terminal-pane-title {
-  color: #a1a1aa;
+  color: #71717a;
   font-weight: 500;
-  font-size: 11px;
+  font-size: 10.5px;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
-  transition: color 0.12s ease, background-color 0.12s ease;
+  padding: 1px 3px;
+  border-radius: 2px;
+  transition: color 0.1s ease;
   max-width: 170px;
+  line-height: 1;
 }
 
 .pane-leaf.focused .terminal-pane-title {
-  color: #f4f4f5;
+  color: #e4e4e7;
 }
 
 .terminal-pane-header-title:hover,
 .terminal-pane-title:hover {
-  background-color: rgba(255, 255, 255, 0.06);
   color: #ffffff;
 }
 
@@ -79,16 +80,18 @@
 }
 
 .terminal-pane-header-rename-input {
-  background-color: #090a0d;
+  background-color: #0c0d10;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
+  border-radius: 2px;
   color: #f4f4f5;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
-  padding: 1px 5px;
+  padding: 0 3px;
   outline: none;
-  width: 130px;
+  width: 120px;
+  height: 18px;
+  box-sizing: border-box;
 }
 
 .terminal-pane-header-right {
@@ -101,49 +104,53 @@
 
 .terminal-pane-header-btn {
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   color: #71717a;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color 0.1s ease, background-color 0.1s ease;
   padding: 0;
+  opacity: 0.7;
 }
 
 .terminal-pane-header-btn:hover {
-  background-color: rgba(255, 255, 255, 0.07);
-  color: #f4f4f5;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  opacity: 1;
 }
 
 .terminal-pane-header-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
 
 .terminal-pane-header-btn.active {
   background-color: rgba(255, 255, 255, 0.1);
-  color: #f4f4f5;
+  color: #ffffff;
+  opacity: 1;
 }
 
 .terminal-pane-header-btn.close-btn:hover {
-  background-color: rgba(239, 68, 68, 0.15);
+  background-color: rgba(239, 68, 68, 0.2);
   color: #f87171;
+  opacity: 1;
 }
 
 .terminal-pane-header-menu {
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 4px;
-  background-color: #16171b;
+  margin-top: 2px;
+  background-color: #141518;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  min-width: 140px;
-  padding: 3px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  min-width: 130px;
+  padding: 2px;
   z-index: 50;
 }
 
@@ -151,12 +158,12 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 5px 8px;
-  font-size: 11px;
-  color: #d4d4d8;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  color: #a1a1aa;
   background: transparent;
   border: none;
-  border-radius: 3px;
+  border-radius: 2px;
   text-align: left;
   cursor: pointer;
   transition: background-color 0.1s ease, color 0.1s ease;
