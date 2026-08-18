@@ -7,7 +7,6 @@ import {
   SplitSquareVertical,
   Globe,
   X,
-  Terminal as TerminalIcon,
 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
@@ -194,9 +193,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   return (
     <div className="terminal-pane-header">
       <div className="terminal-pane-header-left">
-        <span className="terminal-pane-icon-badge" onPointerDown={(e) => e.stopPropagation()}>
-          <TerminalIcon size={12} className="terminal-pane-glyph" />
-        </span>
+        <span className="terminal-pane-dot" />
         {isEditing ? (
           <input
             ref={inputRef}
@@ -233,7 +230,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => setIsMenuOpen((prev) => !prev)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <MoreHorizontal size={13} />
+          <MoreHorizontal size={13} strokeWidth={1.5} />
         </button>
 
         {isMenuOpen && (
@@ -302,7 +299,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={handleOpenInBrowser}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <Globe size={13} />
+          <Globe size={13} strokeWidth={1.5} />
         </button>
 
         <button
@@ -312,7 +309,11 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => toggleMaximizePane(id)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          {isMaximized ? (
+            <Minimize2 size={13} strokeWidth={1.5} />
+          ) : (
+            <Maximize2 size={13} strokeWidth={1.5} />
+          )}
         </button>
 
         <button
@@ -322,7 +323,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void splitPane("h", path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <SplitSquareHorizontal size={13} />
+          <SplitSquareHorizontal size={13} strokeWidth={1.5} />
         </button>
 
         <button
@@ -332,7 +333,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void splitPane("v", path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <SplitSquareVertical size={13} />
+          <SplitSquareVertical size={13} strokeWidth={1.5} />
         </button>
 
         <button
@@ -342,7 +343,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           onClick={() => void closePane(path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <X size={13} />
+          <X size={13} strokeWidth={1.5} />
         </button>
       </div>
     </div>
