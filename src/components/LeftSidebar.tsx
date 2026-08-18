@@ -157,7 +157,29 @@ export function LeftSidebar(): React.ReactElement | null {
 
       <div className="left-sidebar-body">
         <div className="tab-list" role="list">
-          {filteredTabs.map((tab) => {
+          {tabs.length === 0 ? (
+            <div className="sidebar-empty-state">
+              <span className="sidebar-empty-title">No Workspaces</span>
+              <span className="sidebar-empty-desc">
+                No project workspaces open.
+              </span>
+              <button
+                type="button"
+                className="sidebar-empty-btn"
+                onClick={() => createWizardTab()}
+              >
+                <PlusIcon size={12} /> New Workspace
+              </button>
+            </div>
+          ) : filteredTabs.length === 0 ? (
+            <div className="sidebar-empty-state">
+              <span className="sidebar-empty-title">No Matches</span>
+              <span className="sidebar-empty-desc">
+                No workspaces matching &quot;{searchQuery}&quot;
+              </span>
+            </div>
+          ) : (
+            filteredTabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             const { title, cwd } = getTabDetails(tab);
             const isEditing = editingTabId === tab.id;
@@ -228,7 +250,8 @@ export function LeftSidebar(): React.ReactElement | null {
                 </button>
               </div>
             );
-          })}
+          })
+        )}
         </div>
       </div>
 

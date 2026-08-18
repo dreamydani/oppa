@@ -188,7 +188,7 @@ impl PtyManager {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::pty::daemon_server::{CancellationToken, DaemonServer};
     use std::sync::mpsc::channel;

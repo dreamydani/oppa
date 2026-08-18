@@ -60,8 +60,8 @@ describe("terminalStore", () => {
     writeFileMock.mockResolvedValue(undefined);
     useTerminalStore.setState({
       sessions: {},
-      tabs: [{ id: "tab-1", layout: { type: "leaf", id: "" }, focusedPath: [] }],
-      activeTabId: "tab-1",
+      tabs: [],
+      activeTabId: "",
       layout: { type: "leaf", id: "" },
       focusedPath: [],
       serializers: {},
@@ -1232,7 +1232,7 @@ describe("terminalStore", () => {
         expect(state.activeTabId).toBe("t1");
       });
 
-      it("resets to a fresh empty tab when the last tab is closed", async () => {
+      it("resets to empty tabs list when the last tab is closed", async () => {
         ptyKillMock.mockResolvedValue(undefined);
         const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
         useTerminalStore.setState({
@@ -1248,8 +1248,8 @@ describe("terminalStore", () => {
         await useTerminalStore.getState().closeTab("t1");
         expect(ptyKillMock).toHaveBeenCalledWith("s1");
         const state = useTerminalStore.getState();
-        expect(state.tabs).toHaveLength(1);
-        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "" });
+        expect(state.tabs).toHaveLength(0);
+        expect(state.activeTabId).toBe("");
         expect(state.sessions).toEqual({});
       });
     });

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { Sparkles } from "lucide-react";
+import { PlusIcon, TerminalIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar";
@@ -31,6 +33,7 @@ function App() {
   const closePane = useTerminalStore((s) => s.closePane);
   const moveFocus = useTerminalStore((s) => s.moveFocus);
   const createTab = useTerminalStore((s) => s.createTab);
+  const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
   const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleLeftSidebar = useTerminalStore((s) => s.toggleLeftSidebar);
@@ -194,6 +197,37 @@ function App() {
             <BrowserViewport />
           ) : activeTab?.isWizard ? (
             <WorkspaceSetupWizard tabId={activeTab.id} />
+          ) : !activeTab ? (
+            <div className="empty-workspace-view" data-testid="empty-workspace-view">
+              <div className="empty-workspace-card">
+                <div className="empty-workspace-icon">
+                  <TerminalIcon size={28} />
+                </div>
+                <h2 className="empty-workspace-title">No Open Workspaces</h2>
+                <p className="empty-workspace-subtitle">
+                  Create a new terminal session, configure a project workspace with the setup wizard, or press <kbd>Ctrl+N</kbd> to launch.
+                </p>
+                <div className="empty-workspace-actions">
+                  <button
+                    type="button"
+                    className="empty-action-btn primary"
+                    onClick={() => void createTab()}
+                  >
+                    <PlusIcon size={14} /> New Terminal
+                  </button>
+                  <button
+                    type="button"
+                    className="empty-action-btn secondary"
+                    onClick={() => createWizardTab()}
+                  >
+                    <Sparkles size={14} /> Setup Wizard
+                  </button>
+                </div>
+                <div className="empty-workspace-shortcut-hint">
+                  Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
+                </div>
+              </div>
+            </div>
           ) : (
             <PaneSplit />
           )}

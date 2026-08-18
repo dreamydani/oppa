@@ -198,4 +198,34 @@ describe("LeftSidebar", () => {
 
     fireEvent.mouseUp(window);
   });
+
+  it("renders empty state when there are no workspaces open", () => {
+    useTerminalStore.setState({
+      tabs: [],
+      activeTabId: "",
+      sessions: {},
+      layout: { type: "leaf", id: "" },
+    });
+
+    render(<LeftSidebar />);
+
+    expect(screen.getByText("No Workspaces")).toBeDefined();
+    expect(screen.getByText("No project workspaces open.")).toBeDefined();
+    const newWorkspaceBtn = screen.getByRole("button", { name: /new workspace/i });
+    expect(newWorkspaceBtn).toBeDefined();
+
+    fireEvent.click(newWorkspaceBtn);
+    const tabs = useTerminalStore.getState().tabs;
+    expect(tabs.length).toBe(1);
+    expect(tabs[0].isWizard).toBe(true);
+  });
+
+  it("renders No Matches state when search query does not match any workspace", () => {
+    render(<LeftSidebar />);
+
+    const searchInput = screen.getByPlaceholderText(/search tabs/i);
+    fireEvent.change(searchInput, { target: { value: "nonexistent-query" } });
+
+    expect(screen.getByText("No Matches")).toBeDefined();
+  });
 });

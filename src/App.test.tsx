@@ -565,4 +565,18 @@ describe("App", () => {
       expect(container.querySelector(".editor-viewport")).toBeNull();
     });
   });
+
+  it("renders empty workspace view when there are no active tabs/workspaces", () => {
+    useTerminalStore.setState({
+      tabs: [],
+      activeTabId: "",
+      sessions: {},
+      layout: { type: "leaf", id: "" },
+    });
+
+    const { container } = render(<App />);
+
+    expect(container.querySelector('[data-testid="empty-workspace-view"]')).not.toBeNull();
+    expect(container.textContent).toContain("No Open Workspaces");
+  });
 });

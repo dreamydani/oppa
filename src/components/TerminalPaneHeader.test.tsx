@@ -33,6 +33,8 @@ describe("TerminalPaneHeader", () => {
           cwd: "/home/user/project",
         },
       },
+      tabs: [],
+      activeTabId: "",
       layout: { type: "leaf", id: "s1" },
       focusedPath: [],
       maximizedSessionId: null,

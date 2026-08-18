@@ -296,44 +296,38 @@ export interface TerminalState {
   setEditorViewMode: (mode: EditorViewMode) => void;
 }
 
-function getSyncedTabs(state: TerminalState): TabState[] {
-  const activeId = state.activeTabId || "tab-1";
-  if (state.tabs && state.tabs.length > 0) {
-    return state.tabs.map((t) =>
-      t.id === activeId
-        ? {
-            ...t,
-            layout: state.layout ?? t.layout,
-            focusedPath: state.focusedPath ?? t.focusedPath,
-          }
-        : t,
-    );
-  }
-  return [
-    {
-      id: activeId,
-      layout: state.layout ?? { type: "leaf", id: "" },
-      focusedPath: state.focusedPath ?? [],
-    },
-  ];
+function isNonEmptyLayout(layout?: Layout): boolean {
+  if (!layout) return false;
+  if (layout.type === "split") return true;
+  return layout.id !== "";
 }
 
-function getActiveTab(state: TerminalState): TabState {
+function getSyncedTabs(state: TerminalState): TabState[] {
+  if (state.tabs && state.tabs.length > 0) {
+    return state.tabs;
+  }
+  if (isNonEmptyLayout(state.layout)) {
+    return [
+      {
+        id: state.activeTabId || "tab-1",
+        layout: state.layout,
+        focusedPath: state.focusedPath ?? [],
+      },
+    ];
+  }
+  return [];
+}
+
+function getActiveTab(state: TerminalState): TabState | undefined {
   const tabs = getSyncedTabs(state);
-  const activeId = state.activeTabId || tabs[0].id;
+  const activeId = state.activeTabId;
   return tabs.find((t) => t.id === activeId) ?? tabs[0];
 }
 
-const initialTab: TabState = {
-  id: "tab-1",
-  layout: { type: "leaf", id: "" },
-  focusedPath: [],
-};
-
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
-  tabs: [initialTab],
-  activeTabId: "tab-1",
+  tabs: [],
+  activeTabId: "",
   layout: { type: "leaf", id: "" },
   focusedPath: [],
   serializers: {},
@@ -615,18 +609,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const remainingTabs = currentTabs.filter((t) => t.id !== targetId);
 
     if (remainingTabs.length === 0) {
-      const freshTabId = `tab-${++nextTabId}`;
-      const freshTab: TabState = {
-        id: freshTabId,
-        layout: { type: "leaf", id: "" },
-        focusedPath: [],
-      };
       set({
         sessions,
         cachedScrollbacks,
-        tabs: [freshTab],
-        activeTabId: freshTabId,
-        layout: freshTab.layout,
+        tabs: [],
+        activeTabId: "",
+        layout: { type: "leaf", id: "" },
         focusedPath: [],
       });
     } else {
@@ -648,8 +636,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           sessions,
           cachedScrollbacks,
           tabs: remainingTabs,
-          layout: activeTab.layout,
-          focusedPath: activeTab.focusedPath,
+          layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
+          focusedPath: activeTab ? activeTab.focusedPath : [],
         });
       }
     }
@@ -690,7 +678,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   setRatio: (path, ratio) => {
     const state = get();
     const activeTab = getActiveTab(state);
-    const tree = activeTab.layout;
+    const tree = activeTab ? activeTab.layout : state.layout;
     const clamped = Math.min(1, Math.max(0, ratio));
     const rebuild = (node: Layout, steps: Path): Layout => {
       if (node.type === "leaf") return node;
@@ -712,11 +700,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
     const next = rebuild(tree, path);
     if (next === tree) return;
-    const activeId = state.activeTabId || activeTab.id;
-    const tabs = getSyncedTabs(state).map((t) =>
-      t.id === activeId ? { ...t, layout: next } : t,
-    );
-    set({ tabs, layout: next });
+    if (activeTab) {
+      const activeId = state.activeTabId || activeTab.id;
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId ? { ...t, layout: next } : t,
+      );
+      set({ tabs, layout: next });
+    } else {
+      set({ layout: next });
+    }
     void get().saveLayout().catch(() => {});
   },
 
@@ -728,22 +720,29 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   splitPane: async (dir, path) => {
     const state = get();
     const activeTab = getActiveTab(state);
-    const target = path ?? activeTab.focusedPath;
-    const tree = activeTab.layout;
+    const tree = activeTab ? activeTab.layout : state.layout;
+    const target = path ?? (activeTab ? activeTab.focusedPath : state.focusedPath);
     const focusedId = focus(tree, target);
     const currentCwd = get().sessions[focusedId]?.cwd;
     const id = await get().spawnSession(currentCwd);
     const nextLayout = split(dir, tree, target, id);
     const nextFocusedPath = [...target, 1];
-    const activeId = state.activeTabId || activeTab.id;
-    const tabs = getSyncedTabs(state).map((t) =>
-      t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
-    );
-    set({
-      tabs,
-      layout: nextLayout,
-      focusedPath: nextFocusedPath,
-    });
+    if (activeTab) {
+      const activeId = state.activeTabId || activeTab.id;
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
+      );
+      set({
+        tabs,
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    } else {
+      set({
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    }
     void get().saveLayout().catch(() => {});
   },
 
@@ -751,10 +750,21 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   closePane: async (path) => {
     const state = get();
     const activeTab = getActiveTab(state);
-    const target = path ?? activeTab.focusedPath;
-    const tree = activeTab.layout;
+    const tree = activeTab ? activeTab.layout : state.layout;
+    const target = path ?? (activeTab ? activeTab.focusedPath : state.focusedPath);
     const removedId = focus(tree, target);
     const next = remove(tree, target);
+    if (next === null) {
+      if (activeTab) {
+        await get().closeTab(activeTab.id);
+      } else {
+        set({
+          layout: { type: "leaf", id: "" },
+          focusedPath: [],
+        });
+      }
+      return;
+    }
     if (get().sessions[removedId]) {
       await get().killSession(removedId);
     }
@@ -765,19 +775,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     delete sessions[removedId];
     const cachedScrollbacks = { ...get().cachedScrollbacks };
     delete cachedScrollbacks[removedId];
-    const nextLayout: Layout = next === null ? { type: "leaf", id: "" } : next;
-    const nextFocusedPath: Path = next === null ? [] : firstLeafPath(next);
-    const activeId = state.activeTabId || activeTab.id;
-    const tabs = getSyncedTabs(state).map((t) =>
-      t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
-    );
-    set({
-      sessions,
-      cachedScrollbacks,
-      tabs,
-      layout: nextLayout,
-      focusedPath: nextFocusedPath,
-    });
+    const nextLayout: Layout = next;
+    const nextFocusedPath: Path = firstLeafPath(next);
+    if (activeTab) {
+      const activeId = state.activeTabId || activeTab.id;
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
+      );
+      set({
+        sessions,
+        cachedScrollbacks,
+        tabs,
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    } else {
+      set({
+        sessions,
+        cachedScrollbacks,
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    }
     void get().saveLayout().catch(() => {});
   },
 
@@ -793,6 +812,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
     const state = get();
     const activeTab = getActiveTab(state);
+    if (!activeTab) return;
     const focusedId = focus(activeTab.layout, activeTab.focusedPath);
     if (focusedId) {
       set({ maximizedSessionId: focusedId });
@@ -812,6 +832,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   moveFocus: (dir) => {
     const state = get();
     const activeTab = getActiveTab(state);
+    if (!activeTab) return;
     const tree = activeTab.layout;
     const path = activeTab.focusedPath;
     if (path.length === 0) return;
@@ -886,7 +907,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const byId = new Map((parsed.sessions ?? []).map((s) => [s.id, s]));
       const remap: Record<string, string> = {};
 
-      if (Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+      if (Array.isArray(parsed.tabs)) {
+        if (parsed.tabs.length === 0) {
+          set({
+            tabs: [],
+            activeTabId: "",
+            layout: { type: "leaf", id: "" },
+            focusedPath: [],
+          });
+          return;
+        }
         for (const tab of parsed.tabs) {
           for (const oldId of leafIds(tab.layout)) {
             if (oldId === "" || remap[oldId]) continue;
@@ -982,8 +1012,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   getActiveCwd: () => {
     const state = get();
     const activeTab = getActiveTab(state);
-    const leafId = focus(activeTab.layout, activeTab.focusedPath);
-    return state.sessions[leafId]?.cwd;
+    if (!activeTab) return undefined;
+    try {
+      const leafId = focus(activeTab.layout, activeTab.focusedPath);
+      return state.sessions[leafId]?.cwd;
+    } catch {
+      return undefined;
+    }
   },
 
   openWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: true }),
