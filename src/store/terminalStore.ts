@@ -54,7 +54,7 @@ export interface WorkspaceConfig {
 
 export type SessionStatus = "running" | "exited" | "error";
 
-export type AppMode = "terminal" | "browser" | "editor";
+export type AppMode = "terminal" | "browser" | "editor" | "context";
 export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
 
 export type EditorViewMode = "edit" | "diff" | "markdown-preview" | "markdown-split";
@@ -164,6 +164,7 @@ export interface SessionInfo {
   error?: string;
   cols: number;
   rows: number;
+  personaId?: string | null;
 }
 
 export interface TabState {
@@ -254,6 +255,7 @@ export interface TerminalState {
   setSessionStatus: (id: string, status: SessionStatus) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
   renameSession: (id: string, title: string) => void;
+  setSessionPersona: (sessionId: string, personaId: string | null) => void;
   substituteSessionId: (from: string, to: string) => void;
   createTab: (cwd?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
@@ -556,6 +558,25 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         sessions: {
           ...state.sessions,
           [id]: { ...session, title },
+        },
+      };
+    });
+    if (updated) {
+      void get().saveLayout().catch(() => {});
+    }
+  },
+
+  setSessionPersona: (sessionId, personaId) => {
+    let updated = false;
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      if (session.personaId === personaId) return state;
+      updated = true;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, personaId },
         },
       };
     });
