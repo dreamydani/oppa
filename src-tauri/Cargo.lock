@@ -2488,6 +2488,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "dirs",
  "parking_lot",
  "portable-pty",
  "rusqlite",
@@ -2496,6 +2497,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
  "vt100",
 ]

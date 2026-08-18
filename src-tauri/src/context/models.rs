@@ -17,6 +17,19 @@ pub struct ContextPage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextSearchResult {
+    pub id: String,
+    pub scope: String,
+    pub category: String,
+    pub path: String,
+    pub title: String,
+    pub icon: String,
+    pub abstract_l0: String,
+    pub overview_l1: String,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentPersona {
     pub id: String,
     pub name: String,
