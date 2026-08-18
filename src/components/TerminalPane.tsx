@@ -71,10 +71,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
       theme: {
-        background: "#141414",
-        foreground: "#ededec",
-        cursor: "#ededec",
-        selectionBackground: "rgba(255, 255, 255, 0.15)",
+        background: "#0c0d12",
+        foreground: "#f3f4f6",
+        cursor: "#38bdf8",
+        selectionBackground: "rgba(56, 189, 248, 0.25)",
       },
       allowProposedApi: true,
     });
