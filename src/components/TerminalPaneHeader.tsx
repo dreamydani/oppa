@@ -13,30 +13,30 @@ export interface TerminalPaneHeaderProps {
   onClear?: () => void;
 }
 
-/* Bespoke High-End Micro Icons */
+/* Bespoke Vector Icons (16x16) */
 function IconMore() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-      <circle cx="3.5" cy="8" r="1.25" />
-      <circle cx="8" cy="8" r="1.25" />
-      <circle cx="12.5" cy="8" r="1.25" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <circle cx="3" cy="8" r="1.4" />
+      <circle cx="8" cy="8" r="1.4" />
+      <circle cx="13" cy="8" r="1.4" />
     </svg>
   );
 }
 
 function IconGlobe() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6" />
-      <line x1="2" y1="8" x2="14" y2="8" />
-      <path d="M8 2a9 9 0 0 0 0 12 9 9 0 0 0 0-12z" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6.2" />
+      <line x1="1.8" y1="8" x2="14.2" y2="8" />
+      <path d="M8 1.8a9.2 9.2 0 0 0 0 12.4 9.2 9.2 0 0 0 0-12.4z" />
     </svg>
   );
 }
 
 function IconMaximize() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
     </svg>
   );
@@ -44,7 +44,7 @@ function IconMaximize() {
 
 function IconMinimize() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="5" width="9" height="9" rx="1.5" />
       <path d="M5 2h7a2 2 0 0 1 2 2v7" />
     </svg>
@@ -53,27 +53,27 @@ function IconMinimize() {
 
 function IconSplitRight() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="2" width="12" height="12" rx="2" />
-      <line x1="8" y1="2" x2="8" y2="14" strokeWidth="1.2" />
+      <line x1="8" y1="2" x2="8" y2="14" strokeWidth="1.25" />
     </svg>
   );
 }
 
 function IconSplitDown() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="2" width="12" height="12" rx="2" />
-      <line x1="2" y1="8" x2="14" y2="8" strokeWidth="1.2" />
+      <line x1="2" y1="8" x2="14" y2="8" strokeWidth="1.25" />
     </svg>
   );
 }
 
 function IconClose() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-      <line x1="4" y1="4" x2="12" y2="12" />
-      <line x1="12" y1="4" x2="4" y2="12" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
+      <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
+      <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
     </svg>
   );
 }
@@ -249,7 +249,6 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   return (
     <div className="terminal-pane-header">
       <div className="terminal-pane-header-left">
-        <span className="terminal-pane-dot" />
         {isEditing ? (
           <input
             ref={inputRef}
