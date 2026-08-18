@@ -18,10 +18,13 @@ import {
   remove,
   focus,
   firstLeafPath,
+  findLeafPath,
   substituteLeafId,
   remapLeafIds,
+  swapLeaves,
+  moveLeaf,
 } from "../lib/pane-manager/layout";
-import type { Layout, Path } from "../lib/pane-manager/layout";
+import type { Layout, Path, DropZone } from "../lib/pane-manager/layout";
 import { createGridLayout } from "../lib/pane-manager/gridLayout";
 import {
   saveRecents,
@@ -37,7 +40,7 @@ import { readFile, writeFile } from "../lib/fs/transport";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
-export type { Layout, Path } from "../lib/pane-manager/layout";
+export type { Layout, Path, DropZone } from "../lib/pane-manager/layout";
 export type { RecentWorkspace, WorkspacePreset } from "../lib/workspace/transport";
 
 export interface WorkspaceConfig {
@@ -190,6 +193,29 @@ function nodeAt(tree: Layout, prefix: Path): Layout {
   return node;
 }
 
+// Find path of the adjacent sibling leaf in direction dir.
+function findAdjacentPath(
+  tree: Layout,
+  path: Path,
+  dir: "left" | "right" | "up" | "down",
+): Path | null {
+  if (path.length === 0) return null;
+  const target = dir === "left" || dir === "up" ? 0 : 1;
+  const axis = dir === "left" || dir === "right" ? "h" : "v";
+  for (let i = path.length - 1; i >= 0; i--) {
+    const ancestor = nodeAt(tree, path.slice(0, i));
+    if (ancestor.type !== "split" || ancestor.dir !== axis) continue;
+    if (path[i] === target) continue;
+    const destChild = path[i] === 0 ? ancestor.b : ancestor.a;
+    return [
+      ...path.slice(0, i),
+      path[i] === 0 ? 1 : 0,
+      ...firstLeafPath(destChild),
+    ];
+  }
+  return null;
+}
+
 // Leaf ids in depth-first (a before b) order — the deterministic spawn order
 // a persisted-layout restore uses.
 function leafIds(tree: Layout): string[] {
@@ -242,6 +268,9 @@ export interface TerminalState {
   toggleMaximizePane: (id?: string) => void;
   focusPane: (path: Path) => void;
   moveFocus: (dir: "left" | "right" | "up" | "down") => void;
+  swapPanes: (sourceId: string, targetId: string) => void;
+  movePane: (sourceId: string, targetId: string, zone: DropZone) => void;
+  swapFocusedPane: (dir: "left" | "right" | "up" | "down") => void;
   saveLayout: () => Promise<void>;
   loadLayout: () => Promise<void>;
   leftSidebarOpen: boolean;
@@ -835,29 +864,121 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (!activeTab) return;
     const tree = activeTab.layout;
     const path = activeTab.focusedPath;
-    if (path.length === 0) return;
-    const target = dir === "left" || dir === "up" ? 0 : 1;
-    const axis = dir === "left" || dir === "right" ? "h" : "v";
-    for (let i = path.length - 1; i >= 0; i--) {
-      const ancestor = nodeAt(tree, path.slice(0, i));
-      if (ancestor.type !== "split" || ancestor.dir !== axis) continue;
-      if (path[i] === target) continue;
-      const destChild = path[i] === 0 ? ancestor.b : ancestor.a;
-      const newFocusedPath = [
-        ...path.slice(0, i),
-        path[i] === 0 ? 1 : 0,
-        ...firstLeafPath(destChild),
-      ];
+    const newFocusedPath = findAdjacentPath(tree, path, dir);
+    if (!newFocusedPath) return;
+
+    const activeId = state.activeTabId || activeTab.id;
+    const tabs = getSyncedTabs(state).map((t) =>
+      t.id === activeId ? { ...t, focusedPath: newFocusedPath } : t,
+    );
+    set({
+      tabs,
+      focusedPath: newFocusedPath,
+    });
+  },
+
+  // Swap positions of two panes and update focused path to track the focused session.
+  swapPanes: (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const tree = activeTab ? activeTab.layout : state.layout;
+    const nextLayout = swapLeaves(tree, sourceId, targetId);
+    if (nextLayout === tree) return;
+
+    const currentFocusedPath = activeTab ? activeTab.focusedPath : state.focusedPath;
+    let focusedSessionId: string | null = null;
+    try {
+      focusedSessionId = focus(tree, currentFocusedPath);
+    } catch {
+      focusedSessionId = null;
+    }
+
+    let nextFocusedPath = currentFocusedPath;
+    if (focusedSessionId) {
+      const found = findLeafPath(nextLayout, focusedSessionId);
+      if (found !== null) {
+        nextFocusedPath = found;
+      }
+    }
+
+    if (activeTab) {
       const activeId = state.activeTabId || activeTab.id;
       const tabs = getSyncedTabs(state).map((t) =>
-        t.id === activeId ? { ...t, focusedPath: newFocusedPath } : t,
+        t.id === activeId
+          ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath }
+          : t,
       );
       set({
         tabs,
-        focusedPath: newFocusedPath,
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
       });
+    } else {
+      set({
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    }
+    void get().saveLayout().catch(() => {});
+  },
+
+  // Move source pane relative to target pane and focus the source pane.
+  movePane: (sourceId, targetId, zone) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const tree = activeTab ? activeTab.layout : state.layout;
+    const nextLayout = moveLeaf(tree, sourceId, targetId, zone);
+    if (nextLayout === tree) return;
+
+    const nextFocusedPath =
+      findLeafPath(nextLayout, sourceId) ?? firstLeafPath(nextLayout);
+
+    if (activeTab) {
+      const activeId = state.activeTabId || activeTab.id;
+      const tabs = getSyncedTabs(state).map((t) =>
+        t.id === activeId
+          ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath }
+          : t,
+      );
+      set({
+        tabs,
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    } else {
+      set({
+        layout: nextLayout,
+        focusedPath: nextFocusedPath,
+      });
+    }
+    void get().saveLayout().catch(() => {});
+  },
+
+  // Swap the currently focused pane with its adjacent sibling in direction dir.
+  swapFocusedPane: (dir) => {
+    const state = get();
+    const activeTab = getActiveTab(state);
+    const tree = activeTab ? activeTab.layout : state.layout;
+    const path = activeTab ? activeTab.focusedPath : state.focusedPath;
+    let sourceId: string;
+    try {
+      sourceId = focus(tree, path);
+    } catch {
       return;
     }
+    if (!sourceId) return;
+    const targetPath = findAdjacentPath(tree, path, dir);
+    if (!targetPath) return;
+    let targetId: string;
+    try {
+      targetId = focus(tree, targetPath);
+    } catch {
+      return;
+    }
+    if (!targetId || targetId === sourceId) return;
+    get().swapPanes(sourceId, targetId);
   },
 
   // Persist the current multi-tab layout, session state, and active scrollbacks.

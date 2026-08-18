@@ -2188,5 +2188,391 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().activeAppMode).toBe("editor");
     });
   });
+
+  describe("swapPanes", () => {
+    beforeEach(() => {
+      useTerminalStore.setState({ ready: true });
+    });
+
+    it("swaps two leaf positions in single-tab layout and updates focusedPath to follow focused session", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p1" },
+          b: { type: "leaf", id: "p2" },
+        },
+        focusedPath: [0],
+        sessions: {
+          p1: { id: "p1", title: "p1", status: "running", cols: 80, rows: 24 },
+          p2: { id: "p2", title: "p2", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().swapPanes("p1", "p2");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "p2" },
+        b: { type: "leaf", id: "p1" },
+      });
+      // Focused session was p1 at [0]; after swap, p1 is at [1], so focusedPath becomes [1]
+      expect(state.focusedPath).toEqual([1]);
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("swaps leaves in the active tab of multi-tab state", () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "t1",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.5,
+              a: { type: "leaf", id: "p1" },
+              b: { type: "leaf", id: "p2" },
+            },
+            focusedPath: [1],
+          },
+          {
+            id: "t2",
+            layout: { type: "leaf", id: "p3" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "t1",
+        sessions: {
+          p1: { id: "p1", title: "p1", status: "running", cols: 80, rows: 24 },
+          p2: { id: "p2", title: "p2", status: "running", cols: 80, rows: 24 },
+          p3: { id: "p3", title: "p3", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().swapPanes("p1", "p2");
+
+      const state = useTerminalStore.getState();
+      const tab1 = state.tabs.find((t) => t.id === "t1");
+      expect(tab1?.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "p2" },
+        b: { type: "leaf", id: "p1" },
+      });
+      // Focused session was p2 at [1]; after swap, p2 is at [0]
+      expect(tab1?.focusedPath).toEqual([0]);
+      expect(state.layout).toEqual(tab1?.layout);
+      expect(state.focusedPath).toEqual([0]);
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("does nothing when swapping identical IDs or missing IDs", () => {
+      const tree = {
+        type: "split" as const,
+        dir: "h" as const,
+        ratio: 0.5,
+        a: { type: "leaf" as const, id: "p1" },
+        b: { type: "leaf" as const, id: "p2" },
+      };
+      useTerminalStore.setState({
+        layout: tree,
+        focusedPath: [0],
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().swapPanes("p1", "p1");
+      useTerminalStore.getState().swapPanes("p1", "nonexistent");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toBe(tree);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("movePane", () => {
+    beforeEach(() => {
+      useTerminalStore.setState({ ready: true });
+    });
+
+    it("moves source pane relative to target pane and updates focusedPath to sourceId", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p1" },
+          b: { type: "leaf", id: "p2" },
+        },
+        focusedPath: [0],
+        sessions: {
+          p1: { id: "p1", title: "p1", status: "running", cols: 80, rows: 24 },
+          p2: { id: "p2", title: "p2", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().movePane("p1", "p2", "bottom");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "p2" },
+        b: { type: "leaf", id: "p1" },
+      });
+      // sourceId p1 is now at [1]
+      expect(state.focusedPath).toEqual([1]);
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("updates multi-tab active tab layout and focusedPath on movePane", () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "t1",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.5,
+              a: {
+                type: "split",
+                dir: "v",
+                ratio: 0.5,
+                a: { type: "leaf", id: "p1" },
+                b: { type: "leaf", id: "p2" },
+              },
+              b: { type: "leaf", id: "p3" },
+            },
+            focusedPath: [0, 0],
+          },
+        ],
+        activeTabId: "t1",
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().movePane("p3", "p1", "top");
+
+      const state = useTerminalStore.getState();
+      const tab = state.tabs[0];
+      expect(tab.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "v",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p3" },
+          b: { type: "leaf", id: "p1" },
+        },
+        b: { type: "leaf", id: "p2" },
+      });
+      // sourceId p3 is now at [0, 0]
+      expect(tab.focusedPath).toEqual([0, 0]);
+      expect(state.focusedPath).toEqual([0, 0]);
+      expect(saveLayoutMock).toHaveBeenCalled();
+    });
+
+    it("does nothing when moving identical IDs or missing IDs", () => {
+      const tree = {
+        type: "split" as const,
+        dir: "h" as const,
+        ratio: 0.5,
+        a: { type: "leaf" as const, id: "p1" },
+        b: { type: "leaf" as const, id: "p2" },
+      };
+      useTerminalStore.setState({
+        layout: tree,
+        focusedPath: [0],
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().movePane("p1", "p1", "left");
+      useTerminalStore.getState().movePane("p1", "missing", "top");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toBe(tree);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("swapFocusedPane", () => {
+    beforeEach(() => {
+      useTerminalStore.setState({ ready: true });
+    });
+
+    it("swaps focused pane with adjacent sibling to the right", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p1" },
+          b: { type: "leaf", id: "p2" },
+        },
+        focusedPath: [0],
+      });
+
+      useTerminalStore.getState().swapFocusedPane("right");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "p2" },
+        b: { type: "leaf", id: "p1" },
+      });
+      // Focus follows p1 to its new position at [1]
+      expect(state.focusedPath).toEqual([1]);
+    });
+
+    it("swaps focused pane with adjacent sibling to the left", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p1" },
+          b: { type: "leaf", id: "p2" },
+        },
+        focusedPath: [1],
+      });
+
+      useTerminalStore.getState().swapFocusedPane("left");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "p2" },
+        b: { type: "leaf", id: "p1" },
+      });
+      // Focus follows p2 to its new position at [0]
+      expect(state.focusedPath).toEqual([0]);
+    });
+
+    it("swaps focused pane with adjacent vertical sibling up and down", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "v",
+          ratio: 0.5,
+          a: { type: "leaf", id: "top" },
+          b: { type: "leaf", id: "bottom" },
+        },
+        focusedPath: [0],
+      });
+
+      useTerminalStore.getState().swapFocusedPane("down");
+
+      let state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "bottom" },
+        b: { type: "leaf", id: "top" },
+      });
+      expect(state.focusedPath).toEqual([1]); // top is now at [1]
+
+      useTerminalStore.getState().swapFocusedPane("up");
+
+      state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "top" },
+        b: { type: "leaf", id: "bottom" },
+      });
+      expect(state.focusedPath).toEqual([0]); // top is back at [0]
+    });
+
+    it("swaps across nested splits", () => {
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "p1" },
+            b: { type: "leaf", id: "p2" },
+          },
+          b: { type: "leaf", id: "p3" },
+        },
+        focusedPath: [0, 0], // p1
+      });
+
+      // Swapping right from p1 reaches p3
+      useTerminalStore.getState().swapFocusedPane("right");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "v",
+          ratio: 0.5,
+          a: { type: "leaf", id: "p3" },
+          b: { type: "leaf", id: "p2" },
+        },
+        b: { type: "leaf", id: "p1" },
+      });
+      expect(state.focusedPath).toEqual([1]); // p1 moved to [1]
+    });
+
+    it("no-ops when there is no adjacent pane in the specified direction", () => {
+      const tree = {
+        type: "split" as const,
+        dir: "h" as const,
+        ratio: 0.5,
+        a: { type: "leaf" as const, id: "p1" },
+        b: { type: "leaf" as const, id: "p2" },
+      };
+      useTerminalStore.setState({
+        layout: tree,
+        focusedPath: [0],
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().swapFocusedPane("left"); // already leftmost
+      useTerminalStore.getState().swapFocusedPane("up"); // no vertical split
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toBe(tree);
+      expect(state.focusedPath).toEqual([0]);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+    });
+
+    it("no-ops on a single leaf root", () => {
+      const tree = { type: "leaf" as const, id: "p1" };
+      useTerminalStore.setState({
+        layout: tree,
+        focusedPath: [],
+      });
+      saveLayoutMock.mockClear();
+
+      useTerminalStore.getState().swapFocusedPane("right");
+
+      const state = useTerminalStore.getState();
+      expect(state.layout).toBe(tree);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+    });
+  });
 });
 

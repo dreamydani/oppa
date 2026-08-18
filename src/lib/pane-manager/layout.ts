@@ -99,6 +99,19 @@ export function firstLeafPath(tree: Layout): Path {
   return [0, ...firstLeafPath(tree.a)];
 }
 
+// Find the path to the leaf with `id`, or null if not found.
+export function findLeafPath(tree: Layout, id: string): Path | null {
+  if (!id) return null;
+  if (tree.type === "leaf") {
+    return tree.id === id ? [] : null;
+  }
+  const inA = findLeafPath(tree.a, id);
+  if (inA !== null) return [0, ...inA];
+  const inB = findLeafPath(tree.b, id);
+  if (inB !== null) return [1, ...inB];
+  return null;
+}
+
 export type DropZone = "top" | "bottom" | "left" | "right";
 
 // Check if a leaf with `id` exists in the tree.

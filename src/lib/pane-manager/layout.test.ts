@@ -6,6 +6,7 @@ import {
   substituteLeafId,
   swapLeaves,
   moveLeaf,
+  findLeafPath,
 } from "./layout";
 import type { Layout } from "./layout";
 
@@ -269,6 +270,31 @@ describe("layout", () => {
       expect(movedLeft).toEqual(
         splitTree("v", leaf("a"), splitTree("h", leaf("c"), leaf("b"))),
       );
+    });
+  });
+
+  describe("findLeafPath", () => {
+    it("returns empty array for root leaf", () => {
+      const tree = leaf("a");
+      expect(findLeafPath(tree, "a")).toEqual([]);
+    });
+
+    it("returns null for non-existent leaf id or empty id", () => {
+      const tree = leaf("a");
+      expect(findLeafPath(tree, "b")).toBeNull();
+      expect(findLeafPath(tree, "")).toBeNull();
+    });
+
+    it("finds paths in nested splits", () => {
+      const tree = splitTree(
+        "h",
+        splitTree("v", leaf("a"), leaf("b")),
+        leaf("c"),
+      );
+      expect(findLeafPath(tree, "a")).toEqual([0, 0]);
+      expect(findLeafPath(tree, "b")).toEqual([0, 1]);
+      expect(findLeafPath(tree, "c")).toEqual([1]);
+      expect(findLeafPath(tree, "d")).toBeNull();
     });
   });
 });
