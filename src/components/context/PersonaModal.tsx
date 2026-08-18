@@ -1,19 +1,20 @@
 import { useState, type ReactElement } from "react";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
+import { IconClose, IconPersona, IconCheck } from "./ContextIcons";
 import type { AgentPersona } from "../../lib/context/transport";
 
 export interface PersonaModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialPersona?: AgentPersona | null;
+  initialPersona?: AgentPersona;
 }
 
 const SCOPE_OPTIONS = [
-  { id: "global", label: "Global Profile" },
-  { id: "workspace", label: "Workspace" },
+  { id: "global", label: "Global Standards" },
+  { id: "workspace", label: "Workspace Memory" },
   { id: "architecture", label: "Architecture" },
-  { id: "quirks", label: "Quirks" },
+  { id: "quirks", label: "Solved Quirks" },
   { id: "runbooks", label: "Runbooks" },
 ];
 
@@ -26,7 +27,7 @@ export function PersonaModal({
   const getActiveCwd = useTerminalStore((s) => s.getActiveCwd);
 
   const [name, setName] = useState(initialPersona?.name || "");
-  const [icon, setIcon] = useState(initialPersona?.icon || "🎭");
+  const [icon] = useState(initialPersona?.icon || "persona");
   const [tagline, setTagline] = useState(initialPersona?.tagline || "");
   const [systemPrompt, setSystemPrompt] = useState(
     initialPersona?.system_prompt || ""
@@ -56,7 +57,7 @@ export function PersonaModal({
     const persona: AgentPersona = {
       id,
       name: name.trim(),
-      icon: icon.trim() || "🎭",
+      icon: icon.trim() || "persona",
       tagline: tagline.trim(),
       system_prompt: systemPrompt.trim(),
       attached_scopes: attachedScopes,
@@ -81,9 +82,11 @@ export function PersonaModal({
       >
         <div className="persona-modal-header">
           <div className="persona-modal-title-box">
-            <span className="persona-modal-icon-preview">{icon || "🎭"}</span>
+            <span className="persona-modal-icon-preview">
+              <IconPersona size={16} />
+            </span>
             <h3 className="persona-modal-title">
-              {initialPersona ? "Edit Persona" : "Create Persona"}
+              {initialPersona ? "Edit Persona" : "Create Agent Persona"}
             </h3>
           </div>
           <button
@@ -92,24 +95,12 @@ export function PersonaModal({
             onClick={onClose}
             aria-label="Close modal"
           >
-            ✕
+            <IconClose size={13} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="persona-modal-form">
           <div className="persona-modal-row">
-            <div className="persona-input-group icon-field">
-              <label htmlFor="persona-icon-input">Icon</label>
-              <input
-                id="persona-icon-input"
-                type="text"
-                className="persona-input"
-                placeholder="🎭"
-                value={icon}
-                onChange={(e) => setIcon(e.target.value)}
-                maxLength={4}
-              />
-            </div>
             <div className="persona-input-group name-field">
               <label htmlFor="persona-name-input">Persona Name</label>
               <input
@@ -141,9 +132,9 @@ export function PersonaModal({
             <label htmlFor="persona-prompt-input">System Rules & Persona Prompt</label>
             <textarea
               id="persona-prompt-input"
-              className="persona-textarea"
-              rows={5}
-              placeholder="System rules & behavioral prompt..."
+              className="persona-textarea monospace"
+              rows={6}
+              placeholder="System rules and behavioral prompt for agent CLI session..."
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
             />
@@ -164,6 +155,9 @@ export function PersonaModal({
                       checked={checked}
                       onChange={() => handleScopeToggle(scope.id)}
                     />
+                    <span className="scope-checkbox-indicator">
+                      {checked && <IconCheck size={10} />}
+                    </span>
                     <span>{scope.label}</span>
                   </label>
                 );

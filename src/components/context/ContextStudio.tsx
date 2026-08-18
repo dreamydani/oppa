@@ -5,6 +5,14 @@ import { ContextTree } from "./ContextTree";
 import { ContextInspector } from "./ContextInspector";
 import { ContextStatusPanel } from "./ContextStatusPanel";
 import { PersonaModal } from "./PersonaModal";
+import {
+  IconSearch,
+  IconPlus,
+  IconClose,
+  IconFile,
+  IconPersona,
+  IconChevronDown,
+} from "./ContextIcons";
 import type { ContextPage } from "../../lib/context/transport";
 import "./ContextStudio.css";
 
@@ -46,7 +54,7 @@ export function ContextStudio(): ReactElement {
       category: "architecture",
       path: `architecture/note-${Date.now().toString(36)}`,
       title: "Untitled Note",
-      icon: "📝",
+      icon: "file",
       abstract_l0: "",
       overview_l1: "",
       details_l2: "",
@@ -61,10 +69,10 @@ export function ContextStudio(): ReactElement {
 
   return (
     <div className="context-studio" data-testid="context-studio">
-      {/* Top Header Bar */}
+      {/* Minimalist Studio Top Bar */}
       <header className="context-studio-header">
         <div className="context-search-bar-wrapper">
-          <span className="context-search-icon">🔍</span>
+          <IconSearch size={14} className="context-search-icon" />
           <input
             type="text"
             className="context-search-input"
@@ -72,15 +80,18 @@ export function ContextStudio(): ReactElement {
             value={searchQuery}
             onChange={(e) => handleSearchChange(e.target.value)}
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button
               type="button"
               className="context-search-clear-btn"
               onClick={handleClearSearch}
               title="Clear search"
+              aria-label="Clear search"
             >
-              ✕
+              <IconClose size={12} />
             </button>
+          ) : (
+            <span className="context-search-kbd">⌘K</span>
           )}
         </div>
 
@@ -92,7 +103,9 @@ export function ContextStudio(): ReactElement {
               onClick={() => setIsAddMenuOpen((prev) => !prev)}
               aria-label="+ Add Item"
             >
-              + Add Item <span className="dropdown-arrow">▼</span>
+              <IconPlus size={13} />
+              <span>+ Add Item</span>
+              <IconChevronDown size={10} className="dropdown-arrow-icon" />
             </button>
             {isAddMenuOpen && (
               <div className="context-add-menu">
@@ -101,7 +114,7 @@ export function ContextStudio(): ReactElement {
                   className="context-add-menu-item"
                   onClick={handleCreateDraftNote}
                 >
-                  <span className="menu-item-icon">📝</span>
+                  <IconFile size={14} className="menu-item-icon" />
                   <span>+ New Memory Note</span>
                 </button>
                 <button
@@ -112,7 +125,7 @@ export function ContextStudio(): ReactElement {
                     setIsPersonaModalOpen(true);
                   }}
                 >
-                  <span className="menu-item-icon">🎭</span>
+                  <IconPersona size={14} className="menu-item-icon" />
                   <span>+ New Persona</span>
                 </button>
               </div>
@@ -121,10 +134,13 @@ export function ContextStudio(): ReactElement {
         </div>
       </header>
 
-      {/* 3-Column Studio Layout */}
+      {/* 3-Column Studio Workbench */}
       <div className="context-studio-workbench">
         <ContextTree onOpenPersonaModal={() => setIsPersonaModalOpen(true)} />
-        <ContextInspector />
+        <ContextInspector
+          onOpenNewNote={handleCreateDraftNote}
+          onOpenNewPersona={() => setIsPersonaModalOpen(true)}
+        />
         <ContextStatusPanel />
       </div>
 

@@ -596,7 +596,7 @@ describe("App", () => {
     expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
   });
 
-  it("renders BrowserViewport in main-viewport when activeAppMode is 'browser'", () => {
+  it("renders BrowserViewport in main-viewport when activeAppMode is 'browser' and hides sidebars", () => {
     useTerminalStore.setState({
       activeAppMode: "browser",
       leftSidebarOpen: true,
@@ -609,13 +609,15 @@ describe("App", () => {
     const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
     expect(browserWrapper.style.display).toBe("flex");
     expect(terminalWrapper.style.display).toBe("none");
-    expect(container.querySelector(".left-sidebar")).not.toBeNull();
-    expect(container.querySelector(".right-sidebar")).not.toBeNull();
+    expect(container.querySelector(".left-sidebar")).toBeNull();
+    expect(container.querySelector(".right-sidebar")).toBeNull();
   });
 
-  it("switches between terminal PaneSplit and BrowserViewport when mode changes", async () => {
+  it("switches between terminal PaneSplit and BrowserViewport when mode changes and toggles sidebars", async () => {
     useTerminalStore.setState({
       activeAppMode: "terminal",
+      leftSidebarOpen: true,
+      rightSidebarOpen: true,
     });
     const { container } = render(<App />);
 
@@ -623,6 +625,7 @@ describe("App", () => {
     const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
     expect(terminalWrapper.style.display).toBe("flex");
     expect(browserWrapper.style.display).toBe("none");
+    expect(container.querySelector(".left-sidebar")).not.toBeNull();
 
     // Switch to browser
     useTerminalStore.getState().setAppMode("browser");
@@ -630,6 +633,7 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(browserWrapper.style.display).toBe("flex");
       expect(terminalWrapper.style.display).toBe("none");
+      expect(container.querySelector(".left-sidebar")).toBeNull();
     });
 
     // Switch back to terminal
@@ -638,6 +642,7 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(terminalWrapper.style.display).toBe("flex");
       expect(browserWrapper.style.display).toBe("none");
+      expect(container.querySelector(".left-sidebar")).not.toBeNull();
     });
   });
 
@@ -686,7 +691,7 @@ describe("App", () => {
     });
   });
 
-  it("renders ContextStudio in main-viewport when activeAppMode is 'context'", () => {
+  it("renders ContextStudio in main-viewport when activeAppMode is 'context' and hides sidebars", () => {
     useTerminalStore.setState({
       activeAppMode: "context",
       leftSidebarOpen: true,
@@ -699,13 +704,15 @@ describe("App", () => {
     const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
     expect(contextWrapper.style.display).toBe("flex");
     expect(terminalWrapper.style.display).toBe("none");
-    expect(container.querySelector(".left-sidebar")).not.toBeNull();
-    expect(container.querySelector(".right-sidebar")).not.toBeNull();
+    expect(container.querySelector(".left-sidebar")).toBeNull();
+    expect(container.querySelector(".right-sidebar")).toBeNull();
   });
 
-  it("switches between terminal PaneSplit and ContextStudio when mode changes", async () => {
+  it("switches between terminal PaneSplit and ContextStudio when mode changes and toggles sidebars", async () => {
     useTerminalStore.setState({
       activeAppMode: "terminal",
+      leftSidebarOpen: true,
+      rightSidebarOpen: true,
     });
     const { container } = render(<App />);
 
@@ -713,6 +720,7 @@ describe("App", () => {
     const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
     expect(terminalWrapper.style.display).toBe("flex");
     expect(contextWrapper.style.display).toBe("none");
+    expect(container.querySelector(".left-sidebar")).not.toBeNull();
 
     // Switch to context
     useTerminalStore.getState().setAppMode("context");
@@ -721,6 +729,7 @@ describe("App", () => {
       expect(contextWrapper.style.display).toBe("flex");
       expect(terminalWrapper.style.display).toBe("none");
       expect(container.querySelector("[data-testid='context-studio']")).not.toBeNull();
+      expect(container.querySelector(".left-sidebar")).toBeNull();
     });
 
     // Switch back to terminal
@@ -729,6 +738,7 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(terminalWrapper.style.display).toBe("flex");
       expect(contextWrapper.style.display).toBe("none");
+      expect(container.querySelector(".left-sidebar")).not.toBeNull();
     });
   });
 

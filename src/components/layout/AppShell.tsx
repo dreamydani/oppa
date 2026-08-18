@@ -24,7 +24,9 @@ export function AppShell(): React.ReactElement {
     <div className="app-shell">
       <Titlebar />
       <div className="app-body">
-        {leftSidebarOpen && <LeftSidebar />}
+        {leftSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+          <LeftSidebar />
+        )}
         <main className="app-main">
           {activeAppMode === "context" ? (
             <ContextStudio />
@@ -45,7 +47,9 @@ export function AppShell(): React.ReactElement {
             </>
           )}
         </main>
-        {rightSidebarOpen && <RightSidebar />}
+        {rightSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+          <RightSidebar />
+        )}
       </div>
       <StatusBar />
     </div>

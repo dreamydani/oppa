@@ -1,6 +1,21 @@
 import { useState, type ReactElement } from "react";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
+import {
+  IconFolder,
+  IconArchitecture,
+  IconQuirk,
+  IconRunbook,
+  IconPersona,
+  IconPreferences,
+  IconStandards,
+  IconPin,
+  IconChevronDown,
+  IconChevronRight,
+  IconPlus,
+  IconFile,
+  IconGlobe,
+} from "./ContextIcons";
 import type { ContextPage } from "../../lib/context/transport";
 
 export interface ContextTreeProps {
@@ -70,9 +85,15 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
         role="button"
         tabIndex={0}
       >
-        <span className="context-tree-item-icon">{page.icon || "📄"}</span>
+        <span className="context-tree-item-icon">
+          <IconFile size={13} />
+        </span>
         <span className="context-tree-item-title">{page.title}</span>
-        {page.pinned && <span className="context-tree-pin-badge" title="Pinned">📌</span>}
+        {page.pinned && (
+          <span className="context-tree-pin-badge" title="Pinned">
+            <IconPin size={11} />
+          </span>
+        )}
       </div>
     );
   };
@@ -84,14 +105,18 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
       </div>
 
       <div className="context-tree-content">
-        {/* Workspace Section */}
+        {/* Workspace Scope Section */}
         <div className="context-tree-section">
           <div
             className="context-tree-group-header root-header"
             onClick={() => toggleSection("workspace")}
           >
-            <span className="tree-arrow">{collapsedSections.workspace ? "▶" : "▼"}</span>
-            <span className="tree-icon">📁</span>
+            <span className="tree-arrow">
+              {collapsedSections.workspace ? <IconChevronRight size={11} /> : <IconChevronDown size={11} />}
+            </span>
+            <span className="tree-icon">
+              <IconFolder size={14} />
+            </span>
             <span className="tree-label">Workspace ({projectName})</span>
           </div>
 
@@ -104,9 +129,11 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                   onClick={() => toggleSection("architecture")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.architecture ? "▶" : "▼"}
+                    {collapsedSections.architecture ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">🏗️</span>
+                  <span className="tree-icon">
+                    <IconArchitecture size={13} />
+                  </span>
                   <span className="tree-label">Architecture</span>
                   <span className="tree-count">{workspaceArchPages.length}</span>
                 </div>
@@ -127,9 +154,11 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                   onClick={() => toggleSection("quirk")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.quirk ? "▶" : "▼"}
+                    {collapsedSections.quirk ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">🐛</span>
+                  <span className="tree-icon">
+                    <IconQuirk size={13} />
+                  </span>
                   <span className="tree-label">Solved Quirks</span>
                   <span className="tree-count">{workspaceQuirkPages.length}</span>
                 </div>
@@ -150,9 +179,11 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                   onClick={() => toggleSection("runbook")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.runbook ? "▶" : "▼"}
+                    {collapsedSections.runbook ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">⚡</span>
+                  <span className="tree-icon">
+                    <IconRunbook size={13} />
+                  </span>
                   <span className="tree-label">Runbooks</span>
                   <span className="tree-count">{workspaceRunbookPages.length}</span>
                 </div>
@@ -173,9 +204,11 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                   onClick={() => toggleSection("personas")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.personas ? "▶" : "▼"}
+                    {collapsedSections.personas ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">🎭</span>
+                  <span className="tree-icon">
+                    <IconPersona size={13} />
+                  </span>
                   <span className="tree-label">Personas</span>
                   <span className="tree-count">{personas.length}</span>
                 </div>
@@ -186,32 +219,29 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                       return (
                         <div
                           key={persona.id}
-                          className={`context-tree-item persona-item ${
-                            isSelected ? "selected" : ""
-                          }`}
+                          className={`context-tree-item ${isSelected ? "selected" : ""}`}
                           onClick={() => selectPersona(persona.id)}
                           role="button"
                           tabIndex={0}
                         >
                           <span className="context-tree-item-icon">
-                            {persona.icon || "🎭"}
+                            <IconPersona size={13} />
                           </span>
                           <span className="context-tree-item-title">{persona.name}</span>
                           {persona.is_built_in && (
-                            <span className="context-tree-builtin-badge">Built-in</span>
+                            <span className="context-tree-builtin-pill">Core</span>
                           )}
                         </div>
                       );
                     })}
-                    {onOpenPersonaModal && (
-                      <button
-                        type="button"
-                        className="context-tree-add-btn"
-                        onClick={onOpenPersonaModal}
-                      >
-                        + New Persona
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="context-tree-add-persona-btn"
+                      onClick={onOpenPersonaModal}
+                    >
+                      <IconPlus size={11} />
+                      <span>New Persona</span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -219,29 +249,35 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
           )}
         </div>
 
-        {/* Global Profile Section */}
+        {/* Global Scope Section */}
         <div className="context-tree-section">
           <div
             className="context-tree-group-header root-header"
             onClick={() => toggleSection("global")}
           >
-            <span className="tree-arrow">{collapsedSections.global ? "▶" : "▼"}</span>
-            <span className="tree-icon">🌐</span>
+            <span className="tree-arrow">
+              {collapsedSections.global ? <IconChevronRight size={11} /> : <IconChevronDown size={11} />}
+            </span>
+            <span className="tree-icon">
+              <IconGlobe size={14} />
+            </span>
             <span className="tree-label">Global Profile (User)</span>
           </div>
 
           {!collapsedSections.global && (
             <div className="context-tree-subgroup">
-              {/* Preferences */}
+              {/* Preferences Category */}
               <div className="context-tree-category">
                 <div
                   className="context-tree-group-header category-header"
                   onClick={() => toggleSection("preference")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.preference ? "▶" : "▼"}
+                    {collapsedSections.preference ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">⚙️</span>
+                  <span className="tree-icon">
+                    <IconPreferences size={13} />
+                  </span>
                   <span className="tree-label">Preferences</span>
                   <span className="tree-count">{globalPrefPages.length}</span>
                 </div>
@@ -255,16 +291,18 @@ export function ContextTree({ onOpenPersonaModal }: ContextTreeProps): ReactElem
                 )}
               </div>
 
-              {/* Universal Standards */}
+              {/* Universal Standards Category */}
               <div className="context-tree-category">
                 <div
                   className="context-tree-group-header category-header"
                   onClick={() => toggleSection("standards")}
                 >
                   <span className="tree-arrow">
-                    {collapsedSections.standards ? "▶" : "▼"}
+                    {collapsedSections.standards ? <IconChevronRight size={10} /> : <IconChevronDown size={10} />}
                   </span>
-                  <span className="tree-icon">📜</span>
+                  <span className="tree-icon">
+                    <IconStandards size={13} />
+                  </span>
                   <span className="tree-label">Universal Standards</span>
                   <span className="tree-count">{globalStandardsPages.length}</span>
                 </div>

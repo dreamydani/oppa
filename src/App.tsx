@@ -216,7 +216,9 @@ function App() {
       <div className="workspace-container">
         <div className="soft-edge-left" />
         <div className="soft-edge-right" />
-        {leftSidebarOpen && <LeftSidebar />}
+        {leftSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+          <LeftSidebar />
+        )}
         <main className="main-viewport">
           {!activeTab ? (
             <div className="empty-workspace-view" data-testid="empty-workspace-view">
@@ -296,7 +298,9 @@ function App() {
             </>
           )}
         </main>
-        {rightSidebarOpen && <RightSidebar />}
+        {rightSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+          <RightSidebar />
+        )}
       </div>
       <StatusBar />
       <WorkspaceLauncherModal />

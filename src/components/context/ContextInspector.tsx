@@ -2,9 +2,28 @@ import { useState, useEffect, type ReactElement } from "react";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
 import { MarkdownViewer } from "../editor/MarkdownViewer";
+import {
+  IconPin,
+  IconEdit,
+  IconTrash,
+  IconCheck,
+  IconClose,
+  IconBrain,
+  IconPlus,
+  IconPersona,
+  IconFile,
+} from "./ContextIcons";
 import type { ContextPage, AgentPersona, ContextCategory } from "../../lib/context/transport";
 
-export function ContextInspector(): ReactElement | null {
+export interface ContextInspectorProps {
+  onOpenNewNote?: () => void;
+  onOpenNewPersona?: () => void;
+}
+
+export function ContextInspector({
+  onOpenNewNote,
+  onOpenNewPersona,
+}: ContextInspectorProps): ReactElement | null {
   const pages = useContextStore((s) => s.pages);
   const personas = useContextStore((s) => s.personas);
   const selectedPageId = useContextStore((s) => s.selectedPageId);
@@ -101,12 +120,31 @@ export function ContextInspector(): ReactElement | null {
     return (
       <div className="context-inspector context-inspector-empty">
         <div className="empty-inspector-card">
-          <span className="empty-inspector-icon">🧠</span>
-          <h3>Context Inspector</h3>
-          <p>
-            Select a memory note or persona from the left explorer to inspect and
-            edit context knowledge tiers (L0 Abstract, L1 Overview, L2 Raw Details).
+          <div className="empty-inspector-icon-wrapper">
+            <IconBrain size={28} className="empty-inspector-icon" />
+          </div>
+          <h3 className="empty-inspector-title">Context & Persona Studio</h3>
+          <p className="empty-inspector-desc">
+            Select a memory note or persona from the left explorer to inspect and edit context knowledge tiers (L0 Abstract, L1 Overview, L2 Raw Details).
           </p>
+          <div className="empty-inspector-actions">
+            <button
+              type="button"
+              className="empty-inspector-btn primary"
+              onClick={onOpenNewNote}
+            >
+              <IconPlus size={12} />
+              <span>+ New Memory Note</span>
+            </button>
+            <button
+              type="button"
+              className="empty-inspector-btn secondary"
+              onClick={onOpenNewPersona}
+            >
+              <IconPersona size={12} />
+              <span>+ New Persona</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -119,7 +157,9 @@ export function ContextInspector(): ReactElement | null {
         <div className="inspector-header persona-header">
           <div className="inspector-header-meta">
             <div className="inspector-title-row">
-              <span className="persona-avatar-icon">{selectedPersona.icon || "🎭"}</span>
+              <span className="persona-avatar-icon">
+                <IconPersona size={16} />
+              </span>
               <h2 className="inspector-title">{selectedPersona.name}</h2>
               <span
                 className={`inspector-badge ${
@@ -139,106 +179,130 @@ export function ContextInspector(): ReactElement | null {
                   className="inspector-action-btn cancel"
                   onClick={() => setIsEditing(false)}
                 >
-                  Cancel
+                  <IconClose size={12} />
+                  <span>Cancel</span>
                 </button>
                 <button
                   type="button"
-                  className="inspector-action-btn primary"
+                  className="inspector-action-btn save"
                   onClick={handleSavePersona}
                 >
-                  💾 Save
+                  <IconCheck size={12} />
+                  <span>Save Persona</span>
                 </button>
               </>
             ) : (
               <button
                 type="button"
-                className="inspector-action-btn"
+                className="inspector-action-btn edit"
                 onClick={() => setIsEditing(true)}
               >
-                ✏️ Edit
+                <IconEdit size={12} />
+                <span>Edit Prompt</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Persona Sub-Tabs */}
-        <div className="inspector-subtabs">
+        {/* Segmented Control Sub-Tabs */}
+        <div className="inspector-tier-tabs">
           <button
             type="button"
-            className={`inspector-tab-btn ${activeTier === "l0" ? "active" : ""}`}
+            className={`tier-tab-btn ${activeTier === "l0" ? "active" : ""}`}
             onClick={() => setActiveTier("l0")}
           >
-            L0 Summary
+            <span>L0 Summary</span>
+            <span className="tier-pill">Abstract</span>
           </button>
           <button
             type="button"
-            className={`inspector-tab-btn ${activeTier === "l1" ? "active" : ""}`}
+            className={`tier-tab-btn ${activeTier === "l1" ? "active" : ""}`}
             onClick={() => setActiveTier("l1")}
           >
-            L1 System Rules & Prompt
+            <span>L1 System Rules</span>
+            <span className="tier-pill">Prompt</span>
           </button>
           <button
             type="button"
-            className={`inspector-tab-btn ${activeTier === "l2" ? "active" : ""}`}
+            className={`tier-tab-btn ${activeTier === "l2" ? "active" : ""}`}
             onClick={() => setActiveTier("l2")}
           >
-            L2 Attached Scopes
+            <span>L2 Attached Scopes</span>
+            <span className="tier-pill">Knowledge</span>
           </button>
         </div>
 
-        {/* Persona Body */}
+        {/* Content Body */}
         <div className="inspector-body">
           {activeTier === "l0" && (
-            <div className="inspector-tier-view">
-              <div className="persona-overview-box">
-                <h4>Persona Identity</h4>
-                <p>{selectedPersona.tagline || "No summary provided."}</p>
-                <div className="persona-meta-row">
-                  <span>ID: <code>{selectedPersona.id}</code></span>
-                  <span>Type: {selectedPersona.is_built_in ? "System Template" : "User Defined"}</span>
+            <div className="persona-l0-view">
+              <div className="persona-meta-grid">
+                <div className="persona-meta-card">
+                  <div className="meta-card-label">ROLE IDENTIFIER</div>
+                  <div className="meta-card-value monospace">{selectedPersona.id}</div>
                 </div>
+                <div className="persona-meta-card">
+                  <div className="meta-card-label">CLASSIFICATION</div>
+                  <div className="meta-card-value">
+                    {selectedPersona.is_built_in ? "Core System Role" : "Custom Workspace Role"}
+                  </div>
+                </div>
+              </div>
+              <div className="persona-summary-box">
+                <h4>System Role Summary</h4>
+                <p>{selectedPersona.tagline}</p>
               </div>
             </div>
           )}
 
           {activeTier === "l1" && (
-            <div className="inspector-tier-view">
+            <div className="persona-l1-view">
               {isEditing ? (
-                <div className="inspector-edit-field">
-                  <label htmlFor="persona-prompt-editor">System Rules & Persona Prompt</label>
+                <div className="persona-edit-box">
+                  <label htmlFor="persona-prompt-editor" className="editor-label">
+                    System Rules & Behavioral Instructions
+                  </label>
                   <textarea
                     id="persona-prompt-editor"
-                    className="inspector-textarea"
+                    className="inspector-textarea monospace"
                     rows={12}
                     value={draftPersonaPrompt}
                     onChange={(e) => setDraftPersonaPrompt(e.target.value)}
+                    placeholder="Instructions for CLI agents running under this persona..."
                   />
                 </div>
               ) : (
-                <div className="persona-prompt-preview">
-                  <MarkdownViewer
-                    content={
-                      selectedPersona.system_prompt ||
-                      "_No system prompt defined for this persona._"
-                    }
-                  />
+                <div className="persona-prompt-display">
+                  <div className="prompt-display-header">
+                    <span>SYSTEM PROMPT INJECTION</span>
+                  </div>
+                  <pre className="persona-prompt-pre monospace">
+                    {selectedPersona.system_prompt || "No behavioral prompt defined."}
+                  </pre>
                 </div>
               )}
             </div>
           )}
 
           {activeTier === "l2" && (
-            <div className="inspector-tier-view">
-              <h4>Attached Memory Scopes</h4>
-              <p className="tier-desc">
-                Defines which knowledge categories this persona automatically references when generating context.
-              </p>
-              <div className="persona-scope-tags">
-                {selectedPersona.attached_scopes.map((scope) => (
-                  <span key={scope} className="scope-tag">
-                    {scope}
-                  </span>
-                ))}
+            <div className="persona-l2-view">
+              <div className="persona-scopes-header">
+                <h4>Mounted Context Folders</h4>
+                <p>When this persona is assigned to a terminal, these memory folders are loaded into context.</p>
+              </div>
+              <div className="persona-scopes-list">
+                {selectedPersona.attached_scopes.length > 0 ? (
+                  selectedPersona.attached_scopes.map((scope) => (
+                    <div key={scope} className="persona-scope-chip monospace">
+                      <IconFile size={12} />
+                      <span>{scope}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="persona-scope-empty">
+                    <span>Inherits all workspace context by default</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -247,16 +311,15 @@ export function ContextInspector(): ReactElement | null {
     );
   }
 
-  // Render Memory Page View
   if (!selectedPage) return null;
 
+  // Render Memory Page View
   return (
-    <div className="context-inspector" aria-label="Context Inspector">
-      {/* Header */}
-      <div className="inspector-header">
+    <div className="context-inspector" aria-label="Context Page Inspector">
+      <div className="inspector-header page-header">
         <div className="inspector-header-meta">
           <div className="inspector-title-row">
-            <span className="inspector-icon">{selectedPage.icon || "📄"}</span>
+            <span className="page-category-badge">{selectedPage.category.toUpperCase()}</span>
             {isEditing ? (
               <input
                 type="text"
@@ -268,23 +331,32 @@ export function ContextInspector(): ReactElement | null {
             ) : (
               <h2 className="inspector-title">{selectedPage.title}</h2>
             )}
-            <span className="inspector-badge scope-badge">{selectedPage.scope}</span>
-            <span className="inspector-badge category-badge">{selectedPage.category}</span>
           </div>
-          <div className="inspector-path-row">
-            <code>{selectedPage.path}</code>
+          <div className="inspector-path-row monospace">
+            <span className="path-prefix">{selectedPage.scope}://</span>
+            {isEditing ? (
+              <input
+                type="text"
+                className="inspector-path-input monospace"
+                value={draftPath}
+                onChange={(e) => setDraftPath(e.target.value)}
+                placeholder="path/to/note"
+              />
+            ) : (
+              <span className="path-text">{selectedPage.path}</span>
+            )}
           </div>
         </div>
 
         <div className="inspector-actions">
           <button
             type="button"
-            className={`inspector-action-btn pin-btn ${selectedPage.pinned ? "pinned" : ""}`}
+            className={`inspector-action-btn pin ${selectedPage.pinned ? "active" : ""}`}
             onClick={handleTogglePin}
-            title={selectedPage.pinned ? "Unpin note" : "Pin note"}
-            aria-label="Pin"
+            title={selectedPage.pinned ? "Unpin memory" : "Pin memory"}
           >
-            {selectedPage.pinned ? "📍 Unpin" : "📌 Pin"}
+            <IconPin size={13} />
+            <span>{selectedPage.pinned ? "Pinned" : "Pin"}</span>
           </button>
           {isEditing ? (
             <>
@@ -293,141 +365,141 @@ export function ContextInspector(): ReactElement | null {
                 className="inspector-action-btn cancel"
                 onClick={() => setIsEditing(false)}
               >
-                Cancel
+                <IconClose size={12} />
+                <span>Cancel</span>
               </button>
               <button
                 type="button"
-                className="inspector-action-btn primary"
+                className="inspector-action-btn save"
                 onClick={handleSavePage}
-                aria-label="Save"
               >
-                💾 Save
+                <IconCheck size={12} />
+                <span>Save</span>
               </button>
             </>
           ) : (
             <button
               type="button"
-              className="inspector-action-btn"
+              className="inspector-action-btn edit"
               onClick={() => setIsEditing(true)}
-              aria-label="Edit"
             >
-              ✏️ Edit
+              <IconEdit size={12} />
+              <span>Edit</span>
             </button>
           )}
           <button
             type="button"
-            className="inspector-action-btn danger"
+            className="inspector-action-btn delete"
             onClick={handleDeletePage}
-            title="Delete this note"
-            aria-label="Delete"
+            title="Delete memory page"
           >
-            🗑️ Delete
+            <IconTrash size={13} />
           </button>
         </div>
       </div>
 
-      {/* 3 Knowledge Tiers Sub-Tabs */}
-      <div className="inspector-subtabs">
+      {/* Segmented Control Sub-Tabs */}
+      <div className="inspector-tier-tabs">
         <button
           type="button"
-          className={`inspector-tab-btn ${activeTier === "l0" ? "active" : ""}`}
+          className={`tier-tab-btn ${activeTier === "l0" ? "active" : ""}`}
           onClick={() => setActiveTier("l0")}
         >
-          L0 Abstract
+          <span>L0 Abstract</span>
+          <span className="tier-pill">~100 Tokens</span>
         </button>
         <button
           type="button"
-          className={`inspector-tab-btn ${activeTier === "l1" ? "active" : ""}`}
+          className={`tier-tab-btn ${activeTier === "l1" ? "active" : ""}`}
           onClick={() => setActiveTier("l1")}
         >
-          L1 Overview
+          <span>L1 Overview</span>
+          <span className="tier-pill">~1.5k Tokens</span>
         </button>
         <button
           type="button"
-          className={`inspector-tab-btn ${activeTier === "l2" ? "active" : ""}`}
+          className={`tier-tab-btn ${activeTier === "l2" ? "active" : ""}`}
           onClick={() => setActiveTier("l2")}
         >
-          L2 Raw Details
+          <span>L2 Raw Details</span>
+          <span className="tier-pill">Full Text</span>
         </button>
       </div>
 
-      {/* Inspector Body */}
+      {/* Content Body */}
       <div className="inspector-body">
-        {isEditing ? (
-          <div className="inspector-editor-wrapper">
-            {activeTier === "l0" && (
-              <div className="inspector-edit-field">
-                <label htmlFor="tier-l0-textarea">
-                  L0 Abstract (Ultra-concise high-level summary)
-                </label>
-                <textarea
-                  id="tier-l0-textarea"
-                  className="inspector-textarea"
-                  rows={6}
-                  value={draftAbstract}
-                  onChange={(e) => setDraftAbstract(e.target.value)}
-                  placeholder="L0 abstract summary..."
-                />
+        {activeTier === "l0" && (
+          <div className="tier-content l0-content">
+            <div className="tier-info-banner">
+              <span className="tier-info-title">L0 Abstract (System Prompt Injection)</span>
+              <span className="tier-info-desc">
+                High-density 1-2 sentence summary used for fast scanning and prompt routing.
+              </span>
+            </div>
+            {isEditing ? (
+              <textarea
+                className="inspector-textarea"
+                rows={5}
+                value={draftAbstract}
+                onChange={(e) => setDraftAbstract(e.target.value)}
+                placeholder="Write a concise ~100-token summary..."
+              />
+            ) : (
+              <div className="rendered-abstract-box">
+                <p>{selectedPage.abstract_l0 || "No abstract written."}</p>
               </div>
             )}
-            {activeTier === "l1" && (
-              <div className="inspector-edit-field">
-                <label htmlFor="tier-l1-textarea">
-                  L1 Overview (Markdown formatted structured explanation)
-                </label>
-                <textarea
-                  id="tier-l1-textarea"
-                  className="inspector-textarea"
-                  rows={14}
-                  value={draftOverview}
-                  onChange={(e) => setDraftOverview(e.target.value)}
-                  placeholder="## L1 Overview (Markdown)..."
-                />
-              </div>
-            )}
-            {activeTier === "l2" && (
-              <div className="inspector-edit-field">
-                <label htmlFor="tier-l2-textarea">
-                  L2 Raw Details (Full deep implementation, code blocks & specs)
-                </label>
-                <textarea
-                  id="tier-l2-textarea"
-                  className="inspector-textarea"
-                  rows={16}
-                  value={draftDetails}
-                  onChange={(e) => setDraftDetails(e.target.value)}
-                  placeholder="### L2 Raw Details..."
+          </div>
+        )}
+
+        {activeTier === "l1" && (
+          <div className="tier-content l1-content">
+            <div className="tier-info-banner">
+              <span className="tier-info-title">L1 Structured Overview (Markdown)</span>
+              <span className="tier-info-desc">
+                Core architectural documentation, key endpoints, resolution steps, and patterns.
+              </span>
+            </div>
+            {isEditing ? (
+              <textarea
+                className="inspector-textarea monospace"
+                rows={14}
+                value={draftOverview}
+                onChange={(e) => setDraftOverview(e.target.value)}
+                placeholder="Write structured Markdown overview..."
+              />
+            ) : (
+              <div className="rendered-markdown-wrapper">
+                <MarkdownViewer
+                  content={selectedPage.overview_l1 || "*No overview documentation.*"}
                 />
               </div>
             )}
           </div>
-        ) : (
-          <div className="inspector-tier-content">
-            {activeTier === "l0" && (
-              <div className="tier-l0-box">
-                <p className="tier-l0-text">
-                  {selectedPage.abstract_l0 || "No L0 abstract provided."}
-                </p>
-              </div>
-            )}
-            {activeTier === "l1" && (
-              <div className="tier-l1-box">
-                <MarkdownViewer
-                  content={
-                    selectedPage.overview_l1 ||
-                    "_No L1 overview documentation provided._"
-                  }
-                />
-              </div>
-            )}
-            {activeTier === "l2" && (
-              <div className="tier-l2-box">
+        )}
+
+        {activeTier === "l2" && (
+          <div className="tier-content l2-content">
+            <div className="tier-info-banner">
+              <span className="tier-info-title">L2 Raw Details (On-Demand Retrieval)</span>
+              <span className="tier-info-desc">
+                Uncompressed stack traces, code snippets, logs, or original diffs.
+              </span>
+            </div>
+            {isEditing ? (
+              <textarea
+                className="inspector-textarea monospace"
+                rows={14}
+                value={draftDetails}
+                onChange={(e) => setDraftDetails(e.target.value)}
+                placeholder="Paste raw compiler logs, stack traces, or code snippets..."
+              />
+            ) : (
+              <div className="rendered-details-box monospace">
                 {selectedPage.details_l2 ? (
-                  <MarkdownViewer content={selectedPage.details_l2} />
+                  <pre>{selectedPage.details_l2}</pre>
                 ) : (
-                  <div className="empty-tier-placeholder">
-                    <span>No raw details (L2) stored for this page.</span>
-                  </div>
+                  <div className="details-empty-state">No raw details attached.</div>
                 )}
               </div>
             )}
