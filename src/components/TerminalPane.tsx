@@ -235,10 +235,15 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     term.onData((data) => ptyWrite(idRef.current, data));
 
+    // Debounce PTY resize to avoid ConPTY prompt-redraw storms during drag
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
       fit.fit();
-      const { cols, rows } = term;
-      resizeSession(idRef.current, cols, rows);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const { cols, rows } = term;
+        resizeSession(idRef.current, cols, rows);
+      }, 100);
     });
     ro.observe(containerRef.current!);
 
@@ -246,6 +251,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       if (flushTimer) {
         clearTimeout(flushTimer);
         flushTimer = null;
+      }
+      if (resizeTimer) {
+        clearTimeout(resizeTimer);
+        resizeTimer = null;
       }
       flushScrollback();
       unregisterSerializer(idRef.current);

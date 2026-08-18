@@ -738,7 +738,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     } else {
       set({ layout: next });
     }
-    void get().saveLayout().catch(() => {});
+    // NOTE: no saveLayout() here — SplitDivider calls it once on drag end
   },
 
   setSplitRatio: (path, ratio) => {

@@ -263,24 +263,30 @@ describe("TerminalPane", () => {
   });
 
   it("resizes the pty via FitAddon when the container resizes", async () => {
+    vi.useFakeTimers();
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
     term().cols = 120;
     term().rows = 40;
     fireResize();
+    // PTY resize is debounced (100ms) to avoid ConPTY prompt-redraw storms
+    expect(ptyResizeMock).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
   });
 
   it("does not recreate the terminal when a ResizeObserver callback fires (no resize feedback loop)", async () => {
+    vi.useFakeTimers();
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
     expect(xtermState.instances.length).toBe(1);
 
     fireResize();
     fireResize();
-    await vi.waitFor(() => expect(ptyResizeMock).toHaveBeenCalledTimes(2));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Debounce collapses the two rapid resizes into one PTY resize call
+    vi.advanceTimersByTime(100);
+    expect(ptyResizeMock).toHaveBeenCalledTimes(1);
     expect(xtermState.instances.length).toBe(1);
     expect(xtermState.instances[0]!.dispose).not.toHaveBeenCalled();
   });

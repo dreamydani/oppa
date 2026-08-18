@@ -20,6 +20,7 @@ export function PaneSplit() {
   const focusedPath = useTerminalStore((s) => s.focusedPath);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const setRatio = useTerminalStore((s) => s.setRatio);
+  const saveLayout = useTerminalStore((s) => s.saveLayout);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
 
   const { isDragging, sourceId, targetId, zone } = usePaneDragStore();
@@ -68,6 +69,7 @@ export function PaneSplit() {
               path={path}
               dir={node.dir}
               setRatio={setRatio}
+              saveLayout={saveLayout}
             />
           )}
           <div className="pane-child" style={childStyle(node, 1)}>
@@ -133,17 +135,18 @@ function childStyle(node: Layout, index: 0 | 1) {
   };
 }
 
-// A thin draggable divider. `ratio` and the split's length are baked in at
-// drag start, so the divider tracks the cursor exactly and the store only
-// receives the final ratio (no per-pixel store churn).
+// A thin draggable divider. setRatio fires per pixel for smooth visual
+// tracking; saveLayout fires once on drag end (no per-pixel disk I/O).
 function SplitDivider({
   path,
   dir,
   setRatio,
+  saveLayout,
 }: {
   path: Path;
   dir: "h" | "v";
   setRatio: (path: Path, ratio: number) => void;
+  saveLayout: () => Promise<void>;
 }) {
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -174,13 +177,14 @@ function SplitDivider({
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", endDrag);
         window.removeEventListener("blur", endDrag);
+        void saveLayout().catch(() => {});
       };
 
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("blur", endDrag);
     },
-    [dir, path, setRatio],
+    [dir, path, setRatio, saveLayout],
   );
 
   return (

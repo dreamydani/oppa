@@ -654,7 +654,7 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
-    it("setRatio persists the new ratio", () => {
+    it("setRatio updates the ratio without persisting (saveLayout deferred to drag end)", () => {
       useTerminalStore.setState({
         layout: {
           type: "split",
@@ -666,7 +666,10 @@ describe("terminalStore", () => {
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().setRatio([], 0.75);
-      expect(saveLayoutMock).toHaveBeenCalled();
+      const layout = useTerminalStore.getState().layout;
+      expect(layout.type === "split" && layout.ratio).toBe(0.75);
+      // saveLayout is NOT called per-pixel; SplitDivider calls it once on drag end
+      expect(saveLayoutMock).not.toHaveBeenCalled();
     });
 
     it("updateSessionCwd persists the updated cwd", () => {
