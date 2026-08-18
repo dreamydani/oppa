@@ -652,8 +652,8 @@ body,
   overflow: hidden;
   position: relative;
   background-color: #090a0c;
-  padding: 2px;
-  gap: 2px;
+  padding: 4px;
+  gap: 4px;
   box-sizing: border-box;
 }
 
@@ -662,7 +662,7 @@ body,
   flex: 1;
   min-width: 0;
   min-height: 0;
-  gap: 2px;
+  gap: 4px;
 }
 
 .pane-child {
@@ -677,11 +677,11 @@ body,
   min-width: 0;
   min-height: 0;
   position: relative;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   background-color: #0c0d10;
   overflow: hidden;
-  transition: border-color 0.1s ease;
+  transition: border-color 0.15s ease;
 }
 
 .pane-leaf.maximized {
@@ -703,7 +703,7 @@ body,
 }
 
 .pane-leaf.focused {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(56, 189, 248, 0.45);
 }
 
 .pane-leaf.is-drag-source {
@@ -715,9 +715,9 @@ body,
   position: absolute;
   pointer-events: none;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px dashed rgba(255, 255, 255, 0.35);
-  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1.5px dashed rgba(56, 189, 248, 0.5);
+  border-radius: 6px;
   box-sizing: border-box;
   transition: top 0.12s cubic-bezier(0.16, 1, 0.3, 1),
               left 0.12s cubic-bezier(0.16, 1, 0.3, 1),
@@ -763,20 +763,20 @@ body,
 }
 
 .pane-divider.dir-h {
-  width: 3px;
+  width: 4px;
   cursor: col-resize;
-  margin: 0 -1px;
+  margin: 0 -2px;
 }
 
 .pane-divider.dir-v {
-  height: 3px;
+  height: 4px;
   cursor: row-resize;
-  margin: -1px 0;
+  margin: -2px 0;
 }
 
 .pane-divider:hover {
-  background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 1px;
+  background-color: rgba(56, 189, 248, 0.3);
+  border-radius: 2px;
 }
 
 /* ==========================================================================
@@ -788,7 +788,7 @@ body,
   min-height: 0;
   width: 100%;
   background-color: #0c0d10;
-  padding: 2px 4px;
+  padding: 4px 6px;
   box-sizing: border-box;
 }
 
@@ -803,7 +803,7 @@ body,
   height: 100%;
   overflow: hidden;
   background-color: #0c0d10;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .terminal-pane-error {

@@ -1,69 +1,72 @@
-/* Terminal Pane Header - Ultra-Compact Utilitarian Minimalism */
+/* Terminal Pane Header - Clean High-End Proportions */
 
 .terminal-pane-header {
-  height: 24px;
-  min-height: 24px;
-  max-height: 24px;
-  background-color: transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  background-color: #12141a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 6px;
+  padding: 0 10px;
   user-select: none;
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: 11.5px;
   flex-shrink: 0;
   box-sizing: border-box;
   position: relative;
   z-index: 10;
+  border-radius: 6px 6px 0 0;
 }
 
 .terminal-pane-header-left {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   min-width: 0;
-  max-width: 200px;
+  max-width: 220px;
   flex: 0 1 auto;
   overflow: hidden;
 }
 
 .terminal-pane-dot {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background-color: #3f3f46;
+  background-color: #4b5563;
   flex-shrink: 0;
+  transition: background-color 0.15s ease;
 }
 
 .pane-leaf.focused .terminal-pane-dot {
-  background-color: #a1a1aa;
+  background-color: var(--accent-cyan, #38bdf8);
 }
 
 .terminal-pane-header-title,
 .terminal-pane-title {
-  color: #71717a;
+  color: #9ca3af;
   font-weight: 500;
-  font-size: 10.5px;
+  font-size: 11.5px;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
-  padding: 1px 3px;
-  border-radius: 2px;
-  transition: color 0.1s ease;
-  max-width: 170px;
-  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  transition: color 0.12s ease, background-color 0.12s ease;
+  max-width: 180px;
+  line-height: normal;
 }
 
 .pane-leaf.focused .terminal-pane-title {
-  color: #e4e4e7;
+  color: #f3f4f6;
 }
 
 .terminal-pane-header-title:hover,
 .terminal-pane-title:hover {
+  background-color: rgba(255, 255, 255, 0.06);
   color: #ffffff;
 }
 
@@ -72,7 +75,7 @@
   height: 100%;
   cursor: grab;
   user-select: none;
-  min-width: 8px;
+  min-width: 12px;
 }
 
 .pane-header-drag-zone.dragging {
@@ -80,77 +83,78 @@
 }
 
 .terminal-pane-header-rename-input {
-  background-color: #0c0d10;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-  color: #f4f4f5;
+  background-color: #090a0d;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 3px;
+  color: #f3f4f6;
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
-  padding: 0 3px;
+  padding: 1px 6px;
   outline: none;
-  width: 120px;
-  height: 18px;
+  width: 130px;
+  height: 22px;
   box-sizing: border-box;
 }
 
 .terminal-pane-header-right {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   flex-shrink: 0;
   position: relative;
 }
 
 .terminal-pane-header-btn {
   background: transparent;
-  border: none;
-  color: #71717a;
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
+  border: 1px solid transparent;
+  color: #9ca3af;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: color 0.1s ease, background-color 0.1s ease;
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
   padding: 0;
-  opacity: 0.7;
 }
 
 .terminal-pane-header-btn:hover {
   background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
   color: #ffffff;
-  opacity: 1;
+  transform: translateY(-1px);
 }
 
 .terminal-pane-header-btn:active {
-  transform: scale(0.92);
+  transform: scale(0.94);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .terminal-pane-header-btn.active {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  opacity: 1;
+  background-color: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent-cyan, #38bdf8);
 }
 
 .terminal-pane-header-btn.close-btn:hover {
-  background-color: rgba(239, 68, 68, 0.2);
-  color: #f87171;
-  opacity: 1;
+  background-color: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
 }
 
 .terminal-pane-header-menu {
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 2px;
-  background-color: #141518;
+  margin-top: 4px;
+  background-color: #161820;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  min-width: 130px;
-  padding: 2px;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  min-width: 145px;
+  padding: 3px;
   z-index: 50;
 }
 
@@ -158,12 +162,12 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 4px 8px;
-  font-size: 10.5px;
-  color: #a1a1aa;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #d1d5db;
   background: transparent;
   border: none;
-  border-radius: 2px;
+  border-radius: 3px;
   text-align: left;
   cursor: pointer;
   transition: background-color 0.1s ease, color 0.1s ease;
