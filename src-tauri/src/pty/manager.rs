@@ -37,7 +37,12 @@ impl PtyManager {
     }
 
     pub fn next_id(&self) -> String {
-        (self.next_id.fetch_add(1, Ordering::SeqCst) + 1).to_string()
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let seq = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+        format!("s-{now}-{seq}")
     }
 
     #[allow(dead_code)]

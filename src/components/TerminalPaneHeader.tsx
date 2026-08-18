@@ -30,7 +30,12 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const detectedPorts = useTerminalStore((s) => s.detectedPorts);
 
   const isMaximized = maximizedSessionId === id;
-  const displayTitle = session?.title || "oppa";
+  const displayTitle =
+    session?.title && session.title !== session.id && !session.title.startsWith("s-")
+      ? session.title
+      : session?.cwd
+        ? session.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "terminal"
+        : session?.title || "terminal";
 
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(displayTitle);
