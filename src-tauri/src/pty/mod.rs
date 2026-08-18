@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod ipc_protocol;
 pub mod manager;
 pub mod osc_scanner;
 pub mod powershell_bootstrap;
