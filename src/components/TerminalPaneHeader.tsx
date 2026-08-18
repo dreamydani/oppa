@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTerminalStore } from "../store/terminalStore";
+import { useContextStore } from "../store/contextStore";
 import type { Path } from "../lib/pane-manager/layout";
 import {
   usePaneDragStore,
@@ -81,6 +82,7 @@ function IconClose() {
 export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProps) {
   const session = useTerminalStore((s) => s.sessions[id]);
   const renameSession = useTerminalStore((s) => s.renameSession);
+  const setSessionPersona = useTerminalStore((s) => s.setSessionPersona);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
@@ -90,6 +92,16 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const setAppMode = useTerminalStore((s) => s.setAppMode);
   const navigateBrowser = useTerminalStore((s) => s.navigateBrowser);
   const detectedPorts = useTerminalStore((s) => s.detectedPorts);
+  const personas = useContextStore((s) => s.personas);
+
+  const personaId = session?.personaId;
+  const activePersona = personaId
+    ? personas.find((p) => p.id === personaId) || {
+        id: personaId,
+        name: personaId,
+        icon: "🎭",
+      }
+    : null;
 
   const isMaximized = maximizedSessionId === id;
   const displayTitle =
@@ -269,6 +281,16 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             {displayTitle}
           </span>
         )}
+        {activePersona && (
+          <span
+            className="pane-persona-badge"
+            title={`Active Persona: ${activePersona.name}`}
+            onClick={() => setIsMenuOpen((prev) => !prev)}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {activePersona.icon} {activePersona.name}
+          </span>
+        )}
       </div>
 
       <div
@@ -343,6 +365,45 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
               onPointerDown={(e) => e.stopPropagation()}
             >
               Open in Browser
+            </button>
+
+            <div className="terminal-pane-header-menu-divider" />
+            <div className="terminal-pane-header-menu-header">Persona Role</div>
+
+            <button
+              className={`terminal-pane-header-menu-item ${!session?.personaId ? "active" : ""}`}
+              onClick={() => {
+                setSessionPersona(id, null);
+                setIsMenuOpen(false);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              None (Default Shell)
+            </button>
+
+            {personas.map((persona) => (
+              <button
+                key={persona.id}
+                className={`terminal-pane-header-menu-item ${session?.personaId === persona.id ? "active" : ""}`}
+                onClick={() => {
+                  setSessionPersona(id, persona.id);
+                  setIsMenuOpen(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {persona.icon} {persona.name}
+              </button>
+            ))}
+
+            <button
+              className="terminal-pane-header-menu-item manage-item"
+              onClick={() => {
+                setIsMenuOpen(false);
+                setAppMode("context");
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              + Manage in Context Studio...
             </button>
           </div>
         )}
