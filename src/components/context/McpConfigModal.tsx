@@ -69,18 +69,39 @@ export function McpConfigModal({
   const activeTab =
     CLIENT_TABS.find((tab) => tab.id === activeTabId) || CLIENT_TABS[0];
 
-  const configSnippet = JSON.stringify(
-    {
-      mcpServers: {
-        oppa: {
-          command: "oppa",
-          args: ["--mcp", "--workspace", effectivePath],
+  const getConfigSnippet = (tabId: string) => {
+    if (tabId === "opencode") {
+      return JSON.stringify(
+        {
+          "$schema": "https://opencode.ai/config.json",
+          "mcp": {
+            "oppa": {
+              "type": "local",
+              "command": ["oppa", "--mcp", "--workspace", effectivePath],
+              "enabled": true,
+            },
+          },
+        },
+        null,
+        2
+      );
+    }
+
+    return JSON.stringify(
+      {
+        mcpServers: {
+          oppa: {
+            command: "oppa",
+            args: ["--mcp", "--workspace", effectivePath],
+          },
         },
       },
-    },
-    null,
-    2
-  );
+      null,
+      2
+    );
+  };
+
+  const configSnippet = getConfigSnippet(activeTabId);
 
   const handleCopy = async () => {
     try {

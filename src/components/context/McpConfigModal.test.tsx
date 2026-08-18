@@ -39,8 +39,10 @@ describe("McpConfigModal", () => {
 
     expect(screen.getAllByText(/~[/\\]\.config[/\\]opencode[/\\]opencode\.json/i).length).toBeGreaterThan(0);
     const codeBlock = screen.getByTestId("mcp-config-code");
-    expect(codeBlock.textContent).toContain('"command": "oppa"');
-    expect(codeBlock.textContent).toContain('"args": [');
+    expect(codeBlock.textContent).toContain('"mcp": {');
+    expect(codeBlock.textContent).toContain('"type": "local"');
+    expect(codeBlock.textContent).toContain('"command": [');
+    expect(codeBlock.textContent).toContain('"oppa"');
     expect(codeBlock.textContent).toContain('"--workspace"');
     expect(codeBlock.textContent).toContain('"D:/my/workspace"');
   });
@@ -90,6 +92,7 @@ describe("McpConfigModal", () => {
     expect(copiedContent).toContain('"oppa"');
     expect(copiedContent).toContain('"--workspace"');
     expect(copiedContent).toContain('"/test/repo"');
+    expect(copiedContent).toContain('"mcp"');
 
     expect(screen.getByText(/copied!/i)).toBeTruthy();
   });
@@ -130,7 +133,7 @@ describe("McpConfigModal", () => {
     render(<McpConfigModal isOpen={true} onClose={vi.fn()} />);
 
     const codeBlock = screen.getByTestId("mcp-config-code");
-    expect(codeBlock.textContent).toContain('"command": "oppa"');
+    expect(codeBlock.textContent).toContain('"oppa"');
     expect(codeBlock.textContent).toContain('"."');
   });
 });
