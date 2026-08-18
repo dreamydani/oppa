@@ -26,12 +26,14 @@ import "./App.css";
 //   Cmd/Ctrl+Shift+D  split focused pane horizontally
 //   Cmd/Ctrl+Shift+E  split focused pane vertically
 //   Cmd/Ctrl+arrows   move focus to a sibling pane
+//   Alt+Shift+arrows  swap focused pane with adjacent pane
 //   Cmd/Ctrl+B        toggle left sidebar
 //   Cmd/Ctrl+Shift+B  toggle right sidebar
 function App() {
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
   const moveFocus = useTerminalStore((s) => s.moveFocus);
+  const swapFocusedPane = useTerminalStore((s) => s.swapFocusedPane);
   const createTab = useTerminalStore((s) => s.createTab);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
@@ -138,6 +140,30 @@ function App() {
         return;
       }
 
+      // Directional pane swapping: Alt+Shift+Arrows
+      if (e.altKey && e.shiftKey) {
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          swapFocusedPane("up");
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          swapFocusedPane("down");
+          return;
+        }
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          swapFocusedPane("left");
+          return;
+        }
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          swapFocusedPane("right");
+          return;
+        }
+      }
+
       if (!modifier(e) && !e.ctrlKey && !e.metaKey) return;
       const key = e.key.toLowerCase();
       if (key === "b" && e.shiftKey) {
@@ -177,7 +203,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splitPane, closePane, moveFocus, createTab, toggleLeftSidebar, toggleRightSidebar]);
+  }, [splitPane, closePane, moveFocus, swapFocusedPane, createTab, toggleLeftSidebar, toggleRightSidebar]);
 
   // Hold the pane grid until the startup restore has settled: rendering a
   // sessionless placeholder leaf before the restore would spawn a throwaway

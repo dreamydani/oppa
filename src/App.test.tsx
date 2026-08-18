@@ -453,6 +453,105 @@ describe("App", () => {
     expect(useTerminalStore.getState().focusedPath).toEqual([0]);
   });
 
+  it("triggers Alt+Shift+Arrows directional pane swapping shortcuts", () => {
+    const splitLayout: any = {
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: { type: "leaf", id: "s1" },
+      b: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s2" },
+        b: { type: "leaf", id: "s3" },
+      },
+    };
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          layout: splitLayout,
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      layout: splitLayout,
+      focusedPath: [0],
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+        s3: { id: "s3", title: "s3", status: "running", cols: 80, rows: 24 },
+      },
+    });
+
+    render(<App />);
+
+    // Alt+Shift+ArrowRight -> swaps s1 (left) with s2 (right top)
+    const eventRight = new KeyboardEvent("keydown", {
+      key: "ArrowRight",
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(eventRight);
+    expect(eventRight.defaultPrevented).toBe(true);
+
+    const layoutAfterRight = useTerminalStore.getState().layout as any;
+    expect(layoutAfterRight.a.id).toBe("s2");
+    expect(layoutAfterRight.b.a.id).toBe("s1");
+    expect(useTerminalStore.getState().focusedPath).toEqual([1, 0]);
+
+    // Alt+Shift+ArrowDown -> swaps s1 at [1, 0] with s3 at [1, 1]
+    const eventDown = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(eventDown);
+    expect(eventDown.defaultPrevented).toBe(true);
+
+    const layoutAfterDown = useTerminalStore.getState().layout as any;
+    expect(layoutAfterDown.b.a.id).toBe("s3");
+    expect(layoutAfterDown.b.b.id).toBe("s1");
+    expect(useTerminalStore.getState().focusedPath).toEqual([1, 1]);
+
+    // Alt+Shift+ArrowUp -> swaps s1 at [1, 1] back with s3 at [1, 0]
+    const eventUp = new KeyboardEvent("keydown", {
+      key: "ArrowUp",
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(eventUp);
+    expect(eventUp.defaultPrevented).toBe(true);
+
+    const layoutAfterUp = useTerminalStore.getState().layout as any;
+    expect(layoutAfterUp.b.a.id).toBe("s1");
+    expect(layoutAfterUp.b.b.id).toBe("s3");
+    expect(useTerminalStore.getState().focusedPath).toEqual([1, 0]);
+
+    // Alt+Shift+ArrowLeft -> swaps s1 at [1, 0] back with s2 at [0]
+    const eventLeft = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(eventLeft);
+    expect(eventLeft.defaultPrevented).toBe(true);
+
+    const layoutAfterLeft = useTerminalStore.getState().layout as any;
+    expect(layoutAfterLeft.a.id).toBe("s1");
+    expect(layoutAfterLeft.b.a.id).toBe("s2");
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+  });
+
   it("toggles workspace launcher modal on Ctrl+N or Cmd+N", () => {
     useTerminalStore.setState({ isWorkspaceLauncherOpen: false });
     render(<App />);
