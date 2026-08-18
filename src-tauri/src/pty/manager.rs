@@ -233,7 +233,7 @@ mod tests {
         collected
     }
 
-    fn setup_test_server_and_manager() -> (PtyManager, CancellationToken, std::thread::JoinHandle<()>) {
+    pub(crate) fn setup_test_server_and_manager() -> (PtyManager, CancellationToken, std::thread::JoinHandle<()>) {
         let server = Arc::new(DaemonServer::new());
         let cancel_token = CancellationToken::new();
 

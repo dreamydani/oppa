@@ -16,7 +16,9 @@ const DETACHED_PROCESS: u32 = 0x00000008;
 pub fn probe_daemon(socket_path: &str) -> bool {
     #[cfg(target_os = "windows")]
     {
-        tokio::net::windows::named_pipe::ClientOptions::new()
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
             .open(socket_path)
             .is_ok()
     }

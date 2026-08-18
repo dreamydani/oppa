@@ -216,12 +216,15 @@ mod tests {
 
     #[test]
     fn pty_list_empty_on_fresh_manager() {
-        let manager = PtyManager::new();
+        let (manager, cancel_token, server_thread) =
+            crate::pty::manager::tests::setup_test_server_and_manager();
         let ids = pty_list_impl(&manager);
         assert!(
             ids.is_empty(),
             "expected no sessions on a fresh manager, got: {ids:?}"
         );
+        cancel_token.cancel();
+        let _ = server_thread.join();
     }
 
     #[test]
