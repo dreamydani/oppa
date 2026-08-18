@@ -3,6 +3,7 @@ pub mod context;
 mod fs;
 mod git;
 mod layout;
+pub mod mcp;
 pub mod pty;
 mod workspace_presets;
 
