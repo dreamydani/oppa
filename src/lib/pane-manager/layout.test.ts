@@ -4,6 +4,8 @@ import {
   remove,
   focus,
   substituteLeafId,
+  swapLeaves,
+  moveLeaf,
 } from "./layout";
 import type { Layout } from "./layout";
 
@@ -152,6 +154,120 @@ describe("layout", () => {
       const tree = splitTree("h", leaf("a"), leaf("b"));
       expect(substituteLeafId(tree, "a", "a1")).toEqual(
         splitTree("h", leaf("a1"), leaf("b")),
+      );
+    });
+  });
+
+  describe("swapLeaves", () => {
+    it("swaps two leaves in a simple two-leaf tree", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      const next = swapLeaves(tree, "a", "b");
+      expect(next).toEqual(splitTree("h", leaf("b"), leaf("a")));
+      expect(next).not.toBe(tree);
+    });
+
+    it("swaps leaves across nested splits in a three-leaf tree", () => {
+      const tree = splitTree(
+        "h",
+        splitTree("v", leaf("a"), leaf("b")),
+        leaf("c"),
+      );
+      const next = swapLeaves(tree, "a", "c");
+      expect(next).toEqual(
+        splitTree("h", splitTree("v", leaf("c"), leaf("b")), leaf("a")),
+      );
+    });
+
+    it("returns unchanged tree when swapping identical ids", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(swapLeaves(tree, "a", "a")).toBe(tree);
+    });
+
+    it("returns unchanged tree when either leaf is missing", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(swapLeaves(tree, "a", "missing")).toBe(tree);
+      expect(swapLeaves(tree, "missing", "b")).toBe(tree);
+      expect(swapLeaves(tree, "foo", "bar")).toBe(tree);
+    });
+
+    it("does not mutate original tree", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      const original = JSON.stringify(tree);
+      swapLeaves(tree, "a", "b");
+      expect(JSON.stringify(tree)).toBe(original);
+    });
+  });
+
+  describe("moveLeaf", () => {
+    it("returns unchanged tree when sourceId equals targetId", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(moveLeaf(tree, "a", "a", "left")).toBe(tree);
+    });
+
+    it("returns unchanged tree when sourceId or targetId is missing", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+      expect(moveLeaf(tree, "missing", "a", "top")).toBe(tree);
+      expect(moveLeaf(tree, "a", "missing", "top")).toBe(tree);
+    });
+
+    it("returns unchanged tree on single leaf root", () => {
+      const tree = leaf("a");
+      expect(moveLeaf(tree, "a", "b", "left")).toBe(tree);
+    });
+
+    it("reorders 2-leaf split across all 4 drop zones", () => {
+      const tree = splitTree("h", leaf("a"), leaf("b"));
+
+      // Moving a to the left of b
+      expect(moveLeaf(tree, "a", "b", "left")).toEqual(
+        splitTree("h", leaf("a"), leaf("b")),
+      );
+
+      // Moving a to the right of b
+      expect(moveLeaf(tree, "a", "b", "right")).toEqual(
+        splitTree("h", leaf("b"), leaf("a")),
+      );
+
+      // Moving a to the top of b
+      expect(moveLeaf(tree, "a", "b", "top")).toEqual(
+        splitTree("v", leaf("a"), leaf("b")),
+      );
+
+      // Moving a to the bottom of b
+      expect(moveLeaf(tree, "a", "b", "bottom")).toEqual(
+        splitTree("v", leaf("b"), leaf("a")),
+      );
+    });
+
+    it("reorganizes 3-leaf nested split when moving leaf to top/bottom/left/right", () => {
+      const tree = splitTree(
+        "h",
+        splitTree("v", leaf("a"), leaf("b")),
+        leaf("c"),
+      );
+
+      // Move leaf c to top of a: detaches c, promotes inner split, wraps a with c on top
+      const movedTop = moveLeaf(tree, "c", "a", "top");
+      expect(movedTop).toEqual(
+        splitTree("v", splitTree("v", leaf("c"), leaf("a")), leaf("b")),
+      );
+
+      // Move leaf a to right of c: detaches a, promotes b, wraps c with a on right
+      const movedRight = moveLeaf(tree, "a", "c", "right");
+      expect(movedRight).toEqual(
+        splitTree("h", leaf("b"), splitTree("h", leaf("c"), leaf("a"))),
+      );
+
+      // Move leaf b to bottom of c: detaches b, promotes a, wraps c with b on bottom
+      const movedBottom = moveLeaf(tree, "b", "c", "bottom");
+      expect(movedBottom).toEqual(
+        splitTree("h", leaf("a"), splitTree("v", leaf("c"), leaf("b"))),
+      );
+
+      // Move leaf c to left of b: detaches c, promotes inner split, wraps b with c on left
+      const movedLeft = moveLeaf(tree, "c", "b", "left");
+      expect(movedLeft).toEqual(
+        splitTree("v", leaf("a"), splitTree("h", leaf("c"), leaf("b"))),
       );
     });
   });

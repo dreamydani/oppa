@@ -98,3 +98,85 @@ export function firstLeafPath(tree: Layout): Path {
   if (tree.type === "leaf") return [];
   return [0, ...firstLeafPath(tree.a)];
 }
+
+export type DropZone = "top" | "bottom" | "left" | "right";
+
+// Check if a leaf with `id` exists in the tree.
+function hasLeaf(tree: Layout, id: string): boolean {
+  if (tree.type === "leaf") return tree.id === id;
+  return hasLeaf(tree.a, id) || hasLeaf(tree.b, id);
+}
+
+// Remove the leaf with `id` and collapse single-child splits.
+function removeLeaf(tree: Layout, id: string): Layout | null {
+  if (tree.type === "leaf") {
+    return tree.id === id ? null : tree;
+  }
+  const a = removeLeaf(tree.a, id);
+  const b = removeLeaf(tree.b, id);
+  if (a === null && b === null) return null;
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a === tree.a && b === tree.b) return tree;
+  return { type: "split", dir: tree.dir, ratio: tree.ratio, a, b };
+}
+
+// Insert `sourceId` relative to `targetId` according to `zone`.
+function insertAtLeaf(
+  tree: Layout,
+  targetId: string,
+  sourceId: string,
+  zone: DropZone,
+): Layout {
+  if (tree.type === "leaf") {
+    if (tree.id !== targetId) return tree;
+    const sourceNode: Layout = { type: "leaf", id: sourceId };
+    const dir = zone === "left" || zone === "right" ? "h" : "v";
+    const [a, b] =
+      zone === "left" || zone === "top"
+        ? [sourceNode, tree]
+        : [tree, sourceNode];
+    return { type: "split", dir, ratio: 0.5, a, b };
+  }
+  const a = insertAtLeaf(tree.a, targetId, sourceId, zone);
+  const b = insertAtLeaf(tree.b, targetId, sourceId, zone);
+  if (a === tree.a && b === tree.b) return tree;
+  return { type: "split", dir: tree.dir, ratio: tree.ratio, a, b };
+}
+
+// Recursively swap the positions of two leaf nodes.
+export function swapLeaves(tree: Layout, idA: string, idB: string): Layout {
+  if (idA === idB) return tree;
+  if (!hasLeaf(tree, idA) || !hasLeaf(tree, idB)) return tree;
+
+  function doSwap(node: Layout): Layout {
+    if (node.type === "leaf") {
+      if (node.id === idA) return { type: "leaf", id: idB };
+      if (node.id === idB) return { type: "leaf", id: idA };
+      return node;
+    }
+    const a = doSwap(node.a);
+    const b = doSwap(node.b);
+    if (a === node.a && b === node.b) return node;
+    return { type: "split", dir: node.dir, ratio: node.ratio, a, b };
+  }
+
+  return doSwap(tree);
+}
+
+// Detach source leaf and attach it relative to target leaf in specified zone.
+export function moveLeaf(
+  tree: Layout,
+  sourceId: string,
+  targetId: string,
+  zone: DropZone,
+): Layout {
+  if (sourceId === targetId) return tree;
+  if (!hasLeaf(tree, sourceId) || !hasLeaf(tree, targetId)) return tree;
+
+  const pruned = removeLeaf(tree, sourceId);
+  if (!pruned) return tree;
+
+  return insertAtLeaf(pruned, targetId, sourceId, zone);
+}
+
