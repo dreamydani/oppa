@@ -37,11 +37,13 @@ pub fn run() {
     // signal, then exit. Falls back to exiting after a short timeout so a
     // hung renderer cannot trap the app.
     let save_done = Arc::new(AtomicBool::new(false));
+    let context_manager = std::sync::Arc::new(context::manager::ContextManager::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
         .manage(browser::manager::BrowserManager::new())
+        .manage(context_manager)
         .invoke_handler(tauri::generate_handler![
             pty::commands::pty_spawn,
             pty::commands::pty_write,
@@ -75,6 +77,13 @@ pub fn run() {
             browser::commands::browser_go_forward,
             browser::commands::browser_reload,
             browser::commands::browser_open_devtools,
+            context::commands::context_list,
+            context::commands::context_get,
+            context::commands::context_upsert,
+            context::commands::context_delete,
+            context::commands::context_search,
+            context::commands::persona_list,
+            context::commands::persona_upsert,
             confirm_save_complete,
         ])
         .setup(move |app| {
