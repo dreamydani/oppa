@@ -1,4 +1,5 @@
 mod browser;
+pub mod context;
 mod fs;
 mod git;
 mod layout;
