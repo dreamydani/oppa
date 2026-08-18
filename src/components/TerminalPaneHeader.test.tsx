@@ -254,5 +254,72 @@ describe("TerminalPaneHeader", () => {
     expect(useTerminalStore.getState().activeAppMode).toBe("browser");
     expect(screen.queryByText("Clear Scrollback")).toBeNull();
   });
+
+  it("renders draggable header region with title constraint class", () => {
+    const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const dragZone = container.querySelector(".pane-header-drag-zone");
+    expect(dragZone).not.toBeNull();
+
+    const titleEl = container.querySelector(".terminal-pane-title");
+    expect(titleEl).not.toBeNull();
+    expect(titleEl?.textContent).toBe("Terminal 1");
+  });
+
+  it("clicking drag region with movement < 5px focuses pane without initiating drag", () => {
+    useTerminalStore.setState({
+      focusedPath: [1],
+    });
+
+    const { container } = render(<TerminalPaneHeader id="s1" path={[0]} />);
+    const dragZone = container.querySelector(".pane-header-drag-zone")!;
+    expect(dragZone).not.toBeNull();
+
+    // Movement of 3px (below 5px threshold)
+    fireEvent.pointerDown(dragZone, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 13, clientY: 10 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 13, clientY: 10 });
+
+    expect(useTerminalStore.getState().focusedPath).toEqual([0]);
+  });
+
+  it("dragging drag region >= 5px captures pointer and activates drag state", () => {
+    const { container } = render(<TerminalPaneHeader id="s1" path={[0]} />);
+    const dragZone = container.querySelector(".pane-header-drag-zone")!;
+
+    const captureSpy = vi.spyOn(dragZone, "setPointerCapture");
+    const releaseSpy = vi.spyOn(dragZone, "releasePointerCapture");
+
+    // Movement of 10px (exceeds 5px threshold)
+    fireEvent.pointerDown(dragZone, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+    expect(captureSpy).toHaveBeenCalledWith(1);
+
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 20, clientY: 20 });
+    expect(dragZone.className).toContain("dragging");
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 20, clientY: 20 });
+    expect(releaseSpy).toHaveBeenCalledWith(1);
+    expect(dragZone.className).not.toContain("dragging");
+  });
+
+  it("action buttons and rename elements stop pointerdown propagation", () => {
+    const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const buttons = container.querySelectorAll(".terminal-pane-header-btn");
+    expect(buttons.length).toBeGreaterThan(0);
+
+    for (const btn of buttons) {
+      const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+      const stopSpy = vi.spyOn(event, "stopPropagation");
+      btn.dispatchEvent(event);
+      expect(stopSpy).toHaveBeenCalled();
+    }
+
+    const titleEl = container.querySelector(".terminal-pane-title")!;
+    const titleEvent = new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+    const titleStopSpy = vi.spyOn(titleEvent, "stopPropagation");
+    titleEl.dispatchEvent(titleEvent);
+    expect(titleStopSpy).toHaveBeenCalled();
+  });
 });
 

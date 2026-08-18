@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Layout, Path } from "../store/terminalStore";
+import { usePaneDragStore } from "../lib/pane-manager/dragState";
 import { SessionLeaf } from "./SessionLeaf";
 
 // True when `id` is present as a leaf anywhere in `tree`.
@@ -21,6 +22,8 @@ export function PaneSplit() {
   const setRatio = useTerminalStore((s) => s.setRatio);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
 
+  const { isDragging, sourceId, targetId, zone } = usePaneDragStore();
+
   const renderTree = (targetLayout: Layout, targetFocusedPath: Path, isTabActive: boolean) => {
     const isAnyMaximized = Boolean(
       isTabActive && maximizedSessionId && containsSession(targetLayout, maximizedSessionId),
@@ -30,15 +33,24 @@ export function PaneSplit() {
       if (node.type === "leaf") {
         const isMaximized = isAnyMaximized && node.id === maximizedSessionId;
         const isHidden = isAnyMaximized && !isMaximized;
+        const isDragSource = isDragging && node.id === sourceId;
+        const isDropTarget = isDragging && node.id === targetId && zone !== null;
         return (
           <div
             key={path.join(".")}
-            className={`pane-leaf${isTabActive && path.join(".") === targetFocusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}`}
+            data-pane-id={node.id}
+            className={`pane-leaf${isTabActive && path.join(".") === targetFocusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}${isDragSource ? " is-drag-source" : ""}`}
             onMouseDown={() => {
               if (isTabActive) focusPane(path);
             }}
           >
             <SessionLeaf id={node.id} path={path} />
+            {isDropTarget && (
+              <div
+                className={`pane-drop-overlay zone-${zone}`}
+                data-testid="drop-overlay"
+              />
+            )}
           </div>
         );
       }

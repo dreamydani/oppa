@@ -321,4 +321,79 @@ describe("PaneSplit", () => {
     const panes = container.querySelectorAll(".terminal-pane");
     expect(panes).toHaveLength(2);
   });
+
+  it("renders drop overlay in target quadrant and dims drag source leaf during pane drag", async () => {
+    const { usePaneDragStore } = await import("../lib/pane-manager/dragState");
+    setSessions(["a", "b"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "a" },
+        b: { type: "leaf", id: "b" },
+      },
+    });
+
+    usePaneDragStore.setState({
+      isDragging: true,
+      sourceId: "a",
+      targetId: "b",
+      zone: "right",
+    });
+
+    const { container } = render(<PaneSplit />);
+    const leaves = container.querySelectorAll(".pane-leaf");
+    expect(leaves[0].className).toContain("is-drag-source");
+
+    const overlay = container.querySelector(".pane-drop-overlay");
+    expect(overlay).not.toBeNull();
+    expect(overlay?.className).toContain("zone-right");
+
+    // Reset drag store
+    usePaneDragStore.setState({
+      isDragging: false,
+      sourceId: null,
+      targetId: null,
+      zone: null,
+    });
+  });
+
+  it("dragging pane onto another pane calls movePane with correct quadrant zone", async () => {
+    const { usePaneDragStore, calculateDropZone } = await import("../lib/pane-manager/dragState");
+    setSessions(["s1", "s2"]);
+    useTerminalStore.setState({
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s1" },
+        b: { type: "leaf", id: "s2" },
+      },
+    });
+
+    const movePaneSpy = vi.spyOn(useTerminalStore.getState(), "movePane");
+
+    // Test calculateDropZone on a 100x100 box
+    const rect = { left: 100, top: 0, width: 100, height: 100 };
+    expect(calculateDropZone(rect, 150, 10)).toBe("top");
+    expect(calculateDropZone(rect, 150, 90)).toBe("bottom");
+    expect(calculateDropZone(rect, 110, 50)).toBe("left");
+    expect(calculateDropZone(rect, 190, 50)).toBe("right");
+
+    // Simulate drag from s1 to s2 right zone
+    usePaneDragStore.getState().startDrag("s1");
+    usePaneDragStore.getState().updateDropTarget("s2", "right");
+
+    expect(usePaneDragStore.getState().isDragging).toBe(true);
+    expect(usePaneDragStore.getState().sourceId).toBe("s1");
+    expect(usePaneDragStore.getState().targetId).toBe("s2");
+    expect(usePaneDragStore.getState().zone).toBe("right");
+
+    useTerminalStore.getState().movePane("s1", "s2", "right");
+    expect(movePaneSpy).toHaveBeenCalledWith("s1", "s2", "right");
+
+    usePaneDragStore.getState().endDrag();
+    expect(usePaneDragStore.getState().isDragging).toBe(false);
+  });
 });

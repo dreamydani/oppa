@@ -20,10 +20,13 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1;
+  max-width: 180px;
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
-.terminal-pane-header-title {
+.terminal-pane-header-title,
+.terminal-pane-title {
   color: var(--foreground, #ededec);
   font-weight: 500;
   font-size: 11px;
@@ -35,10 +38,24 @@
   padding: 2px 4px;
   border-radius: 3px;
   transition: background-color 0.15s ease;
+  max-width: 180px;
 }
 
-.terminal-pane-header-title:hover {
+.terminal-pane-header-title:hover,
+.terminal-pane-title:hover {
   background-color: var(--muted, #2e2e2d);
+}
+
+.pane-header-drag-zone {
+  flex: 1;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+  min-width: 8px;
+}
+
+.pane-header-drag-zone.dragging {
+  cursor: grabbing;
 }
 
 .terminal-pane-header-rename-input {

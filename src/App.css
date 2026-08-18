@@ -696,6 +696,55 @@ body,
   outline-offset: -1px;
 }
 
+.pane-leaf.is-drag-source {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+
+.pane-drop-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 50;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1.5px solid rgba(129, 140, 248, 0.6);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+  border-radius: 6px;
+  box-sizing: border-box;
+  transition: top 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              left 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              height 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.15s ease;
+}
+
+.pane-drop-overlay.zone-top {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+}
+
+.pane-drop-overlay.zone-bottom {
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 50%;
+}
+
+.pane-drop-overlay.zone-left {
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+}
+
+.pane-drop-overlay.zone-right {
+  top: 0;
+  left: 50%;
+  width: 50%;
+  height: 100%;
+}
+
 .pane-divider {
   flex: 0 0 auto;
   background-color: var(--border-divider);

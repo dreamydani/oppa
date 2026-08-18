@@ -10,6 +10,10 @@ import {
 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
+import {
+  usePaneDragStore,
+  findDropTargetUnderPointer,
+} from "../lib/pane-manager/dragState";
 import "./TerminalPaneHeader.css";
 
 export interface TerminalPaneHeaderProps {
@@ -25,6 +29,8 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
+  const focusPane = useTerminalStore((s) => s.focusPane);
+  const movePane = useTerminalStore((s) => s.movePane);
   const setAppMode = useTerminalStore((s) => s.setAppMode);
   const navigateBrowser = useTerminalStore((s) => s.navigateBrowser);
   const detectedPorts = useTerminalStore((s) => s.detectedPorts);
@@ -40,6 +46,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(displayTitle);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isDraggingLocal, setIsDraggingLocal] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,6 +94,84 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     setAppMode("browser");
   }, [detectedPorts, navigateBrowser, setAppMode]);
 
+  // Pointer drag on empty header middle area
+  const handleDragPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+
+      const dragZoneEl = e.currentTarget;
+      const pointerId = e.pointerId;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let hasExceededThreshold = false;
+
+      try {
+        dragZoneEl.setPointerCapture(pointerId);
+      } catch {}
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!hasExceededThreshold) {
+          if (Math.hypot(dx, dy) >= 5) {
+            hasExceededThreshold = true;
+            setIsDraggingLocal(true);
+            usePaneDragStore.getState().startDrag(id);
+            const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
+            if (target) {
+              usePaneDragStore.getState().updateDropTarget(target.targetId, target.zone);
+            } else {
+              usePaneDragStore.getState().updateDropTarget(null, null);
+            }
+          }
+        } else {
+          const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
+          if (target) {
+            usePaneDragStore.getState().updateDropTarget(target.targetId, target.zone);
+          } else {
+            usePaneDragStore.getState().updateDropTarget(null, null);
+          }
+        }
+      };
+
+      const cleanup = () => {
+        try {
+          dragZoneEl.releasePointerCapture(pointerId);
+        } catch {}
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        setIsDraggingLocal(false);
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        cleanup();
+        if (hasExceededThreshold) {
+          const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
+          if (target) {
+            movePane(id, target.targetId, target.zone);
+          }
+          usePaneDragStore.getState().endDrag();
+        } else {
+          if (path) {
+            focusPane(path);
+          }
+        }
+      };
+
+      const onCancel = () => {
+        cleanup();
+        usePaneDragStore.getState().endDrag();
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
+    },
+    [focusPane, id, movePane, path]
+  );
+
   // Close dropdown menu on outside clicks
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -116,17 +201,24 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             onChange={(e) => setEditTitle(e.target.value)}
             onBlur={handleSave}
             onKeyDown={handleKeyDown}
+            onPointerDown={(e) => e.stopPropagation()}
           />
         ) : (
           <span
-            className="terminal-pane-header-title"
+            className="terminal-pane-header-title terminal-pane-title"
             title="Click to rename pane"
             onClick={startRename}
+            onPointerDown={(e) => e.stopPropagation()}
           >
             {displayTitle}
           </span>
         )}
       </div>
+
+      <div
+        className={`pane-header-drag-zone${isDraggingLocal ? " dragging" : ""}`}
+        onPointerDown={handleDragPointerDown}
+      />
 
       <div className="terminal-pane-header-right">
         <button
@@ -135,18 +227,24 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title="More Options"
           aria-label="More Options"
           onClick={() => setIsMenuOpen((prev) => !prev)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <MoreHorizontal size={14} />
         </button>
 
         {isMenuOpen && (
-          <div ref={menuRef} className="terminal-pane-header-menu">
+          <div
+            ref={menuRef}
+            className="terminal-pane-header-menu"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <button
               className="terminal-pane-header-menu-item"
               onClick={() => {
                 onClear?.();
                 setIsMenuOpen(false);
               }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               Clear Scrollback
             </button>
@@ -156,6 +254,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
                 setIsMenuOpen(false);
                 startRename();
               }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               Rename Pane
             </button>
@@ -165,6 +264,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
                 setIsMenuOpen(false);
                 void splitPane("h", path);
               }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               Split Right
             </button>
@@ -174,6 +274,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
                 setIsMenuOpen(false);
                 void splitPane("v", path);
               }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               Split Down
             </button>
@@ -183,6 +284,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
                 setIsMenuOpen(false);
                 handleOpenInBrowser();
               }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               Open in Browser
             </button>
@@ -194,6 +296,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title="Open in Browser"
           aria-label="Open in Browser"
           onClick={handleOpenInBrowser}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <Globe size={14} />
         </button>
@@ -203,6 +306,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title={isMaximized ? "Restore Pane" : "Maximize Pane"}
           aria-label={isMaximized ? "Restore Pane" : "Maximize Pane"}
           onClick={() => toggleMaximizePane(id)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
@@ -212,6 +316,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title="Split Right"
           aria-label="Split Right"
           onClick={() => void splitPane("h", path)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <SplitSquareHorizontal size={14} />
         </button>
@@ -221,6 +326,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title="Split Down"
           aria-label="Split Down"
           onClick={() => void splitPane("v", path)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <SplitSquareVertical size={14} />
         </button>
@@ -230,6 +336,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           title="Close Pane"
           aria-label="Close Pane"
           onClick={() => void closePane(path)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <X size={14} />
         </button>
