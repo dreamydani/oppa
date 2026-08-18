@@ -131,6 +131,28 @@ describe("terminalStore", () => {
     expect(session.cwd).toBe("C:\\custom");
   });
 
+  it("spawnSession forwards personaId in options and stores it on the session", async () => {
+    ptySpawnMock.mockResolvedValue({
+      id: "session-persona",
+      is_new: true,
+      pid: 4321,
+      cols: 80,
+      rows: 24,
+      cwd: "C:\\projects",
+    });
+    const id = await useTerminalStore
+      .getState()
+      .spawnSession("C:\\projects", undefined, undefined, "designer");
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      cwd: "C:\\projects",
+      persona_id: "designer",
+    });
+    expect(id).toBe("session-persona");
+    const session = useTerminalStore.getState().sessions["session-persona"];
+    expect(session).toBeDefined();
+    expect(session.personaId).toBe("designer");
+  });
+
   it("spawnSession records restoredScrollbacks when is_new is false and snapshot is present", async () => {
     ptySpawnMock.mockResolvedValue({
       id: "s-warm",

@@ -34,6 +34,8 @@ export type PtySpawnOptions = {
   cwd?: string;
   cols?: number;
   rows?: number;
+  persona_id?: string;
+  personaId?: string;
 };
 
 export async function ptySpawn(opts?: PtySpawnOptions): Promise<PtySpawnResult> {

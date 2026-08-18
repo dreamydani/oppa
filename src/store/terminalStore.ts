@@ -248,7 +248,7 @@ export interface TerminalState {
   cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
-  spawnSession: (cwd?: string, shell?: string, existingId?: string) => Promise<string>;
+  spawnSession: (cwd?: string, shell?: string, existingId?: string, personaId?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
@@ -416,12 +416,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd, shell, existingId) => {
+  spawnSession: async (cwd, shell, existingId, personaId) => {
     try {
       const opts: PtySpawnOptions = {};
       if (existingId) opts.id = existingId;
       if (cwd) opts.cwd = cwd;
       if (shell) opts.shell = shell;
+      if (personaId) opts.persona_id = personaId;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
@@ -449,6 +450,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             cwd: resolvedCwd,
             cols,
             rows,
+            personaId: personaId ?? null,
           },
         },
       }));
@@ -1240,7 +1242,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const count = Math.max(1, config.terminalCount || 1);
     const sessionIds: string[] = [];
     for (let i = 0; i < count; i++) {
-      const id = await get().spawnSession(config.cwd, config.shell);
+      const id = await get().spawnSession(config.cwd, config.shell, undefined, config.agentPersona);
       sessionIds.push(id);
       if (config.commands && config.commands[i] && config.commands[i].trim()) {
         const cmd = config.commands[i].trim();
@@ -1297,7 +1299,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const count = Math.max(1, config.terminalCount || 1);
     const sessionIds: string[] = [];
     for (let i = 0; i < count; i++) {
-      const id = await get().spawnSession(config.cwd, config.shell);
+      const id = await get().spawnSession(config.cwd, config.shell, undefined, config.agentPersona);
       sessionIds.push(id);
       if (config.commands && config.commands[i] && config.commands[i].trim()) {
         const cmd = config.commands[i].trim();
