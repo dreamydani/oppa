@@ -17,16 +17,27 @@ export interface PtyCwdPayload {
   cwd: string;
 }
 
+export interface PtySpawnResult {
+  id: string;
+  is_new: boolean;
+  snapshot?: string | null;
+  pid: number;
+  cols?: number;
+  rows?: number;
+  cwd?: string | null;
+}
+
 // Type alias (not interface) so it satisfies InvokeArgs' index signature.
 export type PtySpawnOptions = {
+  id?: string;
   shell?: string;
   cwd?: string;
   cols?: number;
   rows?: number;
 };
 
-export async function ptySpawn(opts?: PtySpawnOptions): Promise<string> {
-  return invoke<string>("pty_spawn", opts ?? {});
+export async function ptySpawn(opts?: PtySpawnOptions): Promise<PtySpawnResult> {
+  return invoke<PtySpawnResult>("pty_spawn", opts ?? {});
 }
 export function ptyWrite(id: string, data: string): Promise<void> {
   return invoke("pty_write", { id, data });
@@ -42,6 +53,12 @@ export function ptyAck(id: string, chars: number): Promise<void> {
 }
 export function ptyList(): Promise<string[]> {
   return invoke("pty_list");
+}
+export function ptyDisconnect(): Promise<void> {
+  return invoke("pty_disconnect");
+}
+export function ptyShutdown(): Promise<void> {
+  return invoke("pty_shutdown");
 }
 export function saveLayout(layoutJson: string): Promise<void> {
   return invoke("save_layout", { layoutJson });

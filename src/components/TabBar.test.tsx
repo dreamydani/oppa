@@ -25,7 +25,7 @@ const ptySpawnMock = vi.mocked(transport.ptySpawn);
 describe("TabBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ptySpawnMock.mockResolvedValue("s-new");
+    ptySpawnMock.mockResolvedValue({ id: "s-new", is_new: true, pid: 100 });
     useTerminalStore.setState({
       tabs: [
         {

@@ -8,6 +8,8 @@ import {
   ptyKill,
   ptyAck,
   ptyList,
+  ptyDisconnect,
+  ptyShutdown,
   saveLayout,
   loadLayout,
   saveScrollback,
@@ -18,6 +20,7 @@ import {
   onPtyExit,
   onPtyCwd,
 } from "./transport";
+import type { PtySpawnResult } from "./transport";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -30,22 +33,52 @@ describe("pty transport", () => {
     vi.clearAllMocks();
   });
 
-  it("ptySpawn invokes pty_spawn with options and resolves the session id", async () => {
-    invokeMock.mockResolvedValue("abc");
-    const id = await ptySpawn({ shell: "pwsh", cwd: "/tmp", cols: 100, rows: 30 });
+  it("ptySpawn invokes pty_spawn with options including id and resolves PtySpawnResult", async () => {
+    const mockResult: PtySpawnResult = {
+      id: "abc",
+      is_new: false,
+      snapshot: "previous snapshot",
+      pid: 1234,
+      cols: 100,
+      rows: 30,
+      cwd: "/tmp",
+    };
+    invokeMock.mockResolvedValue(mockResult);
+    const result = await ptySpawn({ id: "abc", shell: "pwsh", cwd: "/tmp", cols: 100, rows: 30 });
     expect(invokeMock).toHaveBeenCalledWith("pty_spawn", {
+      id: "abc",
       shell: "pwsh",
       cwd: "/tmp",
       cols: 100,
       rows: 30,
     });
-    expect(id).toBe("abc");
+    expect(result).toEqual(mockResult);
   });
 
   it("ptySpawn with no options invokes pty_spawn with empty args", async () => {
-    invokeMock.mockResolvedValue("xyz");
-    await ptySpawn();
+    const mockResult: PtySpawnResult = {
+      id: "xyz",
+      is_new: true,
+      pid: 5678,
+      cols: 80,
+      rows: 24,
+    };
+    invokeMock.mockResolvedValue(mockResult);
+    const result = await ptySpawn();
     expect(invokeMock).toHaveBeenCalledWith("pty_spawn", {});
+    expect(result).toEqual(mockResult);
+  });
+
+  it("ptyDisconnect invokes pty_disconnect", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await ptyDisconnect();
+    expect(invokeMock).toHaveBeenCalledWith("pty_disconnect");
+  });
+
+  it("ptyShutdown invokes pty_shutdown", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await ptyShutdown();
+    expect(invokeMock).toHaveBeenCalledWith("pty_shutdown");
   });
 
   it("ptyWrite invokes pty_write with id and data", () => {

@@ -34,7 +34,7 @@ const ptySpawnMock = vi.mocked(transport.ptySpawn);
 describe("PaneSplit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ptySpawnMock.mockResolvedValue("s1");
+    ptySpawnMock.mockResolvedValue({ id: "s1", is_new: true, pid: 100 });
   });
 
   function setSessions(ids: string[]) {

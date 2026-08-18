@@ -160,6 +160,11 @@ pub fn pty_disconnect(manager: State<'_, PtyManager>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn pty_shutdown(manager: State<'_, PtyManager>) -> Result<(), String> {
+    manager.shutdown()
+}
+
+#[tauri::command]
 pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), String> {
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

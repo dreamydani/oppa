@@ -59,7 +59,7 @@ describe("SessionLeaf", () => {
   });
 
   it("spawns a session for a leaf id that has none, then renders the terminal", async () => {
-    ptySpawnMock.mockResolvedValue("s1");
+    ptySpawnMock.mockResolvedValue({ id: "s1", is_new: true, pid: 100 });
     // The fresh-start layout has a root leaf with no session yet; SessionLeaf
     // must spawn one and swap the leaf id.
     const { container } = render(<LeafHarness />);
@@ -80,7 +80,7 @@ describe("SessionLeaf", () => {
   });
 
   it("renders the terminal immediately when the session already exists", () => {
-    ptySpawnMock.mockResolvedValue("unused");
+    ptySpawnMock.mockResolvedValue({ id: "unused", is_new: true, pid: 100 });
     useTerminalStore.setState({
       sessions: { s1: running("s1") },
       layout: { type: "leaf", id: "s1" },
@@ -92,7 +92,7 @@ describe("SessionLeaf", () => {
   });
 
   it("does not double-spawn under StrictMode", async () => {
-    ptySpawnMock.mockResolvedValue("s1");
+    ptySpawnMock.mockResolvedValue({ id: "s1", is_new: true, pid: 100 });
     render(
       <StrictMode>
         <LeafHarness />
@@ -108,7 +108,7 @@ describe("SessionLeaf", () => {
   it("does not spawn a second session when the id was already swapped in", async () => {
     // The store already has a session for the leaf id (id swap happened on a
     // previous render); SessionLeaf must reuse it, not spawn again.
-    ptySpawnMock.mockResolvedValue("unused");
+    ptySpawnMock.mockResolvedValue({ id: "unused", is_new: true, pid: 100 });
     useTerminalStore.setState({
       sessions: { s1: running("s1") },
       layout: { type: "leaf", id: "s1" },
@@ -120,9 +120,9 @@ describe("SessionLeaf", () => {
   });
 
   it("shows a loading placeholder while the spawn is in flight", async () => {
-    let resolveSpawn!: (id: string) => void;
+    let resolveSpawn!: (res: transport.PtySpawnResult) => void;
     ptySpawnMock.mockReturnValue(
-      new Promise<string>((resolve) => {
+      new Promise<transport.PtySpawnResult>((resolve) => {
         resolveSpawn = resolve;
       }),
     );
@@ -133,7 +133,7 @@ describe("SessionLeaf", () => {
       expect(container.querySelector(".session-leaf-loading")).not.toBeNull(),
     );
 
-    resolveSpawn("s1");
+    resolveSpawn({ id: "s1", is_new: true, pid: 100 });
     await waitFor(() =>
       expect(within(container).queryByTestId("s1")).not.toBeNull(),
     );
@@ -153,9 +153,9 @@ describe("SessionLeaf", () => {
   });
 
   it("does not swap the layout when unmounted before the spawn resolves", async () => {
-    let resolveSpawn!: (id: string) => void;
+    let resolveSpawn!: (res: transport.PtySpawnResult) => void;
     ptySpawnMock.mockReturnValue(
-      new Promise<string>((resolve) => {
+      new Promise<transport.PtySpawnResult>((resolve) => {
         resolveSpawn = resolve;
       }),
     );
@@ -167,7 +167,7 @@ describe("SessionLeaf", () => {
     // Real unmount detaches the node, so the late resolution must not swap
     // the layout (the leaf is gone). The orphan session itself stays in the
     // store — killing it is the session owner's job, not the view's.
-    resolveSpawn("late");
+    resolveSpawn({ id: "late", is_new: true, pid: 100 });
     await waitFor(() =>
       expect(useTerminalStore.getState().sessions["late"]).toBeDefined(),
     );
@@ -175,9 +175,9 @@ describe("SessionLeaf", () => {
   });
 
   it("substitutes the placeholder id everywhere when the user splits before the spawn resolves", async () => {
-    let resolveSpawn!: (id: string) => void;
+    let resolveSpawn!: (res: transport.PtySpawnResult) => void;
     ptySpawnMock.mockReturnValue(
-      new Promise<string>((resolve) => {
+      new Promise<transport.PtySpawnResult>((resolve) => {
         resolveSpawn = resolve;
       }),
     );
@@ -190,7 +190,7 @@ describe("SessionLeaf", () => {
 
     // The user splits before the spawn resolves: splitPane spawns a real
     // session for the new leaf and wraps the placeholder as a child.
-    ptySpawnMock.mockResolvedValueOnce("other");
+    ptySpawnMock.mockResolvedValueOnce({ id: "other", is_new: true, pid: 100 });
     await useTerminalStore.getState().splitPane("h");
     expect(useTerminalStore.getState().layout).toEqual({
       type: "split",
@@ -203,7 +203,7 @@ describe("SessionLeaf", () => {
     // The original spawn now resolves: the placeholder id must be replaced
     // wherever it still occurs in the tree — no placeholder may remain and
     // the real session must be referenced by the tree.
-    resolveSpawn("s1");
+    resolveSpawn({ id: "s1", is_new: true, pid: 100 });
     await waitFor(() =>
       expect(useTerminalStore.getState().layout).toEqual({
         type: "split",

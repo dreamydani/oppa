@@ -48,6 +48,10 @@ const loadPresetsMock = vi.mocked(workspaceTransport.loadPresets);
 const readFileMock = vi.mocked(fsTransport.readFile);
 const writeFileMock = vi.mocked(fsTransport.writeFile);
 
+function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
+  return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
+}
+
 describe("terminalStore", () => {
   beforeEach(() => {
     saveLayoutMock.mockResolvedValue(undefined);
@@ -86,7 +90,7 @@ describe("terminalStore", () => {
   });
 
   it("spawnSession calls transport and tracks the new session as running", async () => {
-    ptySpawnMock.mockResolvedValue("abc");
+    ptySpawnMock.mockResolvedValue(spawnRes("abc"));
     await useTerminalStore.getState().spawnSession();
     expect(ptySpawnMock).toHaveBeenCalledWith(undefined); // transport maps undefined -> {} for invoke
     const session = useTerminalStore.getState().sessions["abc"];
@@ -98,10 +102,48 @@ describe("terminalStore", () => {
   });
 
   it("spawnSession forwards cwd and stores it on the session", async () => {
-    ptySpawnMock.mockResolvedValue("def");
+    ptySpawnMock.mockResolvedValue(spawnRes("def"));
     await useTerminalStore.getState().spawnSession("C:\\work");
     expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "C:\\work" });
     expect(useTerminalStore.getState().sessions["def"].cwd).toBe("C:\\work");
+  });
+
+  it("spawnSession forwards existingId and shell in options", async () => {
+    ptySpawnMock.mockResolvedValue({
+      id: "session-existing",
+      is_new: false,
+      pid: 1234,
+      cols: 90,
+      rows: 30,
+      cwd: "C:\\custom",
+    });
+    const id = await useTerminalStore.getState().spawnSession("C:\\custom", "pwsh", "session-existing");
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      id: "session-existing",
+      cwd: "C:\\custom",
+      shell: "pwsh",
+    });
+    expect(id).toBe("session-existing");
+    const session = useTerminalStore.getState().sessions["session-existing"];
+    expect(session).toBeDefined();
+    expect(session.cols).toBe(90);
+    expect(session.rows).toBe(30);
+    expect(session.cwd).toBe("C:\\custom");
+  });
+
+  it("spawnSession records restoredScrollbacks when is_new is false and snapshot is present", async () => {
+    ptySpawnMock.mockResolvedValue({
+      id: "s-warm",
+      is_new: false,
+      snapshot: "warm shell snapshot content",
+      pid: 5678,
+      cols: 80,
+      rows: 24,
+      cwd: "/home/user",
+    });
+    const id = await useTerminalStore.getState().spawnSession("/home/user", undefined, "s-warm");
+    expect(id).toBe("s-warm");
+    expect(useTerminalStore.getState().restoredScrollbacks["s-warm"]).toBe("warm shell snapshot content");
   });
 
   it("spawnSession records an error status when spawn fails", async () => {
@@ -227,7 +269,7 @@ describe("terminalStore", () => {
   });
 
   it("splitPane spawns a session, splits the layout, and focuses the new leaf", async () => {
-    ptySpawnMock.mockResolvedValue("s1");
+    ptySpawnMock.mockResolvedValue(spawnRes("s1"));
     useTerminalStore.setState({
       layout: { type: "leaf", id: "root" },
       focusedPath: [],
@@ -247,7 +289,7 @@ describe("terminalStore", () => {
   });
 
   it("splitPane inherits live cwd from the focused session", async () => {
-    ptySpawnMock.mockResolvedValue("s2");
+    ptySpawnMock.mockResolvedValue(spawnRes("s2"));
     useTerminalStore.setState({
       sessions: {
         root: { id: "root", title: "root", status: "running", cwd: "D:\\oppa\\project", cols: 80, rows: 24 },
@@ -269,7 +311,7 @@ describe("terminalStore", () => {
   });
 
   it("splitPane splits at an explicit path and inherits that leaf's cwd", async () => {
-    ptySpawnMock.mockResolvedValue("s2");
+    ptySpawnMock.mockResolvedValue(spawnRes("s2"));
     useTerminalStore.setState({
       sessions: {
         x: { id: "x", title: "x", status: "running", cwd: "C:\\path\\x", cols: 80, rows: 24 },
@@ -553,7 +595,7 @@ describe("terminalStore", () => {
     });
 
     it("createTab persists the new tab layout", async () => {
-      ptySpawnMock.mockResolvedValue("s2");
+      ptySpawnMock.mockResolvedValue(spawnRes("s2"));
       await useTerminalStore.getState().createTab();
       expect(saveLayoutMock).toHaveBeenCalled();
     });
@@ -599,13 +641,13 @@ describe("terminalStore", () => {
     });
 
     it("splitPane persists the new arrangement", async () => {
-      ptySpawnMock.mockResolvedValue("s1");
+      ptySpawnMock.mockResolvedValue(spawnRes("s1"));
       await useTerminalStore.getState().splitPane("h");
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
     it("closePane persists the arrangement", async () => {
-      ptySpawnMock.mockResolvedValue("s1");
+      ptySpawnMock.mockResolvedValue(spawnRes("s1"));
       await useTerminalStore.getState().splitPane("h");
       saveLayoutMock.mockClear();
       await useTerminalStore.getState().closePane();
@@ -856,7 +898,7 @@ describe("terminalStore", () => {
     beforeEach(() => {
       // Default: no saved layout (fresh start).
       loadLayoutMock.mockResolvedValue(null);
-      ptySpawnMock.mockResolvedValue("s1");
+      ptySpawnMock.mockResolvedValue(spawnRes("s1"));
     });
 
     it("does nothing when no layout was saved", async () => {
@@ -890,18 +932,17 @@ describe("terminalStore", () => {
       );
       // Deterministic DFS leaf order: old-left, old-top, old-right.
       ptySpawnMock
-        .mockResolvedValueOnce("new-left")
-        .mockResolvedValueOnce("new-top")
-        .mockResolvedValueOnce("new-right");
+        .mockResolvedValueOnce(spawnRes("new-left"))
+        .mockResolvedValueOnce(spawnRes("new-top"))
+        .mockResolvedValueOnce(spawnRes("new-right"));
 
       await useTerminalStore.getState().loadLayout();
 
-      // Restored sessions are fresh shells: spawned with the saved cwd, and
-      // their NEW ids (not the stale saved ones) back the tree + store.
+      // Restored sessions pass oldId as existingId to enable warm reattachment.
       expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
-        { cwd: "C:\\a" },
-        { cwd: "C:\\b" },
-        { cwd: "C:\\c" },
+        { id: "old-left", cwd: "C:\\a" },
+        { id: "old-top", cwd: "C:\\b" },
+        { id: "old-right", cwd: "C:\\c" },
       ]);
       const { layout, sessions } = useTerminalStore.getState();
       expect(layout).toEqual({
@@ -922,6 +963,61 @@ describe("terminalStore", () => {
       expect(JSON.stringify(layout)).not.toContain("old-");
     });
 
+    it("warm-reattaches to existing daemon sessions without creating duplicate shells", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "daemon-s1" },
+            b: { type: "leaf", id: "daemon-s2" },
+          },
+          sessions: [
+            { id: "daemon-s1", title: "s1", status: "running", cwd: "/app/one", cols: 80, rows: 24 },
+            { id: "daemon-s2", title: "s2", status: "running", cwd: "/app/two", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock
+        .mockResolvedValueOnce({
+          id: "daemon-s1",
+          is_new: false,
+          snapshot: "daemon snapshot 1",
+          pid: 101,
+          cols: 80,
+          rows: 24,
+          cwd: "/app/one",
+        })
+        .mockResolvedValueOnce({
+          id: "daemon-s2",
+          is_new: false,
+          snapshot: "daemon snapshot 2",
+          pid: 102,
+          cols: 80,
+          rows: 24,
+          cwd: "/app/two",
+        });
+
+      await useTerminalStore.getState().loadLayout();
+
+      expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
+        { id: "daemon-s1", cwd: "/app/one" },
+        { id: "daemon-s2", cwd: "/app/two" },
+      ]);
+      const state = useTerminalStore.getState();
+      expect(state.restoredScrollbacks["daemon-s1"]).toBe("daemon snapshot 1");
+      expect(state.restoredScrollbacks["daemon-s2"]).toBe("daemon snapshot 2");
+      expect(state.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "daemon-s1" },
+        b: { type: "leaf", id: "daemon-s2" },
+      });
+      expect(Object.keys(state.sessions)).toEqual(["daemon-s1", "daemon-s2"]);
+    });
+
     it("restores saved scrollbacks, sets restored state, and migrates snapshot on disk", async () => {
       loadLayoutMock.mockResolvedValue(
         JSON.stringify({
@@ -939,8 +1035,8 @@ describe("terminalStore", () => {
         }),
       );
       ptySpawnMock
-        .mockResolvedValueOnce("new-1")
-        .mockResolvedValueOnce("new-2");
+        .mockResolvedValueOnce(spawnRes("new-1"))
+        .mockResolvedValueOnce(spawnRes("new-2"));
       loadScrollbackMock.mockImplementation(async (id) => {
         if (id === "old-1") return "scrollback-1";
         return null;
@@ -985,12 +1081,12 @@ describe("terminalStore", () => {
 
   describe("multi-tab management", () => {
     beforeEach(() => {
-      ptySpawnMock.mockResolvedValue("s1");
+      ptySpawnMock.mockResolvedValue(spawnRes("s1"));
     });
 
     describe("createTab", () => {
       it("creates a new tab with a fresh session, sets it active, and appends to tabs", async () => {
-        ptySpawnMock.mockResolvedValueOnce("s-new");
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("s-new"));
         const tabId = await useTerminalStore.getState().createTab();
         expect(tabId).toBeDefined();
         const state = useTerminalStore.getState();
@@ -1004,7 +1100,7 @@ describe("terminalStore", () => {
       });
 
       it("forwards cwd when creating a tab", async () => {
-        ptySpawnMock.mockResolvedValueOnce("s-cwd");
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("s-cwd"));
         await useTerminalStore.getState().createTab("D:\\my-project");
         expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\my-project" });
         expect(useTerminalStore.getState().sessions["s-cwd"]?.cwd).toBe("D:\\my-project");
@@ -1020,7 +1116,7 @@ describe("terminalStore", () => {
             s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
           },
         });
-        ptySpawnMock.mockResolvedValueOnce("s2");
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("s2"));
         const tab2Id = await useTerminalStore.getState().createTab();
         const { tabs, activeTabId } = useTerminalStore.getState();
         expect(tabs).toHaveLength(2);
@@ -1160,7 +1256,7 @@ describe("terminalStore", () => {
 
     describe("split isolation across tabs", () => {
       it("splitPane modifies only the active tab layout", async () => {
-        ptySpawnMock.mockResolvedValue("s-split");
+        ptySpawnMock.mockResolvedValue(spawnRes("s-split"));
         const tab1 = { id: "t1", layout: { type: "leaf", id: "s1" } as const, focusedPath: [] };
         const tab2 = { id: "t2", layout: { type: "leaf", id: "s2" } as const, focusedPath: [] };
         useTerminalStore.setState({
@@ -1267,8 +1363,8 @@ describe("terminalStore", () => {
           }),
         );
         ptySpawnMock
-          .mockResolvedValueOnce("new-1")
-          .mockResolvedValueOnce("new-2");
+          .mockResolvedValueOnce(spawnRes("new-1"))
+          .mockResolvedValueOnce(spawnRes("new-2"));
 
         await useTerminalStore.getState().loadLayout();
         const state = useTerminalStore.getState();
@@ -1292,7 +1388,7 @@ describe("terminalStore", () => {
             ],
           }),
         );
-        ptySpawnMock.mockResolvedValueOnce("new-legacy");
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("new-legacy"));
 
         await useTerminalStore.getState().loadLayout();
         const state = useTerminalStore.getState();
@@ -1579,10 +1675,10 @@ describe("terminalStore", () => {
 
     it("launchCustomWorkspace spawns multiple sessions, executes startup commands, creates a grid tab, and closes the wizard", async () => {
       ptySpawnMock
-        .mockResolvedValueOnce("s-1")
-        .mockResolvedValueOnce("s-2")
-        .mockResolvedValueOnce("s-3")
-        .mockResolvedValueOnce("s-4");
+        .mockResolvedValueOnce(spawnRes("s-1"))
+        .mockResolvedValueOnce(spawnRes("s-2"))
+        .mockResolvedValueOnce(spawnRes("s-3"))
+        .mockResolvedValueOnce(spawnRes("s-4"));
 
       useTerminalStore.setState({
         isSetupWizardOpen: true,
@@ -1645,7 +1741,7 @@ describe("terminalStore", () => {
     });
 
     it("launchCustomWorkspace infers tab title from folder basename when name is omitted", async () => {
-      ptySpawnMock.mockResolvedValueOnce("s-single");
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("s-single"));
 
       const tabId = await useTerminalStore.getState().launchCustomWorkspace({
         cwd: "C:\\Users\\dev\\my-app",
@@ -1704,8 +1800,8 @@ describe("terminalStore", () => {
 
     it("launchWorkspaceForTab spawns sessions, updates tab layout, title, recents, and sets isWizard=false", async () => {
       ptySpawnMock
-        .mockResolvedValueOnce("w-1")
-        .mockResolvedValueOnce("w-2");
+        .mockResolvedValueOnce(spawnRes("w-1"))
+        .mockResolvedValueOnce(spawnRes("w-2"));
 
       useTerminalStore.setState({
         tabs: [
@@ -1760,7 +1856,7 @@ describe("terminalStore", () => {
     });
 
     it("launchWorkspaceForTab for a background tab updates that tab without disturbing active tab layout", async () => {
-      ptySpawnMock.mockResolvedValueOnce("bg-1");
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("bg-1"));
 
       useTerminalStore.setState({
         tabs: [

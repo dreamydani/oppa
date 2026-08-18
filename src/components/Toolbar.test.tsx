@@ -25,7 +25,7 @@ const ptySpawnMock = vi.mocked(transport.ptySpawn);
 describe("Toolbar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ptySpawnMock.mockResolvedValue("s1");
+    ptySpawnMock.mockResolvedValue({ id: "s1", is_new: true, pid: 100 });
     useTerminalStore.setState({
       sessions: {},
       layout: { type: "leaf", id: "" },

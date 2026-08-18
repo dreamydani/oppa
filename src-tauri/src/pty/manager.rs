@@ -164,6 +164,16 @@ impl PtyManager {
         }
     }
 
+    /// Request the daemon to terminate all sessions and shut down.
+    #[allow(dead_code)]
+    pub fn shutdown(&self) -> Result<(), String> {
+        if let Some(client) = self.client.lock().as_ref() {
+            client.shutdown()
+        } else {
+            Ok(())
+        }
+    }
+
     /// Take output channel for test observation.
     #[allow(dead_code)]
     pub fn take_output(&self, id: &str) -> Option<Receiver<Vec<u8>>> {

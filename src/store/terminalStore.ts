@@ -221,7 +221,7 @@ export interface TerminalState {
   cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
-  spawnSession: (cwd?: string, shell?: string) => Promise<string>;
+  spawnSession: (cwd?: string, shell?: string, existingId?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
@@ -391,12 +391,29 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd, shell) => {
+  spawnSession: async (cwd, shell, existingId) => {
     try {
       const opts: PtySpawnOptions = {};
+      if (existingId) opts.id = existingId;
       if (cwd) opts.cwd = cwd;
       if (shell) opts.shell = shell;
-      const id = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
+      const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
+      const id = typeof res === "string" ? res : res.id;
+      const isNew = typeof res === "string" ? true : res.is_new;
+      const snapshot = typeof res === "string" ? null : res.snapshot;
+      const cols = (typeof res !== "string" && res.cols) || DEFAULT_COLS;
+      const rows = (typeof res !== "string" && res.rows) || DEFAULT_ROWS;
+      const resolvedCwd = (typeof res !== "string" && res.cwd) || cwd;
+
+      if (!isNew && snapshot) {
+        set((state) => ({
+          restoredScrollbacks: {
+            ...state.restoredScrollbacks,
+            [id]: snapshot,
+          },
+        }));
+      }
+
       set((state) => ({
         sessions: {
           ...state.sessions,
@@ -404,9 +421,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             id,
             title: id,
             status: "running",
-            cwd,
-            cols: DEFAULT_COLS,
-            rows: DEFAULT_ROWS,
+            cwd: resolvedCwd,
+            cols,
+            rows,
           },
         },
       }));
@@ -873,14 +890,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         for (const tab of parsed.tabs) {
           for (const oldId of leafIds(tab.layout)) {
             if (oldId === "" || remap[oldId]) continue;
-            const newId = await get().spawnSession(byId.get(oldId)?.cwd);
+            const newId = await get().spawnSession(byId.get(oldId)?.cwd, undefined, oldId);
             remap[oldId] = newId;
 
             const prev = await loadScrollback(oldId);
             if (prev) {
-              get().setRestoredScrollback(newId, prev);
+              if (!get().restoredScrollbacks[newId]) {
+                get().setRestoredScrollback(newId, prev);
+              }
               await saveScrollback(newId, prev);
-              await deleteScrollback(oldId);
+              if (oldId !== newId) {
+                await deleteScrollback(oldId);
+              }
             }
           }
         }
@@ -911,14 +932,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       } else if (parsed.layout) {
         for (const oldId of leafIds(parsed.layout)) {
           if (oldId === "") continue;
-          const newId = await get().spawnSession(byId.get(oldId)?.cwd);
+          const newId = await get().spawnSession(byId.get(oldId)?.cwd, undefined, oldId);
           remap[oldId] = newId;
 
           const prev = await loadScrollback(oldId);
           if (prev) {
-            get().setRestoredScrollback(newId, prev);
+            if (!get().restoredScrollbacks[newId]) {
+              get().setRestoredScrollback(newId, prev);
+            }
             await saveScrollback(newId, prev);
-            await deleteScrollback(oldId);
+            if (oldId !== newId) {
+              await deleteScrollback(oldId);
+            }
           }
         }
         const remappedLayout = remapLeafIds(parsed.layout, remap);
