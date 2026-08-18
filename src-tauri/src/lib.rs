@@ -2,7 +2,7 @@ mod browser;
 mod fs;
 mod git;
 mod layout;
-mod pty;
+pub mod pty;
 mod workspace_presets;
 
 use pty::manager::PtyManager;

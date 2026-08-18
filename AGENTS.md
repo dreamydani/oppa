@@ -8,12 +8,15 @@
 
 ## Architecture
 
-- **Rust-first**: all PTY/session/backpressure logic lives in `src-tauri/src/pty/` (`session.rs`, `manager.rs`, `commands.rs`). No Node runtime in the product.
+- **Rust-first**: all PTY/session/backpressure logic lives in `src-tauri/src/pty/` (`daemon_server.rs`, `daemon_client.rs`, `daemon_session.rs`, `screen_mirror.rs`, `commands.rs`). No Node runtime in the product.
+- **Detached Daemon**: unified binary architecture where `oppa --daemon` starts a headless background Tokio daemon (`run_daemon()`). The GUI process connects as `DaemonClient` (or auto-spawns the daemon on demand). Terminal sessions survive GUI restarts and window closes.
+- **IPC Protocol**: communication between GUI and daemon occurs over named pipes (Windows: `\\.\pipe\oppa-daemon`) or Unix domain sockets (`/tmp/oppa-daemon.sock` / XDG runtime dir) via newline-delimited JSON messages (`DaemonRequest`, `DaemonResponse`, `DaemonEvent`).
+- **Warm Reattachment & Screen Mirroring**: daemon maintains an in-memory `ScreenMirror` (`vt100::Parser`) for each session. When the GUI reconnects, `create_or_attach` returns `is_new: false` along with an ANSI screen snapshot for instant UI hydration without restarting the shell.
 - **State vs transport split**: the renderer's components never call Tauri `invoke` directly. `src/lib/pty/transport.ts` is the *only* file that touches Tauri APIs; components read the zustand store (`src/store/terminalStore.ts`) and call transport helpers.
-- **Session registry**: `PtyManager` owns sessions in a `Mutex<HashMap<String, PtySession>>`. Each session wraps a `portable-pty::PtyPair` with a read loop pushing `pty:data` events; `pty:exit` on child exit.
+- **Session registry**: `DaemonServer` owns sessions in a `Mutex<HashMap<String, Arc<DaemonSession>>>`. Each session wraps a `portable-pty::PtyPair` with a read loop pushing `pty:data` events; `pty:exit` on child exit.
 - **Backpressure (the core lesson, from Orca)**: ACK-based. Renderer ACKs processed chars; Rust pauses the read loop above the high watermark (256KB) and resumes below the low (32KB). Pause = stop reading → OS pipe fills → child blocks. **Never drop output in v1.**
 - **Shell detection**: macOS/Linux `$SHELL` → `/bin/zsh` → `/bin/bash` → `/bin/sh`; Windows `$COMSPEC` → `powershell.exe` → `cmd.exe`. Spawned-shell env: `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=oppa`, inherit app env.
-- **Persistence**: layout + session state (not scrollback) saved on window close to `appDataDir/layout.json`; restored sessions are fresh shells in the same layout + cwd.
+- **Persistence**: layout + workspace state saved on window close to `appDataDir/layout.json`; restored sessions warmly reattach to existing shells in the daemon or fall back to cold restore if the daemon was stopped.
 
 ## Code Style
 
@@ -26,7 +29,8 @@
 ## Testing
 
 - **TDD**: write the failing test first, verify it fails, implement, verify it passes.
-- **Rust**: `cargo test -p oppa --lib` in `src-tauri`. PTY tests use real shells (`sh -c ...`) and a test-only receiver channel.
+- **Rust unit tests**: `cargo test -p oppa --lib` in `src-tauri`.
+- **Rust daemon integration tests**: `cargo test -p oppa --test daemon_integration_test` in `src-tauri`.
 - **Renderer**: `pnpm vitest run` with `@testing-library/react` + `happy-dom`. `transport.ts` is mocked in component tests.
 - Every task ends with a commit. Commit messages follow conventional style (`feat:`, `fix:`, `docs:`).
 
@@ -45,7 +49,7 @@ OPPA targets **macOS, Linux, and Windows**. Keep platform-dependent behavior beh
 - **Dev (desktop)**: `pnpm tauri dev`
 - **Dev (web only)**: `pnpm dev`
 - **Build**: `pnpm build` (tsc + vite) + `cargo check` in `src-tauri`
-- **Rust tests**: `cargo test -p oppa --lib` (run in `src-tauri`)
+- **Rust tests**: `cargo test -p oppa --lib` and `cargo test -p oppa --test daemon_integration_test` (run in `src-tauri`)
 - **Renderer tests**: `pnpm vitest run`
 - **Reference**: Orca source at `D:\orca\orca` — read for architecture ideas, never copy code.
 
