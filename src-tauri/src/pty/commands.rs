@@ -166,7 +166,7 @@ pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Res
 /// `State` guard (which would drag Tauri's runtime into the test binary and
 /// break its load on Windows).
 fn pty_list_impl(manager: &PtyManager) -> Vec<String> {
-    manager.sessions().lock().keys().cloned().collect()
+    manager.list()
 }
 
 #[cfg(test)]

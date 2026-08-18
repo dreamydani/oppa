@@ -1,6 +1,8 @@
 pub mod commands;
+pub mod daemon_client;
 pub mod daemon_server;
 pub mod daemon_session;
+pub mod daemon_spawner;
 pub mod ipc_protocol;
 pub mod manager;
 pub mod osc_scanner;
@@ -9,4 +11,3 @@ pub mod screen_mirror;
 pub mod session;
 pub mod shell_args;
 pub mod snapshot;
-

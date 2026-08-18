@@ -37,6 +37,7 @@ pub fn default_shell() -> String {
 /// close it (drop it) when the child exits — on Windows ConPTY the output
 /// pipe does not EOF on child exit, and dropping the master is what unblocks
 /// the read loop.
+#[allow(dead_code)]
 pub struct PtySession {
     pub id: String,
     pub master: Arc<parking_lot::Mutex<Option<Box<dyn MasterPty + Send>>>>,
@@ -54,6 +55,7 @@ pub struct PtySession {
     pub paused: Arc<AtomicBool>,
 }
 
+#[allow(dead_code)]
 impl PtySession {
     /// Spawn `shell` with `args` attached to the given `pair`'s slave end.
     ///
