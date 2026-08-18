@@ -17,6 +17,7 @@
   box-sizing: border-box;
   position: relative;
   z-index: 10;
+  border-radius: 6px 6px 0 0;
 }
 
 .terminal-pane-header-left {
