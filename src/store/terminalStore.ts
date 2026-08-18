@@ -584,6 +584,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
     if (updated) {
       void get().saveLayout().catch(() => {});
+      // Live-inject the environment variable into the running shell so active agents & scripts immediately reflect the change
+      const isWindows = typeof navigator !== "undefined" && (navigator.platform?.toLowerCase().includes("win") || navigator.userAgent?.toLowerCase().includes("win"));
+      if (personaId) {
+        const cmd = isWindows ? `$env:OPPA_PERSONA = "${personaId}"\r` : `export OPPA_PERSONA="${personaId}"\r`;
+        void Promise.resolve(ptyWrite(sessionId, cmd)).catch(() => {});
+      } else {
+        const cmd = isWindows ? `Remove-Item Env:\\OPPA_PERSONA -ErrorAction SilentlyContinue\r` : `unset OPPA_PERSONA\r`;
+        void Promise.resolve(ptyWrite(sessionId, cmd)).catch(() => {});
+      }
     }
   },
 
@@ -775,8 +784,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const tree = activeTab ? activeTab.layout : state.layout;
     const target = path ?? (activeTab ? activeTab.focusedPath : state.focusedPath);
     const focusedId = focus(tree, target);
-    const currentCwd = get().sessions[focusedId]?.cwd;
-    const id = await get().spawnSession(currentCwd);
+    const focusedSession = get().sessions[focusedId];
+    const currentCwd = focusedSession?.cwd;
+    const currentPersona = focusedSession?.personaId ?? undefined;
+    const id = await get().spawnSession(currentCwd, undefined, undefined, currentPersona);
     const nextLayout = split(dir, tree, target, id);
     const nextFocusedPath = [...target, 1];
     if (activeTab) {
