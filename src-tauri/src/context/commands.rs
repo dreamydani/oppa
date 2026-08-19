@@ -2,17 +2,56 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::context::manager::ContextManager;
-use crate::context::models::{AgentPersona, ContextPage, ContextSearchResult};
+use crate::context::models::{AgentPersona, ContextPage, ContextPageList, ContextSearchResult};
+
+pub(crate) fn apply_tier_filter(mut page: ContextPage, tier: Option<&str>) -> ContextPage {
+    match tier {
+        Some("l0") => {
+            page.overview_l1 = String::new();
+            page.details_l2 = None;
+        }
+        Some("l1") => {
+            page.details_l2 = None;
+        }
+        Some("l2") => {
+            page.abstract_l0 = String::new();
+            page.overview_l1 = String::new();
+        }
+        _ => {}
+    }
+    page
+}
+
+pub(crate) fn export_context_pages(
+    manager: &ContextManager,
+    workspace_path: Option<&str>,
+) -> Result<String, String> {
+    let list = manager.list_pages(workspace_path, None, None, None)?;
+    serde_json::to_string(&list.items).map_err(|e| e.to_string())
+}
+
+pub(crate) fn import_context_pages(
+    manager: &ContextManager,
+    workspace_path: Option<&str>,
+    json: &str,
+) -> Result<usize, String> {
+    let pages: Vec<ContextPage> = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let count = pages.len();
+    for p in &pages {
+        manager.upsert_page(p, workspace_path)?;
+    }
+    Ok(count)
+}
 
 #[tauri::command]
 pub fn context_list(
     manager: State<'_, Arc<ContextManager>>,
     workspace_path: Option<String>,
     category: Option<String>,
-) -> Result<Vec<ContextPage>, String> {
-    manager
-        .list_pages(workspace_path.as_deref(), category.as_deref(), None, None)
-        .map(|list| list.items)
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<ContextPageList, String> {
+    manager.list_pages(workspace_path.as_deref(), category.as_deref(), limit, offset)
 }
 
 #[tauri::command]
@@ -20,8 +59,10 @@ pub fn context_get(
     manager: State<'_, Arc<ContextManager>>,
     id: String,
     workspace_path: Option<String>,
+    tier: Option<String>,
 ) -> Result<Option<ContextPage>, String> {
-    manager.get_page(&id, workspace_path.as_deref())
+    let page = manager.get_page(&id, workspace_path.as_deref())?;
+    Ok(page.map(|p| apply_tier_filter(p, tier.as_deref())))
 }
 
 #[tauri::command]
@@ -44,12 +85,40 @@ pub fn context_delete(
 }
 
 #[tauri::command]
+pub fn context_restore(
+    manager: State<'_, Arc<ContextManager>>,
+    id: String,
+    scope: String,
+    workspace_path: Option<String>,
+) -> Result<(), String> {
+    manager.restore_page(&id, &scope, workspace_path.as_deref())
+}
+
+#[tauri::command]
 pub fn context_search(
     manager: State<'_, Arc<ContextManager>>,
     query: String,
     workspace_path: Option<String>,
+    limit: Option<usize>,
 ) -> Result<Vec<ContextSearchResult>, String> {
-    manager.search_fts(&query, workspace_path.as_deref(), None)
+    manager.search_fts(&query, workspace_path.as_deref(), limit)
+}
+
+#[tauri::command]
+pub fn context_export(
+    manager: State<'_, Arc<ContextManager>>,
+    workspace_path: Option<String>,
+) -> Result<String, String> {
+    export_context_pages(&manager, workspace_path.as_deref())
+}
+
+#[tauri::command]
+pub fn context_import(
+    manager: State<'_, Arc<ContextManager>>,
+    workspace_path: Option<String>,
+    json: String,
+) -> Result<usize, String> {
+    import_context_pages(&manager, workspace_path.as_deref(), &json)
 }
 
 #[tauri::command]
@@ -82,6 +151,82 @@ mod tests {
     }
 
     #[test]
+    fn test_tier_filter_returns_only_l0_when_requested() {
+        let page = ContextPage {
+            id: "p".into(),
+            scope: "global".into(),
+            category: "quirk".into(),
+            path: "quirks/x".into(),
+            title: "X".into(),
+            icon: "bug".into(),
+            abstract_l0: "abstract text".into(),
+            overview_l1: "overview text".into(),
+            details_l2: Some("details text".into()),
+            pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".into(),
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+        };
+
+        let l0 = apply_tier_filter(page.clone(), Some("l0"));
+        assert_eq!(l0.abstract_l0, "abstract text");
+        assert!(l0.overview_l1.is_empty());
+        assert_eq!(l0.details_l2, None);
+
+        let l1 = apply_tier_filter(page.clone(), Some("l1"));
+        assert_eq!(l1.abstract_l0, "abstract text");
+        assert_eq!(l1.overview_l1, "overview text");
+        assert_eq!(l1.details_l2, None);
+
+        let l2 = apply_tier_filter(page.clone(), Some("l2"));
+        assert!(l2.abstract_l0.is_empty());
+        assert!(l2.overview_l1.is_empty());
+        assert_eq!(l2.details_l2, Some("details text".into()));
+
+        let none_tier = apply_tier_filter(page.clone(), None);
+        assert_eq!(none_tier, page);
+    }
+
+    #[test]
+    fn test_export_then_import_round_trips() {
+        let (m, d) = make_test_manager();
+        let ws_path = d.path().to_str().unwrap().to_string();
+        let page = ContextPage {
+            id: "p-export".into(),
+            scope: "workspace".into(),
+            category: "quirk".into(),
+            path: "quirks/x".into(),
+            title: "Exported Quirk".into(),
+            icon: "bug".into(),
+            abstract_l0: "L0 abstract".into(),
+            overview_l1: "L1 overview".into(),
+            details_l2: Some("L2 details".into()),
+            pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".into(),
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+        };
+        m.upsert_page(&page, Some(&ws_path)).unwrap();
+
+        let json = export_context_pages(&m, Some(&ws_path)).unwrap();
+        assert!(json.contains("Exported Quirk"));
+
+        let dir2 = tempdir().unwrap();
+        let m2 = ContextManager::with_global_db_path(dir2.path().join("g.sqlite"));
+        let ws2_path = dir2.path().to_str().unwrap().to_string();
+        let imported_count = import_context_pages(&m2, Some(&ws2_path), &json).unwrap();
+        assert!(imported_count >= 1);
+
+        let retrieved = m2.get_page("p-export", Some(&ws2_path)).unwrap().unwrap();
+        assert_eq!(retrieved.title, "Exported Quirk");
+        assert_eq!(retrieved.abstract_l0, "L0 abstract");
+    }
+
+    #[test]
     fn test_context_list_and_upsert_delegation() {
         let (manager, _dir) = make_test_manager();
         let page = ContextPage {
@@ -102,20 +247,18 @@ mod tests {
             deleted_at: None,
         };
 
-        // Manager method direct check
         manager.upsert_page(&page, None).unwrap();
         let list = manager.list_pages(None, Some("architecture"), None, None).unwrap();
         assert_eq!(list.items.len(), 1);
         assert_eq!(list.items[0].id, "page-1");
 
-        // Now test command logic directly
         let res = manager.get_page("page-1", None).unwrap();
         assert!(res.is_some());
         assert_eq!(res.unwrap().title, "Core Architecture");
     }
 
     #[test]
-    fn test_context_delete_and_search_delegation() {
+    fn test_context_delete_restore_and_search_delegation() {
         let (manager, _dir) = make_test_manager();
         let page = ContextPage {
             id: "search-1".to_string(),
@@ -143,13 +286,17 @@ mod tests {
         manager.delete_page("search-1", "global", None).unwrap();
         let after_delete = manager.get_page("search-1", None).unwrap();
         assert!(after_delete.is_none());
+
+        manager.restore_page("search-1", "global", None).unwrap();
+        let after_restore = manager.get_page("search-1", None).unwrap();
+        assert!(after_restore.is_some());
+        assert_eq!(after_restore.unwrap().id, "search-1");
     }
 
     #[test]
     fn test_persona_list_and_upsert_delegation() {
         let (manager, _dir) = make_test_manager();
         let personas = manager.list_personas(None).unwrap();
-        // 4 built-in personas seeded by schema
         assert_eq!(personas.len(), 4);
 
         let custom_persona = AgentPersona {

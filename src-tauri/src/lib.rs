@@ -31,6 +31,13 @@ pub fn run_daemon() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("oppa=info,warn")),
+        )
+        .try_init();
+
     // Close-save handshake: the renderer saves the layout via an async
     // `invoke`, which `window.beforeunload` cannot await (the webview is torn
     // down as the window closes, so the save never lands). Intercept the exit
@@ -82,7 +89,10 @@ pub fn run() {
             context::commands::context_get,
             context::commands::context_upsert,
             context::commands::context_delete,
+            context::commands::context_restore,
             context::commands::context_search,
+            context::commands::context_export,
+            context::commands::context_import,
             context::commands::persona_list,
             context::commands::persona_upsert,
             confirm_save_complete,
