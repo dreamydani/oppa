@@ -31,7 +31,9 @@ pub struct PtyCwdPayload {
 pub struct PtySpawnResultPayload {
     pub id: String,
     pub is_new: bool,
+    pub is_warm: bool,
     pub snapshot: Option<String>,
+    pub cold_scrollback: Option<String>,
     pub pid: u32,
     pub cols: u16,
     pub rows: u16,
@@ -64,8 +66,8 @@ pub fn pty_spawn(
         _ => manager.next_id(),
     };
 
-    // `app` is moved into the on_data closure; the on_exit and on_cwd closures get their
-    // own clones.
+    // The closures capture clones of `AppHandle` so `app` remains available.
+    let on_data_app = app.clone();
     let on_exit_app = app.clone();
     let on_cwd_app = app.clone();
     let on_data: Box<dyn Fn(&str, &[u8]) + Send + Sync + 'static> =
@@ -75,7 +77,7 @@ pub fn pty_spawn(
                 data: String::from_utf8_lossy(bytes).into_owned(),
                 seq: seq.fetch_add(1, Ordering::SeqCst),
             };
-            let _ = app.emit("pty:data", payload);
+            let _ = on_data_app.emit("pty:data", payload);
         });
     let on_exit: Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static> =
         Box::new(move |id: &str, code: Option<i32>| {
@@ -107,10 +109,23 @@ pub fn pty_spawn(
         Some(on_cwd),
     )?;
 
+    let (is_warm, cold_scrollback) = if !attach_res.is_new {
+        (true, None)
+    } else {
+        use tauri::Manager;
+        let scrollback = app.path().app_data_dir().ok().and_then(|dir| {
+            let storage = crate::pty::snapshot::SnapshotStorage::new(dir);
+            storage.load_snapshot(&session_id).ok().flatten().map(|s| s.scrollback)
+        });
+        (false, scrollback)
+    };
+
     Ok(PtySpawnResultPayload {
         id: session_id,
         is_new: attach_res.is_new,
+        is_warm,
         snapshot: attach_res.snapshot,
+        cold_scrollback,
         pid: attach_res.pid,
         cols: attach_res.cols,
         rows: attach_res.rows,
@@ -245,7 +260,9 @@ mod tests {
         let payload = PtySpawnResultPayload {
             id: "s1".into(),
             is_new: false,
+            is_warm: true,
             snapshot: Some("screen content".into()),
+            cold_scrollback: None,
             pid: 12345,
             cols: 80,
             rows: 24,
@@ -254,7 +271,9 @@ mod tests {
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"id\":\"s1\""));
         assert!(json.contains("\"is_new\":false"));
+        assert!(json.contains("\"is_warm\":true"));
         assert!(json.contains("\"snapshot\":\"screen content\""));
+        assert!(json.contains("\"cold_scrollback\":null"));
         assert!(json.contains("\"pid\":12345"));
         assert!(json.contains("\"cols\":80"));
         assert!(json.contains("\"rows\":24"));
