@@ -58,14 +58,15 @@ export function GeneralSettingsPane(): React.ReactElement {
 
   return (
     <div className="settings-pane" role="region" aria-label="General Settings">
-      <div className="settings-pane-header">
-        <h2 className="settings-pane-title">General</h2>
-        <p className="settings-pane-desc">
-          Workspace behavior, navigation, and defaults.
-        </p>
-      </div>
+      <div className="settings-pane-container">
+        <div className="settings-pane-header">
+          <h2 className="settings-pane-title">General</h2>
+          <p className="settings-pane-desc">
+            Workspace behavior, navigation, and defaults.
+          </p>
+        </div>
 
-      <div className="settings-pane-content">
+        <div className="settings-pane-content">
         {/* Workspace & Startup */}
         <section className="settings-card" aria-labelledby="heading-workspace-startup">
           <h3 id="heading-workspace-startup" className="settings-card-title">
@@ -330,6 +331,7 @@ export function GeneralSettingsPane(): React.ReactElement {
             </div>
           </div>
         </section>
+      </div>
       </div>
     </div>
   );

@@ -16,23 +16,27 @@ export function SettingsView(): React.ReactElement {
         {activeSettingsTab === "shortcuts" && <ShortcutsSettingsPane />}
         {activeSettingsTab === "appearance" && (
           <div className="settings-pane settings-placeholder-pane">
-            <div className="settings-pane-header">
-              <h2 className="settings-pane-title">Appearance</h2>
-              <p className="settings-pane-desc">Themes, fonts, and window styling options.</p>
-            </div>
-            <div className="settings-placeholder-content">
-              <p>Appearance settings coming soon.</p>
+            <div className="settings-pane-container">
+              <div className="settings-pane-header">
+                <h2 className="settings-pane-title">Appearance</h2>
+                <p className="settings-pane-desc">Themes, fonts, and window styling options.</p>
+              </div>
+              <div className="settings-placeholder-content">
+                <p>Appearance settings coming soon.</p>
+              </div>
             </div>
           </div>
         )}
         {activeSettingsTab === "terminal" && (
           <div className="settings-pane settings-placeholder-pane">
-            <div className="settings-pane-header">
-              <h2 className="settings-pane-title">Terminal</h2>
-              <p className="settings-pane-desc">Cursor style, scrollback buffers, and shell configurations.</p>
-            </div>
-            <div className="settings-placeholder-content">
-              <p>Terminal settings coming soon.</p>
+            <div className="settings-pane-container">
+              <div className="settings-pane-header">
+                <h2 className="settings-pane-title">Terminal</h2>
+                <p className="settings-pane-desc">Cursor style, scrollback buffers, and shell configurations.</p>
+              </div>
+              <div className="settings-placeholder-content">
+                <p>Terminal settings coming soon.</p>
+              </div>
             </div>
           </div>
         )}

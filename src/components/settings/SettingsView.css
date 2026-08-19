@@ -5,7 +5,7 @@
   height: 100%;
   flex: 1;
   min-height: 0;
-  background-color: var(--workspace-bg, #18181b);
+  background-color: var(--bg-window, #0c0c0e);
   color: var(--foreground, #ededec);
   overflow: hidden;
   position: relative;
@@ -17,23 +17,44 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  background-color: var(--workspace-bg, #18181b);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background-color: var(--bg-window, #0c0c0e);
+}
+
+.settings-content-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-content-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-content-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+}
+
+.settings-content-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .settings-placeholder-pane {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 32px 40px;
-  box-sizing: border-box;
 }
 
 .settings-placeholder-content {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  color: var(--muted-foreground, #9e9e9a);
-  font-size: 14px;
+  min-height: 240px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--muted-foreground, #71717a);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }

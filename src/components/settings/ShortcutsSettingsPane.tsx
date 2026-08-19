@@ -196,15 +196,16 @@ export function ShortcutsSettingsPane(): React.ReactElement {
 
   return (
     <div className="settings-pane shortcuts-settings-pane" role="region" aria-label="Keyboard Shortcuts">
-      <div className="settings-pane-header">
-        <div className="shortcuts-header-top">
-          <div>
-            <h2 className="settings-pane-title">Keyboard Shortcuts</h2>
-            <p className="settings-pane-desc">
-              Quick reference of all navigation, terminal, layout, and mode keybindings.
-            </p>
+      <div className="settings-pane-container">
+        <div className="settings-pane-header">
+          <div className="shortcuts-header-top">
+            <div>
+              <h2 className="settings-pane-title">Keyboard Shortcuts</h2>
+              <p className="settings-pane-desc">
+                Quick reference of all navigation, terminal, layout, and mode keybindings.
+              </p>
+            </div>
           </div>
-        </div>
 
         <div className="shortcuts-search-wrapper">
           <Search size={15} className="shortcuts-search-icon" aria-hidden="true" />
@@ -278,6 +279,7 @@ export function ShortcutsSettingsPane(): React.ReactElement {
             </section>
           ))
         )}
+      </div>
       </div>
     </div>
   );
