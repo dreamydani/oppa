@@ -26,8 +26,6 @@ pub enum DaemonRequest {
         rows: u16,
         cwd: Option<String>,
         shell: Option<String>,
-        #[serde(default)]
-        persona_id: Option<String>,
     },
     Write {
         session_id: String,
@@ -103,7 +101,6 @@ mod tests {
             rows: 24,
             cwd: Some("C:\\projects".into()),
             shell: None,
-            persona_id: Some("architect".into()),
         };
         let encoded = serde_json::to_string(&req).expect("serialize");
         let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
@@ -123,7 +120,6 @@ mod tests {
                 rows: 30,
                 cwd: None,
                 shell: Some("/bin/bash".into()),
-                persona_id: None,
             },
             DaemonRequest::Write {
                 session_id: "s1".into(),

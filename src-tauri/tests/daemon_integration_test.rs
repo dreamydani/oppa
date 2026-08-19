@@ -64,7 +64,7 @@ fn test_e2e_daemon_spawn_and_data_flow() {
     );
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, None)
+        .create_or_attach(session_id, 80, 24, None, None)
         .expect("create_or_attach failed");
 
     assert!(attach_res.is_new, "expected new session to have is_new = true");
@@ -119,7 +119,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     );
 
     let attach1 = client1
-        .create_or_attach(session_id, 80, 24, None, None, None)
+        .create_or_attach(session_id, 80, 24, None, None)
         .expect("client 1 create_or_attach failed");
     assert!(attach1.is_new, "first connection must be a new session");
 
@@ -154,7 +154,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     // 2. Second client connects and reattaches to the existing session
     let client2 = DaemonClient::connect(&socket_path).expect("connect client 2 failed");
     let attach2 = client2
-        .create_or_attach(session_id, 80, 24, None, None, None)
+        .create_or_attach(session_id, 80, 24, None, None)
         .expect("client 2 reattach failed");
 
     assert!(
@@ -188,7 +188,7 @@ fn test_e2e_daemon_session_kill_lifecycle() {
     let session_id = "e2e-kill-session";
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, None)
+        .create_or_attach(session_id, 80, 24, None, None)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
@@ -218,12 +218,12 @@ fn test_e2e_daemon_session_kill_lifecycle() {
 }
 
 #[test]
-fn test_e2e_daemon_persona_and_cwd_env_injection() {
-    let socket_path = generate_test_socket_path("persona_env");
+fn test_e2e_daemon_cwd_env_injection() {
+    let socket_path = generate_test_socket_path("cwd_env");
     let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
 
     let client = DaemonClient::connect(&socket_path).expect("connect client failed");
-    let session_id = "e2e-persona-session";
+    let session_id = "e2e-cwd-session";
     let (data_tx, data_rx) = channel::<String>();
 
     client.register_callbacks(
@@ -242,19 +242,18 @@ fn test_e2e_daemon_persona_and_cwd_env_injection() {
             24,
             Some("test_ws_cwd".into()),
             None,
-            Some("engineer".into()),
         )
-        .expect("create_or_attach with persona failed");
+        .expect("create_or_attach with cwd failed");
     assert!(attach_res.is_new);
 
     #[cfg(target_os = "windows")]
     client
-        .write(session_id, "Write-Output \"p=$env:OPPA_PERSONA c=$env:OPPA_WORKSPACE_CWD\"\r\n")
+        .write(session_id, "Write-Output \"c=$env:OPPA_WORKSPACE_CWD\"\r\n")
         .expect("write failed");
 
     #[cfg(not(target_os = "windows"))]
     client
-        .write(session_id, "echo p=$OPPA_PERSONA c=$OPPA_WORKSPACE_CWD\n")
+        .write(session_id, "echo c=$OPPA_WORKSPACE_CWD\n")
         .expect("write failed");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(6);
@@ -262,16 +261,12 @@ fn test_e2e_daemon_persona_and_cwd_env_injection() {
     while std::time::Instant::now() < deadline {
         if let Ok(chunk) = data_rx.recv_timeout(Duration::from_millis(200)) {
             output.push_str(&chunk);
-            if output.contains("p=engineer") {
+            if output.contains("c=test_ws_cwd") {
                 break;
             }
         }
     }
 
-    assert!(
-        output.contains("p=engineer"),
-        "expected output to contain 'p=engineer', got: {output}"
-    );
     assert!(
         output.contains("c=test_ws_cwd"),
         "expected output to contain 'c=test_ws_cwd', got: {output}"

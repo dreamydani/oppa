@@ -41,7 +41,6 @@ impl DaemonSession {
         cwd: Option<String>,
         cols: u16,
         rows: u16,
-        persona_id: Option<String>,
     ) -> Result<Arc<Self>, String> {
         let config = resolve_shell_launch_config(shell, cwd);
         Self::spawn_with_args(
@@ -51,7 +50,6 @@ impl DaemonSession {
             config.cwd.as_deref(),
             cols,
             rows,
-            persona_id.as_deref(),
         )
     }
 
@@ -63,7 +61,6 @@ impl DaemonSession {
         cwd: Option<&str>,
         cols: u16,
         rows: u16,
-        persona_id: Option<&str>,
     ) -> Result<Arc<Self>, String> {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -80,9 +77,6 @@ impl DaemonSession {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "oppa");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-        if let Some(persona) = persona_id {
-            cmd.env("OPPA_PERSONA", persona);
-        }
         match std::env::var_os("LANG") {
             Some(lang) if !lang.is_empty() => {}
             _ => {
@@ -339,7 +333,6 @@ mod tests {
             None,
             80,
             24,
-            None,
         )
         .expect("spawn daemon session");
 
@@ -376,7 +369,6 @@ mod tests {
             None,
             80,
             24,
-            None,
         )
         .expect("spawn interactive shell");
 
@@ -413,7 +405,6 @@ mod tests {
             None,
             80,
             24,
-            None,
         )
         .expect("spawn interactive shell");
 
@@ -427,18 +418,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_daemon_session_persona_and_cwd_env_injection() {
+    async fn test_daemon_session_cwd_env_injection() {
         let sh = test_sh_path();
         let session = DaemonSession::spawn_with_args(
             "env-test-s".into(),
             &sh,
-            &["-c".into(), "echo persona=$OPPA_PERSONA cwd=$OPPA_WORKSPACE_CWD".into()],
+            &["-c".into(), "echo cwd=$OPPA_WORKSPACE_CWD".into()],
             Some("test_ws_cwd"),
             80,
             24,
-            Some("architect"),
         )
-        .expect("spawn session with persona and cwd");
+        .expect("spawn session with cwd");
 
         let mut rx = session.subscribe();
         let mut collected = String::new();
@@ -448,7 +438,7 @@ mod tests {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
                 Ok(Ok(DaemonEvent::Data { data, .. })) => {
                     collected.push_str(&data);
-                    if collected.contains("persona=architect") {
+                    if collected.contains("cwd=test_ws_cwd") {
                         break;
                     }
                 }
@@ -457,10 +447,6 @@ mod tests {
             }
         }
 
-        assert!(
-            collected.contains("persona=architect"),
-            "expected output to contain 'persona=architect', got: {collected}"
-        );
         assert!(
             collected.contains("cwd=test_ws_cwd"),
             "expected output to contain 'cwd=test_ws_cwd', got: {collected}"

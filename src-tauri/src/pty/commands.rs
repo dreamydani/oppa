@@ -53,7 +53,6 @@ pub fn pty_spawn(
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
-    persona_id: Option<String>,
 ) -> Result<PtySpawnResultPayload, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -103,7 +102,6 @@ pub fn pty_spawn(
         rows,
         config.cwd,
         Some(config.program),
-        persona_id,
         Some(on_data),
         Some(on_exit),
         Some(on_cwd),

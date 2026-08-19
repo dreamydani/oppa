@@ -69,7 +69,6 @@ impl PtySession {
         cwd: Option<&str>,
         cols: u16,
         rows: u16,
-        persona_id: Option<&str>,
     ) -> std::io::Result<Self> {
         let mut cmd = CommandBuilder::new(shell);
         cmd.args(args.iter().map(String::as_str));
@@ -80,9 +79,6 @@ impl PtySession {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "oppa");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-        if let Some(persona) = persona_id {
-            cmd.env("OPPA_PERSONA", persona);
-        }
         // Locale-clean output on Windows dev boxes: the parent env rarely sets
         // LANG, and a missing/garbage default makes shells emit cp1252 bytes.
         // Only fall back to C.UTF-8 when the parent has no LANG — never

@@ -82,7 +82,6 @@ impl PtyManager {
         rows: u16,
         cwd: Option<String>,
         shell: Option<String>,
-        persona_id: Option<String>,
         on_data: Option<OnData>,
         on_exit: Option<OnExit>,
         on_cwd: Option<OnCwd>,
@@ -90,7 +89,7 @@ impl PtyManager {
         let client = self.get_client()?;
         client.register_callbacks(session_id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(session_id);
-        client.create_or_attach(session_id, cols, rows, cwd, shell, persona_id)
+        client.create_or_attach(session_id, cols, rows, cwd, shell)
     }
 
     /// Spawn a new shell session and return its id.
@@ -102,7 +101,6 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         _args: Vec<String>,
-        persona_id: Option<String>,
         on_data: Option<OnData>,
         on_exit: Option<OnExit>,
         on_cwd: Option<OnCwd>,
@@ -112,7 +110,7 @@ impl PtyManager {
         client.register_callbacks(&id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(&id);
 
-        client.create_or_attach(&id, cols, rows, cwd, shell, persona_id)?;
+        client.create_or_attach(&id, cols, rows, cwd, shell)?;
         Ok(id)
     }
 
@@ -288,7 +286,7 @@ pub(crate) mod tests {
         let sh = sh_path();
 
         let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None, None)
+            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
             .expect("spawn");
 
         let rx = manager.take_output(&id).expect("output channel");
@@ -321,7 +319,6 @@ pub(crate) mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .expect("create");
         assert!(res.is_new);
@@ -339,7 +336,6 @@ pub(crate) mod tests {
                 "session-mgr-1",
                 80,
                 24,
-                None,
                 None,
                 None,
                 None,
@@ -381,7 +377,6 @@ pub(crate) mod tests {
                 80,
                 24,
                 Vec::new(),
-                None,
                 Some(on_data),
                 Some(on_exit),
                 None,
@@ -416,7 +411,7 @@ pub(crate) mod tests {
         let sh = sh_path();
 
         let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None, None)
+            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
             .expect("spawn");
 
         manager.resize(&id, 120, 40).expect("resize");

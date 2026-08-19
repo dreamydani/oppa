@@ -73,7 +73,6 @@ impl DaemonServer {
                 rows,
                 cwd,
                 shell,
-                persona_id,
             } => {
                 let mut sessions = self.sessions.lock();
                 if let Some(session) = sessions.get(&session_id) {
@@ -87,7 +86,7 @@ impl DaemonServer {
                         snapshot: Some(snapshot),
                     })
                 } else {
-                    match DaemonSession::spawn(session_id.clone(), shell, cwd, cols, rows, persona_id) {
+                    match DaemonSession::spawn(session_id.clone(), shell, cwd, cols, rows) {
                         Ok(session) => {
                             let pid = session.pid();
                             let session_cols = session.cols();
@@ -427,7 +426,6 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
-            persona_id: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -464,8 +462,8 @@ mod tests {
         // 6. ListSessions
         let resp = server.handle_request(DaemonRequest::ListSessions);
         match resp {
-            DaemonResponse::SessionList(list) => {
-                assert_eq!(list, vec!["req-test-1".to_string()]);
+            DaemonResponse::SessionList(sessions) => {
+                assert_eq!(sessions, vec!["req-test-1".to_string()]);
             }
             other => panic!("expected SessionList, got {other:?}"),
         }
@@ -477,7 +475,6 @@ mod tests {
             rows: 40,
             cwd: None,
             shell: None,
-            persona_id: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -598,7 +595,6 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
-            persona_id: None,
         };
         let mut create_str = serde_json::to_string(&create_req).unwrap();
         create_str.push('\n');
@@ -691,7 +687,6 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
-            persona_id: None,
         };
         let mut reattach_str = serde_json::to_string(&reattach_req).unwrap();
         reattach_str.push('\n');
