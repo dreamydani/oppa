@@ -11,10 +11,11 @@ import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModa
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
-import { ContextStudio } from "./components/context/ContextStudio";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
+
+export type ActiveMode = "terminal" | "editor" | "browser";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
 // ctrlKey elsewhere):
@@ -216,7 +217,7 @@ function App() {
       <div className="workspace-container">
         <div className="soft-edge-left" />
         <div className="soft-edge-right" />
-        {leftSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+        {leftSidebarOpen && activeAppMode !== "browser" && (
           <LeftSidebar />
         )}
         <main className="main-viewport">
@@ -285,20 +286,10 @@ function App() {
               >
                 <EditorViewport />
               </div>
-              <div
-                className="viewport-view context-viewport-view"
-                style={{
-                  display: activeAppMode === "context" ? "flex" : "none",
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                <ContextStudio />
-              </div>
             </>
           )}
         </main>
-        {rightSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+        {rightSidebarOpen && activeAppMode !== "browser" && (
           <RightSidebar />
         )}
       </div>

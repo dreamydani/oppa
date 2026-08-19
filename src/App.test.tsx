@@ -49,17 +49,6 @@ vi.mock("./lib/git/transport", () => ({
   }),
 }));
 
-vi.mock("./lib/context/transport", () => ({
-  listPages: vi.fn().mockResolvedValue([]),
-  getPage: vi.fn().mockResolvedValue(null),
-  upsertPage: vi.fn().mockResolvedValue(undefined),
-  deletePage: vi.fn().mockResolvedValue(undefined),
-  searchPages: vi.fn().mockResolvedValue([]),
-  listPersonas: vi.fn().mockResolvedValue([]),
-  upsertPersona: vi.fn().mockResolvedValue(undefined),
-  deletePersona: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock("./components/TerminalPane", () => ({
   TerminalPane: ({ id }: { id: string }) => (
     <div className="terminal-pane" data-session-id={id} />
@@ -688,57 +677,6 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(terminalWrapper.style.display).toBe("flex");
       expect(editorWrapper.style.display).toBe("none");
-    });
-  });
-
-  it("renders ContextStudio in main-viewport when activeAppMode is 'context' and hides sidebars", () => {
-    useTerminalStore.setState({
-      activeAppMode: "context",
-      leftSidebarOpen: true,
-      rightSidebarOpen: true,
-    });
-    const { container } = render(<App />);
-
-    expect(container.querySelector(".main-viewport [data-testid='context-studio']")).not.toBeNull();
-    const contextWrapper = container.querySelector(".context-viewport-view") as HTMLElement;
-    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
-    expect(contextWrapper.style.display).toBe("flex");
-    expect(terminalWrapper.style.display).toBe("none");
-    expect(container.querySelector(".left-sidebar")).toBeNull();
-    expect(container.querySelector(".right-sidebar")).toBeNull();
-  });
-
-  it("switches between terminal PaneSplit and ContextStudio when mode changes and toggles sidebars", async () => {
-    useTerminalStore.setState({
-      activeAppMode: "terminal",
-      leftSidebarOpen: true,
-      rightSidebarOpen: true,
-    });
-    const { container } = render(<App />);
-
-    const contextWrapper = container.querySelector(".context-viewport-view") as HTMLElement;
-    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
-    expect(terminalWrapper.style.display).toBe("flex");
-    expect(contextWrapper.style.display).toBe("none");
-    expect(container.querySelector(".left-sidebar")).not.toBeNull();
-
-    // Switch to context
-    useTerminalStore.getState().setAppMode("context");
-
-    await vi.waitFor(() => {
-      expect(contextWrapper.style.display).toBe("flex");
-      expect(terminalWrapper.style.display).toBe("none");
-      expect(container.querySelector("[data-testid='context-studio']")).not.toBeNull();
-      expect(container.querySelector(".left-sidebar")).toBeNull();
-    });
-
-    // Switch back to terminal
-    useTerminalStore.getState().setAppMode("terminal");
-
-    await vi.waitFor(() => {
-      expect(terminalWrapper.style.display).toBe("flex");
-      expect(contextWrapper.style.display).toBe("none");
-      expect(container.querySelector(".left-sidebar")).not.toBeNull();
     });
   });
 

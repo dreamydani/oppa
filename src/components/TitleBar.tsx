@@ -88,16 +88,6 @@ export function TitleBar(): ReactElement {
           >
             editor
           </button>
-          <button
-            type="button"
-            className={`mode-tab ${activeAppMode === "context" ? "active" : ""}`}
-            onClick={() => setAppMode("context")}
-            title="Context"
-            aria-label="Context"
-            aria-pressed={activeAppMode === "context"}
-          >
-            context
-          </button>
         </div>
       </div>
 

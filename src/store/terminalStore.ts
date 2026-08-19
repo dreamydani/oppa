@@ -61,7 +61,7 @@ export type SessionStatus =
   | "error";
 
 
-export type AppMode = "terminal" | "browser" | "editor" | "context";
+export type AppMode = "terminal" | "browser" | "editor";
 export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
 
 export type EditorViewMode = "edit" | "diff" | "markdown-preview" | "markdown-split";
@@ -171,9 +171,10 @@ export interface SessionInfo {
   error?: string;
   cols: number;
   rows: number;
-  personaId?: string | null;
   isRestored?: boolean;
 }
+
+export type TerminalSession = SessionInfo;
 
 
 export interface TabState {
@@ -257,7 +258,7 @@ export interface TerminalState {
   cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
-  spawnSession: (cwd?: string, shell?: string, existingId?: string, personaId?: string) => Promise<string>;
+  spawnSession: (cwd?: string, shell?: string, existingId?: string) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
@@ -266,7 +267,6 @@ export interface TerminalState {
   updateSessionCwd: (id: string, cwd: string) => void;
 
   renameSession: (id: string, title: string) => void;
-  setSessionPersona: (sessionId: string, personaId: string | null) => void;
   substituteSessionId: (from: string, to: string) => void;
   createTab: (cwd?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
@@ -427,15 +427,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd, shell, existingId, personaId) => {
+  spawnSession: async (cwd, shell, existingId) => {
     try {
-      const existingSession = existingId ? get().sessions[existingId] : undefined;
-      const resolvedPersonaId = personaId ?? existingSession?.personaId ?? null;
       const opts: PtySpawnOptions = {};
       if (existingId) opts.id = existingId;
       if (cwd) opts.cwd = cwd;
       if (shell) opts.shell = shell;
-      if (resolvedPersonaId) opts.persona_id = resolvedPersonaId;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
@@ -476,7 +473,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               cwd: resolvedCwd || existingSession?.cwd,
               cols,
               rows,
-              personaId: resolvedPersonaId ?? existingSession?.personaId ?? null,
               ...(isColdRestored || existingSession?.isRestored ? { isRestored: true } : {}),
             },
           },
@@ -608,34 +604,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
     if (updated) {
       void get().saveLayout().catch(() => {});
-    }
-  },
-
-  setSessionPersona: (sessionId, personaId) => {
-    let updated = false;
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      if (session.personaId === personaId) return state;
-      updated = true;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, personaId },
-        },
-      };
-    });
-    if (updated) {
-      void get().saveLayout().catch(() => {});
-      // Live-inject the environment variable into the running shell so active agents & scripts immediately reflect the change
-      const isWindows = typeof navigator !== "undefined" && (navigator.platform?.toLowerCase().includes("win") || navigator.userAgent?.toLowerCase().includes("win"));
-      if (personaId) {
-        const cmd = isWindows ? `$env:OPPA_PERSONA = "${personaId}"\r` : `export OPPA_PERSONA="${personaId}"\r`;
-        void Promise.resolve(ptyWrite(sessionId, cmd)).catch(() => {});
-      } else {
-        const cmd = isWindows ? `Remove-Item Env:\\OPPA_PERSONA -ErrorAction SilentlyContinue\r` : `unset OPPA_PERSONA\r`;
-        void Promise.resolve(ptyWrite(sessionId, cmd)).catch(() => {});
-      }
     }
   },
 
@@ -829,8 +797,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const focusedId = focus(tree, target);
     const focusedSession = get().sessions[focusedId];
     const currentCwd = focusedSession?.cwd;
-    const currentPersona = focusedSession?.personaId ?? undefined;
-    const id = await get().spawnSession(currentCwd, undefined, undefined, currentPersona);
+    const id = await get().spawnSession(currentCwd);
     const nextLayout = split(dir, tree, target, id);
     const nextFocusedPath = [...target, 1];
     if (activeTab) {
@@ -1079,7 +1046,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         cwd: s.cwd,
         cols: s.cols,
         rows: s.rows,
-        ...(s.personaId !== undefined && s.personaId !== null ? { personaId: s.personaId } : {}),
       })),
     };
     await transportSaveLayout(JSON.stringify(snapshot));
@@ -1119,7 +1085,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                 cwd: s.cwd,
                 cols: s.cols || DEFAULT_COLS,
                 rows: s.rows || DEFAULT_ROWS,
-                personaId: s.personaId ?? null,
                 ...(s.isRestored ? { isRestored: true } : {}),
               };
             }
@@ -1146,7 +1111,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               savedSession?.cwd,
               undefined,
               oldId,
-              savedSession?.personaId ?? undefined
             );
             remap[oldId] = newId;
             if (oldId !== newId) {
@@ -1216,7 +1180,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             savedSession?.cwd,
             undefined,
             oldId,
-            savedSession?.personaId ?? undefined
           );
           remap[oldId] = newId;
           if (oldId !== newId) {
@@ -1376,7 +1339,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const count = Math.max(1, config.terminalCount || 1);
     const sessionIds: string[] = [];
     for (let i = 0; i < count; i++) {
-      const id = await get().spawnSession(config.cwd, config.shell, undefined, config.agentPersona);
+      const id = await get().spawnSession(config.cwd, config.shell);
       sessionIds.push(id);
       if (config.commands && config.commands[i] && config.commands[i].trim()) {
         const cmd = config.commands[i].trim();
@@ -1433,7 +1396,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const count = Math.max(1, config.terminalCount || 1);
     const sessionIds: string[] = [];
     for (let i = 0; i < count; i++) {
-      const id = await get().spawnSession(config.cwd, config.shell, undefined, config.agentPersona);
+      const id = await get().spawnSession(config.cwd, config.shell);
       sessionIds.push(id);
       if (config.commands && config.commands[i] && config.commands[i].trim()) {
         const cmd = config.commands[i].trim();

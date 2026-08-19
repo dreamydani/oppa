@@ -7,7 +7,6 @@ import { TabBar } from "../TabBar";
 import { Toolbar } from "../Toolbar";
 import { PaneSplit } from "../PaneSplit";
 import { WorkspaceSetupWizard } from "../wizard/WorkspaceSetupWizard";
-import { ContextStudio } from "../context/ContextStudio";
 import { useTerminalStore } from "../../store/terminalStore";
 import "./AppShell.css";
 
@@ -24,13 +23,11 @@ export function AppShell(): React.ReactElement {
     <div className="app-shell">
       <Titlebar />
       <div className="app-body">
-        {leftSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+        {leftSidebarOpen && activeAppMode !== "browser" && (
           <LeftSidebar />
         )}
         <main className="app-main">
-          {activeAppMode === "context" ? (
-            <ContextStudio />
-          ) : activeTab?.isWizard ? (
+          {activeTab?.isWizard ? (
             <>
               <TabBar />
               <div className="terminal-workbench">
@@ -47,7 +44,7 @@ export function AppShell(): React.ReactElement {
             </>
           )}
         </main>
-        {rightSidebarOpen && activeAppMode !== "browser" && activeAppMode !== "context" && (
+        {rightSidebarOpen && activeAppMode !== "browser" && (
           <RightSidebar />
         )}
       </div>
