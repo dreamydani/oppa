@@ -2,7 +2,7 @@
 :root {
   --bg-window: var(--background, #141414);
   --bg-sidebar: var(--sidebar, #212120);
-  --bg-terminal: var(--topbar-bg, #000000);
+  --bg-terminal: #141414;
   --bg-card-active: var(--card, #282827);
   --bg-card-hover: var(--muted, #2e2e2d);
   --border-divider: var(--border, rgba(255, 255, 255, 0.07));
@@ -699,7 +699,7 @@ body,
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  background-color: var(--bg-window, #141414);
+  background-color: var(--topbar-bg, #000000);
   padding: 2px;
   gap: 2px;
   box-sizing: border-box;
