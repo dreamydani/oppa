@@ -67,8 +67,8 @@ describe("LeftSidebar", () => {
     });
   });
 
-  it("renders search strip and tab cards with avatar badges", () => {
-    render(<LeftSidebar />);
+  it("renders search strip and tab cards with avatar badges and no duplicate icon", () => {
+    const { container } = render(<LeftSidebar />);
 
     expect(screen.getByPlaceholderText(/search tabs/i)).toBeDefined();
     expect(screen.getByTitle("New Tab")).toBeDefined();
@@ -76,6 +76,8 @@ describe("LeftSidebar", () => {
     expect(screen.getByText("oppa-beta")).toBeDefined();
     // CWD is shortened to ~/last-two-segments
     expect(screen.getByText("~/projects/repo-root")).toBeDefined();
+    expect(container.querySelectorAll(".tab-card-avatar").length).toBe(2);
+    expect(container.querySelector(".tab-card-app-icon")).toBeNull();
   });
 
   it("filters tab cards based on search query", () => {

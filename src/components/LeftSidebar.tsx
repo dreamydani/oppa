@@ -204,13 +204,6 @@ export function LeftSidebar(): React.ReactElement | null {
 
                 <div className="tab-card-content">
                   <div className="tab-card-row-top">
-                    <span className="tab-card-app-icon">
-                      {tab.isWizard ? (
-                        <Sparkles size={12} className="text-amber-400" />
-                      ) : (
-                        <TerminalIcon size={12} />
-                      )}
-                    </span>
                     {isEditing ? (
                       <input
                         ref={editInputRef}
