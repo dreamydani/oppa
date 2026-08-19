@@ -608,6 +608,31 @@ describe("App", () => {
     expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
   });
 
+  it("renders BrowserViewport when switching to browser mode while wizard tab is open", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-wizard",
+          title: "New Workspace",
+          isWizard: true,
+          layout: { type: "leaf", id: "" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-wizard",
+      activeAppMode: "browser",
+      leftSidebarOpen: true,
+      ready: true,
+    });
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".main-viewport .browser-viewport")).not.toBeNull();
+    const browserWrapper = container.querySelector(".browser-viewport-view") as HTMLElement;
+    const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
+    expect(browserWrapper.style.display).toBe("flex");
+    expect(terminalWrapper.style.display).toBe("none");
+  });
+
   it("renders BrowserViewport in main-viewport when activeAppMode is 'browser' and hides sidebars", () => {
     useTerminalStore.setState({
       activeAppMode: "browser",

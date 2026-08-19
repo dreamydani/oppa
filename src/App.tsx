@@ -221,73 +221,71 @@ function App() {
           <LeftSidebar />
         )}
         <main className="main-viewport">
-          {!activeTab ? (
-            <div className="empty-workspace-view" data-testid="empty-workspace-view">
-              <div className="empty-workspace-card">
-                <div className="empty-workspace-icon">
-                  <TerminalIcon size={28} />
+          <div
+            className="viewport-view terminal-viewport-view"
+            style={{
+              display: activeAppMode === "terminal" ? "flex" : "none",
+              width: "100%",
+              height: "100%",
+            }}
+          >
+            {!activeTab ? (
+              <div className="empty-workspace-view" data-testid="empty-workspace-view">
+                <div className="empty-workspace-card">
+                  <div className="empty-workspace-icon">
+                    <TerminalIcon size={28} />
+                  </div>
+                  <h2 className="empty-workspace-title">No Open Workspaces</h2>
+                  <p className="empty-workspace-subtitle">
+                    Create a new terminal session, configure a project workspace with the setup wizard, or press <kbd>Ctrl+N</kbd> to launch.
+                  </p>
+                  <div className="empty-workspace-actions">
+                    <button
+                      type="button"
+                      className="empty-action-btn primary"
+                      onClick={() => void createTab()}
+                    >
+                      <PlusIcon size={14} /> New Terminal
+                    </button>
+                    <button
+                      type="button"
+                      className="empty-action-btn secondary"
+                      onClick={() => createWizardTab()}
+                    >
+                      <Sparkles size={14} /> Setup Wizard
+                    </button>
+                  </div>
+                  <div className="empty-workspace-shortcut-hint">
+                    Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
+                  </div>
                 </div>
-                <h2 className="empty-workspace-title">No Open Workspaces</h2>
-                <p className="empty-workspace-subtitle">
-                  Create a new terminal session, configure a project workspace with the setup wizard, or press <kbd>Ctrl+N</kbd> to launch.
-                </p>
-                <div className="empty-workspace-actions">
-                  <button
-                    type="button"
-                    className="empty-action-btn primary"
-                    onClick={() => void createTab()}
-                  >
-                    <PlusIcon size={14} /> New Terminal
-                  </button>
-                  <button
-                    type="button"
-                    className="empty-action-btn secondary"
-                    onClick={() => createWizardTab()}
-                  >
-                    <Sparkles size={14} /> Setup Wizard
-                  </button>
-                </div>
-                <div className="empty-workspace-shortcut-hint">
-                  Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
-                </div>
               </div>
-            </div>
-          ) : activeTab.isWizard ? (
-            <WorkspaceSetupWizard tabId={activeTab.id} />
-          ) : (
-            <>
-              <div
-                className="viewport-view terminal-viewport-view"
-                style={{
-                  display: activeAppMode === "terminal" ? "flex" : "none",
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                <PaneSplit />
-              </div>
-              <div
-                className="viewport-view browser-viewport-view"
-                style={{
-                  display: activeAppMode === "browser" ? "flex" : "none",
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                <BrowserViewport />
-              </div>
-              <div
-                className="viewport-view editor-viewport-view"
-                style={{
-                  display: activeAppMode === "editor" ? "flex" : "none",
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                <EditorViewport />
-              </div>
-            </>
-          )}
+            ) : activeTab.isWizard ? (
+              <WorkspaceSetupWizard tabId={activeTab.id} />
+            ) : (
+              <PaneSplit />
+            )}
+          </div>
+          <div
+            className="viewport-view browser-viewport-view"
+            style={{
+              display: activeAppMode === "browser" ? "flex" : "none",
+              width: "100%",
+              height: "100%",
+            }}
+          >
+            <BrowserViewport />
+          </div>
+          <div
+            className="viewport-view editor-viewport-view"
+            style={{
+              display: activeAppMode === "editor" ? "flex" : "none",
+              width: "100%",
+              height: "100%",
+            }}
+          >
+            <EditorViewport />
+          </div>
         </main>
         {rightSidebarOpen && activeAppMode !== "browser" && (
           <RightSidebar />
