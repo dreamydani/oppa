@@ -37,11 +37,31 @@ import type {
   WorkspacePreset,
 } from "../lib/workspace/transport";
 import { readFile, writeFile } from "../lib/fs/transport";
+import {
+  saveSettings as transportSaveSettings,
+  loadSettings as transportLoadSettings,
+} from "../lib/settings/transport";
+import type {
+  AppSettings,
+  GeneralSettings,
+  SettingsTabId,
+} from "../lib/settings/types";
+import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
 export type { Layout, Path, DropZone } from "../lib/pane-manager/layout";
 export type { RecentWorkspace, WorkspacePreset } from "../lib/workspace/transport";
+export type {
+  AppSettings,
+  GeneralSettings,
+  DefaultCwdMode,
+  StartupBehavior,
+  TabSwitchMode,
+  BrowserSearchEngine,
+  SettingsTabId,
+} from "../lib/settings/types";
+export { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
 
 export interface WorkspaceConfig {
   name?: string;
@@ -354,6 +374,15 @@ export interface TerminalState {
   acceptAiDiff: () => Promise<void>;
   rejectAiDiff: () => void;
   setEditorViewMode: (mode: EditorViewMode) => void;
+  settings: AppSettings;
+  isSettingsOpen: boolean;
+  activeSettingsTab: SettingsTabId;
+  tabFocusHistory: string[];
+  openSettings: (tab?: SettingsTabId) => void;
+  closeSettings: () => void;
+  updateSettings: (partial: Partial<AppSettings> | { general?: Partial<GeneralSettings> }) => void;
+  resolveDefaultCwd: () => string | undefined;
+  loadSettingsData: () => Promise<void>;
 }
 
 function isNonEmptyLayout(layout?: Layout): boolean {
@@ -383,6 +412,9 @@ function getActiveTab(state: TerminalState): TabState | undefined {
   const activeId = state.activeTabId;
   return tabs.find((t) => t.id === activeId) ?? tabs[0];
 }
+
+let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let editorAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
@@ -415,6 +447,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   activeEditorPath: null,
   editorViewMode: "edit",
   pendingAiDiff: null,
+  settings: DEFAULT_APP_SETTINGS,
+  isSettingsOpen: false,
+  activeSettingsTab: "general",
+  tabFocusHistory: [],
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -447,9 +483,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   spawnSession: async (cwd, shell, existingId) => {
     try {
+      const targetCwd = cwd ?? (existingId ? undefined : get().resolveDefaultCwd());
       const opts: PtySpawnOptions = {};
       if (existingId) opts.id = existingId;
-      if (cwd) opts.cwd = cwd;
+      if (targetCwd) opts.cwd = targetCwd;
       if (shell) opts.shell = shell;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
@@ -459,7 +496,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const coldScrollback = typeof res === "string" ? null : res.cold_scrollback;
       const cols = (typeof res !== "string" && res.cols) || DEFAULT_COLS;
       const rows = (typeof res !== "string" && res.rows) || DEFAULT_ROWS;
-      const resolvedCwd = (typeof res !== "string" && res.cwd) || cwd;
+      const resolvedCwd = (typeof res !== "string" && res.cwd) || targetCwd;
 
       const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
@@ -513,7 +550,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             title: id,
             status: "error",
             error: error instanceof Error ? error.message : String(error),
-            cwd,
+            cwd: cwd ?? (existingId ? undefined : get().resolveDefaultCwd()),
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
           },
@@ -649,7 +686,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   createTab: async (cwd) => {
-    const sessionId = await get().spawnSession(cwd);
+    const resolvedCwd = cwd ?? get().resolveDefaultCwd();
+    const sessionId = await get().spawnSession(resolvedCwd);
     const currentTabs = getSyncedTabs(get());
     const tabId = generateNextTabId(currentTabs);
     const newTab: TabState = {
@@ -665,6 +703,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         activeTabId: tabId,
         layout: newTab.layout,
         focusedPath: newTab.focusedPath,
+        tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
       };
     });
     void get().saveLayout().catch(() => {});
@@ -698,6 +737,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const remainingTabs = currentTabs.filter((t) => t.id !== targetId);
+    const nextTabFocusHistory = state.tabFocusHistory.filter((id) => id !== targetId);
 
     if (remainingTabs.length === 0) {
       set({
@@ -707,6 +747,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         activeTabId: "",
         layout: { type: "leaf", id: "" },
         focusedPath: [],
+        tabFocusHistory: nextTabFocusHistory,
       });
     } else {
       if (targetId === state.activeTabId) {
@@ -720,6 +761,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           activeTabId: nextActiveTab.id,
           layout: nextActiveTab.layout,
           focusedPath: nextActiveTab.focusedPath,
+          tabFocusHistory: [
+            nextActiveTab.id,
+            ...nextTabFocusHistory.filter((id) => id !== nextActiveTab.id),
+          ],
         });
       } else {
         const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
@@ -729,6 +774,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           tabs: remainingTabs,
           layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
           focusedPath: activeTab ? activeTab.focusedPath : [],
+          tabFocusHistory: nextTabFocusHistory,
         });
       }
     }
@@ -745,6 +791,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activeTabId: tab.id,
       layout: tab.layout,
       focusedPath: tab.focusedPath,
+      tabFocusHistory: [tab.id, ...state.tabFocusHistory.filter((id) => id !== tab.id)],
     });
     void get().saveLayout().catch(() => {});
   },
@@ -1079,6 +1126,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   // Restore a saved multi-tab (or legacy single-tab) layout.
   loadLayout: async () => {
+    await get().loadSettingsData().catch(() => {});
     try {
       const saved = await transportLoadLayout();
       if (!saved) return;
@@ -1359,6 +1407,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         wizardStep: 1,
         layout: newTab.layout,
         focusedPath: newTab.focusedPath,
+        tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
       };
     });
     void get().saveLayout().catch(() => {});
@@ -1464,6 +1513,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         layout: newTab.layout,
         focusedPath: newTab.focusedPath,
         isSetupWizardOpen: false,
+        tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
       };
     });
 
@@ -1635,6 +1685,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           : t,
       ),
     }));
+
+    const delay = get().settings.general.editorAutoSaveDelay;
+    if (delay > 0) {
+      if (editorAutoSaveTimer) {
+        clearTimeout(editorAutoSaveTimer);
+      }
+      editorAutoSaveTimer = setTimeout(() => {
+        void get().saveActiveFile();
+      }, delay);
+    }
   },
 
   saveActiveFile: async () => {
@@ -1715,4 +1775,51 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   setEditorViewMode: (mode: EditorViewMode) => set({ editorViewMode: mode }),
+
+  openSettings: (tab?: SettingsTabId) =>
+    set({ isSettingsOpen: true, activeSettingsTab: tab || "general" }),
+
+  closeSettings: () => set({ isSettingsOpen: false }),
+
+  updateSettings: (partial) => {
+    const current = get().settings;
+    const updated: AppSettings = {
+      ...current,
+      ...partial,
+      general: {
+        ...current.general,
+        ...(partial.general || {}),
+      },
+    };
+    set({ settings: updated });
+    if (settingsSaveTimer) {
+      clearTimeout(settingsSaveTimer);
+    }
+    settingsSaveTimer = setTimeout(() => {
+      void transportSaveSettings(get().settings).catch(() => {});
+    }, 100);
+  },
+
+  resolveDefaultCwd: () => {
+    const { settings } = get();
+    const { defaultCwdMode, customDefaultCwd } = settings.general;
+    if (defaultCwdMode === "last_active") {
+      return get().getActiveCwd() || undefined;
+    }
+    if (defaultCwdMode === "custom") {
+      return customDefaultCwd.trim() || undefined;
+    }
+    return undefined;
+  },
+
+  loadSettingsData: async () => {
+    try {
+      const loaded = await transportLoadSettings();
+      if (loaded) {
+        set({ settings: loaded });
+      }
+    } catch {
+      // Keep default settings on error
+    }
+  },
 }));

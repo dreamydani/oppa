@@ -3,6 +3,8 @@ import { useTerminalStore } from "./terminalStore";
 import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
+import * as settingsTransport from "../lib/settings/transport";
+import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -32,6 +34,11 @@ vi.mock("../lib/fs/transport", () => ({
   createFile: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../lib/settings/transport", () => ({
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+  loadSettings: vi.fn().mockResolvedValue(null),
+}));
+
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
 const ptyWriteMock = vi.mocked(transport.ptyWrite);
@@ -47,6 +54,8 @@ const savePresetsMock = vi.mocked(workspaceTransport.savePresets);
 const loadPresetsMock = vi.mocked(workspaceTransport.loadPresets);
 const readFileMock = vi.mocked(fsTransport.readFile);
 const writeFileMock = vi.mocked(fsTransport.writeFile);
+const saveSettingsMock = vi.mocked(settingsTransport.saveSettings);
+const loadSettingsMock = vi.mocked(settingsTransport.loadSettings);
 
 function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
@@ -85,7 +94,13 @@ describe("terminalStore", () => {
       activeEditorPath: null,
       editorViewMode: "edit",
       pendingAiDiff: null,
+      settings: DEFAULT_APP_SETTINGS,
+      isSettingsOpen: false,
+      activeSettingsTab: "general",
+      tabFocusHistory: [],
     });
+    saveSettingsMock.mockClear();
+    loadSettingsMock.mockClear();
     vi.clearAllMocks();
   });
 
@@ -2692,5 +2707,265 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).not.toHaveBeenCalled();
     });
   });
+
+  describe("settings slice and integrations", () => {
+    it("initializes with default settings and updates settings", () => {
+      const store = useTerminalStore.getState();
+      expect(store.settings).toEqual(DEFAULT_APP_SETTINGS);
+      expect(store.settings.general.defaultCwdMode).toBe("home");
+      expect(store.isSettingsOpen).toBe(false);
+      expect(store.activeSettingsTab).toBe("general");
+
+      store.openSettings("shortcuts");
+      expect(useTerminalStore.getState().isSettingsOpen).toBe(true);
+      expect(useTerminalStore.getState().activeSettingsTab).toBe("shortcuts");
+
+      store.openSettings();
+      expect(useTerminalStore.getState().isSettingsOpen).toBe(true);
+      expect(useTerminalStore.getState().activeSettingsTab).toBe("general");
+
+      store.closeSettings();
+      expect(useTerminalStore.getState().isSettingsOpen).toBe(false);
+
+      store.updateSettings({
+        general: {
+          defaultCwdMode: "last_active",
+        },
+      });
+      const updatedState = useTerminalStore.getState();
+      expect(updatedState.settings.general.defaultCwdMode).toBe("last_active");
+      // Other general settings remain intact
+      expect(updatedState.settings.general.confirmCloseTabWithMultiplePanes).toBe(true);
+    });
+
+    it("debounces saveSettings on updateSettings", async () => {
+      vi.useFakeTimers();
+      try {
+        const store = useTerminalStore.getState();
+        store.updateSettings({
+          general: {
+            defaultCwdMode: "custom",
+            customDefaultCwd: "C:\\Projects",
+          },
+        });
+
+        expect(saveSettingsMock).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(200);
+        expect(saveSettingsMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            general: expect.objectContaining({
+              defaultCwdMode: "custom",
+              customDefaultCwd: "C:\\Projects",
+            }),
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("resolves default CWD correctly based on settings mode", () => {
+      const store = useTerminalStore.getState();
+
+      // Home mode -> undefined
+      expect(store.resolveDefaultCwd()).toBeUndefined();
+
+      // Custom mode with trimmed valid path
+      store.updateSettings({
+        general: {
+          defaultCwdMode: "custom",
+          customDefaultCwd: "  D:\\oppa\\custom-cwd  ",
+        },
+      });
+      expect(useTerminalStore.getState().resolveDefaultCwd()).toBe("D:\\oppa\\custom-cwd");
+
+      // Custom mode with empty/whitespace path -> fallback undefined
+      store.updateSettings({
+        general: {
+          defaultCwdMode: "custom",
+          customDefaultCwd: "    ",
+        },
+      });
+      expect(useTerminalStore.getState().resolveDefaultCwd()).toBeUndefined();
+
+      // Last active mode without active session -> undefined
+      store.updateSettings({
+        general: {
+          defaultCwdMode: "last_active",
+        },
+      });
+      expect(useTerminalStore.getState().resolveDefaultCwd()).toBeUndefined();
+
+      // Last active mode with active session CWD
+      useTerminalStore.setState({
+        tabs: [{ id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
+        activeTabId: "t1",
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cwd: "D:\\active\\dir", cols: 80, rows: 24 },
+        },
+      });
+      expect(useTerminalStore.getState().resolveDefaultCwd()).toBe("D:\\active\\dir");
+    });
+
+    it("createTab and spawnSession integrate CWD resolution", async () => {
+      ptySpawnMock.mockResolvedValue(spawnRes("s-custom"));
+
+      // Configure custom default CWD
+      useTerminalStore.getState().updateSettings({
+        general: {
+          defaultCwdMode: "custom",
+          customDefaultCwd: "D:\\default\\workspace",
+        },
+      });
+
+      // createTab without explicit cwd uses resolved default CWD
+      await useTerminalStore.getState().createTab();
+      expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\default\\workspace" });
+
+      ptySpawnMock.mockClear();
+
+      // createTab with explicit cwd overrides resolved default CWD
+      await useTerminalStore.getState().createTab("D:\\explicit\\path");
+      expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\explicit\\path" });
+
+      ptySpawnMock.mockClear();
+
+      // spawnSession without cwd uses resolved default CWD
+      await useTerminalStore.getState().spawnSession();
+      expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\default\\workspace" });
+
+      ptySpawnMock.mockClear();
+
+      // spawnSession with explicit cwd overrides resolved default CWD
+      await useTerminalStore.getState().spawnSession("D:\\explicit\\spawn");
+      expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\explicit\\spawn" });
+    });
+
+    it("loadSettingsData loads and updates settings from transport", async () => {
+      const customLoaded = {
+        general: {
+          ...DEFAULT_APP_SETTINGS.general,
+          defaultCwdMode: "last_active" as const,
+          editorWordWrap: false,
+        },
+      };
+      loadSettingsMock.mockResolvedValueOnce(customLoaded);
+
+      await useTerminalStore.getState().loadSettingsData();
+
+      expect(loadSettingsMock).toHaveBeenCalled();
+      expect(useTerminalStore.getState().settings).toEqual(customLoaded);
+    });
+
+    it("loadLayout invokes loadSettingsData during bootstrap", async () => {
+      const customLoaded = {
+        general: {
+          ...DEFAULT_APP_SETTINGS.general,
+          browserSearchEngine: "google" as const,
+        },
+      };
+      loadSettingsMock.mockResolvedValueOnce(customLoaded);
+
+      await useTerminalStore.getState().loadLayout();
+
+      expect(loadSettingsMock).toHaveBeenCalled();
+      expect(useTerminalStore.getState().settings.general.browserSearchEngine).toBe("google");
+    });
+
+    it("tracks tabFocusHistory across tab creation, selection, and closure", async () => {
+      ptySpawnMock.mockResolvedValue(spawnRes("s1"));
+      const t1 = await useTerminalStore.getState().createTab();
+
+      ptySpawnMock.mockResolvedValue(spawnRes("s2"));
+      const t2 = await useTerminalStore.getState().createTab();
+
+      ptySpawnMock.mockResolvedValue(spawnRes("s3"));
+      const t3 = await useTerminalStore.getState().createTab();
+
+      expect(useTerminalStore.getState().tabFocusHistory).toEqual([t3, t2, t1]);
+
+      // Focus t1 -> t1 moves to the front of history
+      useTerminalStore.getState().selectTab(t1);
+      expect(useTerminalStore.getState().tabFocusHistory).toEqual([t1, t3, t2]);
+
+      // Focus t2 -> t2 moves to the front of history
+      useTerminalStore.getState().selectTab(t2);
+      expect(useTerminalStore.getState().tabFocusHistory).toEqual([t2, t1, t3]);
+
+      // Close t1 -> t1 is removed from history
+      await useTerminalStore.getState().closeTab(t1);
+      expect(useTerminalStore.getState().tabFocusHistory).toEqual([t2, t3]);
+    });
+
+    it("debounces editor auto-save when editorAutoSaveDelay > 0", async () => {
+      vi.useFakeTimers();
+      try {
+        useTerminalStore.setState({
+          editorTabs: [
+            {
+              path: "/workspace/index.ts",
+              name: "index.ts",
+              content: "initial",
+              originalContent: "initial",
+              isDirty: false,
+              language: "typescript",
+              isMarkdown: false,
+            },
+          ],
+          activeEditorPath: "/workspace/index.ts",
+          settings: {
+            general: {
+              ...DEFAULT_APP_SETTINGS.general,
+              editorAutoSaveDelay: 500,
+            },
+          },
+        });
+
+        useTerminalStore.getState().updateEditorContent("/workspace/index.ts", "modified content");
+        expect(writeFileMock).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(499);
+        expect(writeFileMock).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(2);
+        expect(writeFileMock).toHaveBeenCalledWith("/workspace/index.ts", "modified content");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not auto-save editor content when editorAutoSaveDelay is 0", async () => {
+      vi.useFakeTimers();
+      try {
+        useTerminalStore.setState({
+          editorTabs: [
+            {
+              path: "/workspace/index.ts",
+              name: "index.ts",
+              content: "initial",
+              originalContent: "initial",
+              isDirty: false,
+              language: "typescript",
+              isMarkdown: false,
+            },
+          ],
+          activeEditorPath: "/workspace/index.ts",
+          settings: {
+            general: {
+              ...DEFAULT_APP_SETTINGS.general,
+              editorAutoSaveDelay: 0,
+            },
+          },
+        });
+
+        useTerminalStore.getState().updateEditorContent("/workspace/index.ts", "modified content");
+        vi.advanceTimersByTime(2000);
+        expect(writeFileMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
+
 
