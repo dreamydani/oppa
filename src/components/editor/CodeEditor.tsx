@@ -147,6 +147,7 @@ export function CodeEditor({
   const updateEditorContent = useTerminalStore((s) => s.updateEditorContent);
   const saveActiveFile = useTerminalStore((s) => s.saveActiveFile);
   const pendingAiDiff = useTerminalStore((s) => s.pendingAiDiff);
+  const editorWordWrap = useTerminalStore((s) => s.settings.general.editorWordWrap);
 
   const activeTab = editorTabs.find((t) => t.path === activeEditorPath);
 
@@ -295,6 +296,9 @@ export function CodeEditor({
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
+          wrap={editorWordWrap ? "soft" : "off"}
+          data-word-wrap={editorWordWrap ? "on" : "off"}
+          style={{ whiteSpace: editorWordWrap ? "pre-wrap" : "pre" }}
           data-language={currentLang}
         />
       </div>

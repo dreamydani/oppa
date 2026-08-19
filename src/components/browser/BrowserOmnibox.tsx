@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactElement } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
+import type { BrowserSearchEngine } from "../../lib/settings/types";
 import * as browserTransport from "../../lib/browser/transport";
 
-export function normalizeUrl(input: string): string {
+export function normalizeUrl(
+  input: string,
+  searchEngine: BrowserSearchEngine = "duckduckgo",
+): string {
   const trimmed = input.trim();
   if (!trimmed) return "";
 
@@ -26,8 +30,16 @@ export function normalizeUrl(input: string): string {
     return `https://${trimmed}`;
   }
 
-  // General search fallback
-  return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
+  // Search engine fallback queries
+  switch (searchEngine) {
+    case "google":
+      return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
+    case "bing":
+      return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`;
+    case "duckduckgo":
+    default:
+      return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
+  }
 }
 
 export function BrowserOmnibox(): ReactElement {
@@ -38,6 +50,7 @@ export function BrowserOmnibox(): ReactElement {
   const storeGoBack = useTerminalStore((s) => s.browserGoBack);
   const storeGoForward = useTerminalStore((s) => s.browserGoForward);
   const storeReload = useTerminalStore((s) => s.browserReload);
+  const searchEngine = useTerminalStore((s) => s.settings.general.browserSearchEngine);
 
   const [inputValue, setInputValue] = useState(browserUrl);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -73,7 +86,7 @@ export function BrowserOmnibox(): ReactElement {
 
   const handleSubmit = (e?: FormEvent) => {
     e?.preventDefault();
-    const targetUrl = normalizeUrl(inputValue);
+    const targetUrl = normalizeUrl(inputValue, searchEngine);
     navigateBrowser(targetUrl);
     void browserTransport.browserNavigate(targetUrl);
   };

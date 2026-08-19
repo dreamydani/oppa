@@ -16,6 +16,7 @@ export function TitleBar(): ReactElement {
   const toggleRight = useTerminalStore((s) => s.toggleRightSidebar);
   const activeAppMode = useTerminalStore((s) => s.activeAppMode);
   const setAppMode = useTerminalStore((s) => s.setAppMode);
+  const isSettingsOpen = useTerminalStore((s) => s.isSettingsOpen);
 
   const handleMinimize = () => {
     try {
@@ -57,38 +58,44 @@ export function TitleBar(): ReactElement {
       </div>
 
       <div className="title-bar-center" data-tauri-drag-region>
-        <div className="mode-switcher-pill" data-tauri-drag-region="false">
-          <button
-            type="button"
-            className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
-            onClick={() => setAppMode("browser")}
-            title="Browser"
-            aria-label="Browser"
-            aria-pressed={activeAppMode === "browser"}
-          >
-            browser
-          </button>
-          <button
-            type="button"
-            className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
-            onClick={() => setAppMode("terminal")}
-            title="Terminal"
-            aria-label="Terminal"
-            aria-pressed={activeAppMode === "terminal"}
-          >
-            terminal
-          </button>
-          <button
-            type="button"
-            className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
-            onClick={() => setAppMode("editor")}
-            title="Editor"
-            aria-label="Editor"
-            aria-pressed={activeAppMode === "editor"}
-          >
-            editor
-          </button>
-        </div>
+        {isSettingsOpen ? (
+          <span className="settings-titlebar-heading" data-testid="settings-titlebar-heading">
+            Settings
+          </span>
+        ) : (
+          <div className="mode-switcher-pill" data-tauri-drag-region="false">
+            <button
+              type="button"
+              className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
+              onClick={() => setAppMode("browser")}
+              title="Browser"
+              aria-label="Browser"
+              aria-pressed={activeAppMode === "browser"}
+            >
+              browser
+            </button>
+            <button
+              type="button"
+              className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
+              onClick={() => setAppMode("terminal")}
+              title="Terminal"
+              aria-label="Terminal"
+              aria-pressed={activeAppMode === "terminal"}
+            >
+              terminal
+            </button>
+            <button
+              type="button"
+              className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
+              onClick={() => setAppMode("editor")}
+              title="Editor"
+              aria-label="Editor"
+              aria-pressed={activeAppMode === "editor"}
+            >
+              editor
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="title-bar-right">

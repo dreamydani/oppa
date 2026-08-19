@@ -22,7 +22,15 @@ describe("TitleBar", () => {
       leftSidebarOpen: true,
       rightSidebarOpen: false,
       activeAppMode: "terminal",
+      isSettingsOpen: false,
     });
+  });
+
+  it("renders Settings title and hides mode switcher pill when isSettingsOpen is true", () => {
+    useTerminalStore.setState({ isSettingsOpen: true });
+    const { container } = render(<TitleBar />);
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(container.querySelector(".mode-switcher-pill")).toBeNull();
   });
 
   it("renders oppa brand title and sidebar toggle buttons", () => {

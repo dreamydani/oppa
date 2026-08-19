@@ -42,12 +42,15 @@ describe("normalizeUrl helper", () => {
     expect(normalizeUrl("docs.rs/tokio")).toBe("https://docs.rs/tokio");
   });
 
-  it("converts general queries into search URLs", () => {
-    expect(normalizeUrl("react useeffect hook")).toBe(
+  it("converts general queries into search URLs based on engine", () => {
+    expect(normalizeUrl("react useeffect hook", "duckduckgo")).toBe(
       "https://duckduckgo.com/?q=react%20useeffect%20hook"
     );
-    expect(normalizeUrl("how to center a div")).toBe(
-      "https://duckduckgo.com/?q=how%20to%20center%20a%20div"
+    expect(normalizeUrl("react useeffect hook", "google")).toBe(
+      "https://www.google.com/search?q=react%20useeffect%20hook"
+    );
+    expect(normalizeUrl("react useeffect hook", "bing")).toBe(
+      "https://www.bing.com/search?q=react%20useeffect%20hook"
     );
   });
 
@@ -155,6 +158,28 @@ describe("BrowserOmnibox component", () => {
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
     expect(browserTransport.browserNavigate).toHaveBeenCalledWith("http://localhost:5173");
+  });
+
+  it("submits search query using configured search engine in settings", () => {
+    useTerminalStore.setState({
+      settings: {
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          browserSearchEngine: "google",
+        },
+      },
+    });
+
+    render(<BrowserOmnibox />);
+    const input = screen.getByPlaceholderText(
+      "Search or enter URL (e.g. 5173 or localhost:3000)"
+    ) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "tauri rust app" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(useTerminalStore.getState().browserUrl).toBe("https://www.google.com/search?q=tauri%20rust%20app");
+    expect(browserTransport.browserNavigate).toHaveBeenCalledWith("https://www.google.com/search?q=tauri%20rust%20app");
   });
 
   it("shows lock indicator for secure/localhost URLs and globe indicator for http URLs", () => {

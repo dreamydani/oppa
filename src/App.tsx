@@ -10,6 +10,7 @@ import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModa
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
+import { SettingsView } from "./components/settings/SettingsView";
 import { useTerminalStore } from "./store/terminalStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
@@ -18,11 +19,14 @@ export type ActiveMode = "terminal" | "editor" | "browser";
 
 // Keyboard shortcuts (platform-checked per AGENTS.md: metaKey on Mac,
 // ctrlKey elsewhere):
+//   Cmd/Ctrl+,        open settings (general)
+//   Cmd/Ctrl+/ / F1   open keyboard shortcuts reference
+//   Esc               close settings when open
 //   Cmd/Ctrl+N        open / toggle workspace launcher modal
 //   Cmd/Ctrl+T        create new tab
 //   Cmd/Ctrl+W        close active tab / focused pane
-//   Ctrl+Tab          cycle active tab forward
-//   Ctrl+Shift+Tab    cycle active tab backward
+//   Ctrl+Tab          cycle active tab forward (sequential or MRU)
+//   Ctrl+Shift+Tab    cycle active tab backward (sequential or MRU)
 //   Alt/Cmd+1..9      jump directly to tab index 0..8
 //   Cmd/Ctrl+Shift+D  split focused pane horizontally
 //   Cmd/Ctrl+Shift+E  split focused pane vertically
@@ -45,22 +49,37 @@ function App() {
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
   const activeAppMode = useTerminalStore((s) => s.activeAppMode);
+  const isSettingsOpen = useTerminalStore((s) => s.isSettingsOpen);
+  const openSettings = useTerminalStore((s) => s.openSettings);
+  const closeSettings = useTerminalStore((s) => s.closeSettings);
 
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
-  // Restore the persisted layout once on startup (StrictMode double-invokes
-  // effects in dev; a ref guarantees the restore runs exactly once).
+  // Restore persisted layout and apply startup behavior on initial mount.
   const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
-    void loadLayout().catch(() => {
-      // A corrupt save file must not brick startup: fall through to a fresh
-      // pane (loadLayout still marks the store ready).
-    });
+    const init = async () => {
+      try {
+        await loadLayout();
+      } catch {
+        // A corrupt save file must not brick startup: fall through to a fresh
+        // pane (loadLayout still marks the store ready).
+      }
+      const currentSettings = useTerminalStore.getState().settings;
+      if (currentSettings.general.startupBehavior === "workspace_launcher") {
+        useTerminalStore.getState().openWorkspaceLauncher();
+      } else if (currentSettings.general.startupBehavior === "fresh_terminal") {
+        if (useTerminalStore.getState().tabs.length === 0) {
+          void useTerminalStore.getState().createTab();
+        }
+      }
+    };
+    void init();
   }, [loadLayout]);
 
   // Subscribe to live PTY CWD updates and keep session CWD in sync.
@@ -116,16 +135,48 @@ function App() {
     const modifier = (e: KeyboardEvent) => (isMac ? e.metaKey : e.ctrlKey);
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Escape: close settings if open
+      if (e.key === "Escape" || e.key === "Esc") {
+        if (useTerminalStore.getState().isSettingsOpen) {
+          e.preventDefault();
+          closeSettings();
+          return;
+        }
+      }
+
+      // F1: open shortcuts settings
+      if (e.key === "F1") {
+        e.preventDefault();
+        openSettings("shortcuts");
+        return;
+      }
+
       // Tab switching: Ctrl+Tab and Ctrl+Shift+Tab
       if (e.ctrlKey && (e.key === "Tab" || e.code === "Tab")) {
         e.preventDefault();
-        const { tabs, activeTabId, selectTab } = useTerminalStore.getState();
+        const { tabs, activeTabId, selectTab, settings, tabFocusHistory } = useTerminalStore.getState();
         if (tabs.length > 0) {
-          const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
-          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-          const offset = e.shiftKey ? -1 : 1;
-          const nextIndex = (safeIndex + offset + tabs.length) % tabs.length;
-          selectTab(tabs[nextIndex].id);
+          if (settings.general.tabSwitchMode === "mru") {
+            const validHistory = tabFocusHistory.filter((id) => tabs.some((t) => t.id === id));
+            for (const t of tabs) {
+              if (!validHistory.includes(t.id)) {
+                validHistory.push(t.id);
+              }
+            }
+            if (validHistory.length > 1) {
+              const currentIdx = validHistory.indexOf(activeTabId);
+              const safeIdx = currentIdx >= 0 ? currentIdx : 0;
+              const offset = e.shiftKey ? -1 : 1;
+              const nextIdx = (safeIdx + offset + validHistory.length) % validHistory.length;
+              selectTab(validHistory[nextIdx]);
+            }
+          } else {
+            const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
+            const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+            const offset = e.shiftKey ? -1 : 1;
+            const nextIndex = (safeIndex + offset + tabs.length) % tabs.length;
+            selectTab(tabs[nextIndex].id);
+          }
         }
         return;
       }
@@ -167,7 +218,13 @@ function App() {
 
       if (!modifier(e) && !e.ctrlKey && !e.metaKey) return;
       const key = e.key.toLowerCase();
-      if (key === "b" && e.shiftKey) {
+      if (key === "," && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        openSettings("general");
+      } else if ((key === "/" || key === "?") && !e.altKey) {
+        e.preventDefault();
+        openSettings("shortcuts");
+      } else if (key === "b" && e.shiftKey) {
         e.preventDefault();
         toggleRightSidebar();
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
@@ -204,7 +261,17 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splitPane, closePane, moveFocus, swapFocusedPane, createTab, toggleLeftSidebar, toggleRightSidebar]);
+  }, [
+    splitPane,
+    closePane,
+    moveFocus,
+    swapFocusedPane,
+    createTab,
+    toggleLeftSidebar,
+    toggleRightSidebar,
+    openSettings,
+    closeSettings,
+  ]);
 
   // Hold the pane grid until the startup restore has settled: rendering a
   // sessionless placeholder leaf before the restore would spawn a throwaway
@@ -213,78 +280,82 @@ function App() {
   return (
     <div className="app-container">
       <TitleBar />
-      <div className="workspace-container">
-        <div className="soft-edge-left" />
-        <div className="soft-edge-right" />
-        {leftSidebarOpen && activeAppMode !== "browser" && (
-          <LeftSidebar />
-        )}
-        <main className="main-viewport">
-          <div
-            className="viewport-view terminal-viewport-view"
-            style={{
-              display: activeAppMode === "terminal" ? "flex" : "none",
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            {!activeTab ? (
-              <div className="empty-workspace-view" data-testid="empty-workspace-view">
-                <div className="empty-workspace-card">
-                  <div className="empty-workspace-icon">
-                    <TerminalIcon size={26} />
-                  </div>
-                  <h2 className="empty-workspace-title">No Open Workspaces</h2>
-                  <p className="empty-workspace-subtitle">
-                    Configure an active project workspace with terminal layouts, shells, and agent personas.
-                  </p>
-                  <div className="empty-workspace-actions">
-                    <button
-                      type="button"
-                      className="empty-action-btn primary"
-                      onClick={() => createWizardTab()}
-                      aria-label="New Workspace"
-                    >
-                      <PlusIcon size={15} />
-                      <span>New Workspace</span>
-                    </button>
-                  </div>
-                  <div className="empty-workspace-shortcut-hint">
-                    Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
+      {isSettingsOpen ? (
+        <SettingsView />
+      ) : (
+        <div className="workspace-container">
+          <div className="soft-edge-left" />
+          <div className="soft-edge-right" />
+          {leftSidebarOpen && activeAppMode !== "browser" && (
+            <LeftSidebar />
+          )}
+          <main className="main-viewport">
+            <div
+              className="viewport-view terminal-viewport-view"
+              style={{
+                display: activeAppMode === "terminal" ? "flex" : "none",
+                width: "100%",
+                height: "100%",
+              }}
+            >
+              {!activeTab ? (
+                <div className="empty-workspace-view" data-testid="empty-workspace-view">
+                  <div className="empty-workspace-card">
+                    <div className="empty-workspace-icon">
+                      <TerminalIcon size={26} />
+                    </div>
+                    <h2 className="empty-workspace-title">No Open Workspaces</h2>
+                    <p className="empty-workspace-subtitle">
+                      Configure an active project workspace with terminal layouts, shells, and agent personas.
+                    </p>
+                    <div className="empty-workspace-actions">
+                      <button
+                        type="button"
+                        className="empty-action-btn primary"
+                        onClick={() => createWizardTab()}
+                        aria-label="New Workspace"
+                      >
+                        <PlusIcon size={15} />
+                        <span>New Workspace</span>
+                      </button>
+                    </div>
+                    <div className="empty-workspace-shortcut-hint">
+                      Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : activeTab.isWizard ? (
-              <WorkspaceSetupWizard tabId={activeTab.id} />
-            ) : (
-              <PaneSplit />
-            )}
-          </div>
-          <div
-            className="viewport-view browser-viewport-view"
-            style={{
-              display: activeAppMode === "browser" ? "flex" : "none",
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            <BrowserViewport />
-          </div>
-          <div
-            className="viewport-view editor-viewport-view"
-            style={{
-              display: activeAppMode === "editor" ? "flex" : "none",
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            <EditorViewport />
-          </div>
-        </main>
-        {rightSidebarOpen && activeAppMode !== "browser" && (
-          <RightSidebar />
-        )}
-      </div>
+              ) : activeTab.isWizard ? (
+                <WorkspaceSetupWizard tabId={activeTab.id} />
+              ) : (
+                <PaneSplit />
+              )}
+            </div>
+            <div
+              className="viewport-view browser-viewport-view"
+              style={{
+                display: activeAppMode === "browser" ? "flex" : "none",
+                width: "100%",
+                height: "100%",
+              }}
+            >
+              <BrowserViewport />
+            </div>
+            <div
+              className="viewport-view editor-viewport-view"
+              style={{
+                display: activeAppMode === "editor" ? "flex" : "none",
+                width: "100%",
+                height: "100%",
+              }}
+            >
+              <EditorViewport />
+            </div>
+          </main>
+          {rightSidebarOpen && activeAppMode !== "browser" && (
+            <RightSidebar />
+          )}
+        </div>
+      )}
       <StatusBar />
       <WorkspaceLauncherModal />
     </div>

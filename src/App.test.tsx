@@ -756,5 +756,125 @@ describe("App", () => {
     fireEvent.click(newWorkspaceBtn);
     expect(createWizardTabSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("renders SettingsView instead of workspace container when isSettingsOpen is true", () => {
+    useTerminalStore.setState({
+      isSettingsOpen: true,
+      activeSettingsTab: "general",
+    });
+
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".settings-view")).not.toBeNull();
+    expect(container.querySelector(".workspace-container")).toBeNull();
+  });
+
+  it("opens general settings with Ctrl+, shortcut", () => {
+    useTerminalStore.setState({ isSettingsOpen: false });
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: ",", ctrlKey: true, bubbles: true }),
+    );
+
+    expect(useTerminalStore.getState().isSettingsOpen).toBe(true);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("general");
+  });
+
+  it("opens shortcuts reference with Ctrl+/ and F1 shortcuts", () => {
+    useTerminalStore.setState({ isSettingsOpen: false });
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "/", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().isSettingsOpen).toBe(true);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("shortcuts");
+
+    useTerminalStore.setState({ isSettingsOpen: false });
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F1", bubbles: true }),
+    );
+    expect(useTerminalStore.getState().isSettingsOpen).toBe(true);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("shortcuts");
+  });
+
+  it("closes settings on Escape key when isSettingsOpen is true", () => {
+    useTerminalStore.setState({ isSettingsOpen: true });
+    render(<App />);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+
+    expect(useTerminalStore.getState().isSettingsOpen).toBe(false);
+  });
+
+  it("cycles tabs using MRU history when tabSwitchMode is 'mru'", () => {
+    useTerminalStore.setState({
+      tabs: [
+        { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        { id: "tab-2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        { id: "tab-3", layout: { type: "leaf", id: "s3" }, focusedPath: [] },
+      ],
+      activeTabId: "tab-3",
+      tabFocusHistory: ["tab-3", "tab-1", "tab-2"],
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          tabSwitchMode: "mru",
+        },
+      },
+    });
+
+    render(<App />);
+
+    // Ctrl+Tab: should switch from tab-3 to tab-1 (most recently active)
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }),
+    );
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
+  });
+
+  it("triggers workspace launcher modal on startup when startupBehavior is workspace_launcher", async () => {
+    useTerminalStore.setState({
+      isWorkspaceLauncherOpen: false,
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          startupBehavior: "workspace_launcher",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
+    });
+  });
+
+  it("creates a fresh terminal tab on startup when startupBehavior is fresh_terminal and no tabs exist", async () => {
+    useTerminalStore.setState({
+      tabs: [],
+      activeTabId: "",
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          startupBehavior: "fresh_terminal",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().tabs.length).toBeGreaterThan(0);
+    });
+  });
 });
 

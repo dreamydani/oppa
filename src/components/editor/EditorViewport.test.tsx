@@ -136,4 +136,36 @@ describe("EditorViewport", () => {
 
     expect(saveSpy).toHaveBeenCalled();
   });
+
+  it("applies editorWordWrap setting to textarea wrap and data attributes", () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          editorWordWrap: false,
+        },
+      },
+    });
+
+    const { rerender } = render(<EditorViewport />);
+    let textarea = screen.getByRole("textbox");
+    expect(textarea.getAttribute("wrap")).toBe("off");
+    expect(textarea.getAttribute("data-word-wrap")).toBe("off");
+
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: {
+          ...useTerminalStore.getState().settings.general,
+          editorWordWrap: true,
+        },
+      },
+    });
+
+    rerender(<EditorViewport />);
+    textarea = screen.getByRole("textbox");
+    expect(textarea.getAttribute("wrap")).toBe("soft");
+    expect(textarea.getAttribute("data-word-wrap")).toBe("on");
+  });
 });
