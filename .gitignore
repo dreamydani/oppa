@@ -28,3 +28,6 @@ dist-ssr
 
 # Git worktrees (isolated workspace)
 .worktrees/
+
+# App local runtime data
+.oppa/
