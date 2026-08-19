@@ -731,4 +731,64 @@ describe("TerminalPane", () => {
     t.modes.mouseTrackingMode = "vt200";
     expect(t.customWheelHandler?.({ deltaY: -16, deltaMode: 0 } as WheelEvent)).toBe(true);
   });
+
+  it("renders loading skeleton when session status is loading or restoring", () => {
+    useTerminalStore.setState({
+      sessions: {
+        loadingSession: {
+          id: "loadingSession",
+          title: "Loading Workspace",
+          status: "loading",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+
+    const { container, rerender } = render(<TerminalPane id="loadingSession" />);
+    expect(container.querySelector(".terminal-loading-skeleton")).not.toBeNull();
+    expect(screen.getByText("Session loading...")).toBeTruthy();
+    expect(xtermState.instances.length).toBe(0);
+
+    useTerminalStore.setState({
+      sessions: {
+        loadingSession: {
+          id: "loadingSession",
+          title: "Restoring Workspace",
+          status: "restoring",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    rerender(<TerminalPane id="loadingSession" />);
+    expect(container.querySelector(".terminal-loading-skeleton")).not.toBeNull();
+    expect(screen.getByText("Session loading...")).toBeTruthy();
+  });
+
+  it("auto-dismisses restored banner when user types (onData)", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: {
+          id: "abc",
+          title: "abc",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          isRestored: true,
+        },
+      },
+    });
+
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(useTerminalStore.getState().sessions["abc"].isRestored).toBe(true);
+
+    const onDataHandler = term().onData.mock.calls[0][0] as (data: string) => void;
+    onDataHandler("a");
+
+    expect(useTerminalStore.getState().sessions["abc"].isRestored).toBe(false);
+    expect(ptyWriteMock).toHaveBeenCalledWith("abc", "a");
+  });
 });

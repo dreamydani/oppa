@@ -219,3 +219,70 @@
   border-color: rgba(99, 102, 241, 0.5);
   color: #c7d2fe;
 }
+
+/* Restored Session Badge */
+.terminal-restored-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 9999px;
+  padding: 1px 6px 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fbbf24;
+  cursor: pointer;
+  user-select: none;
+  animation: restoredBadgeFadeIn 0.2s ease-out;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.terminal-restored-badge:hover {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.restored-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  flex-shrink: 0;
+}
+
+.restored-text {
+  line-height: 1.2;
+}
+
+.restored-dismiss-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 1px;
+  margin-left: 2px;
+  color: rgba(251, 191, 36, 0.7);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.1s ease, background-color 0.1s ease;
+}
+
+.restored-dismiss-btn:hover {
+  color: #fbbf24;
+  background-color: rgba(245, 158, 11, 0.2);
+}
+
+@keyframes restoredBadgeFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

@@ -19,6 +19,7 @@ import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
+import "./TerminalPane.css";
 
 // Renders the terminal view for ONE store session with WebGL acceleration,
 // Unicode 11 width calculation, clickable web links, and in-pane search overlay.
@@ -41,6 +42,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const registerSerializer = useTerminalStore((s) => s.registerSerializer);
   const unregisterSerializer = useTerminalStore((s) => s.unregisterSerializer);
   const clearRestoredScrollback = useTerminalStore((s) => s.clearRestoredScrollback);
+  const dismissSessionRestoredBanner = useTerminalStore((s) => s.dismissSessionRestoredBanner);
 
   const handleLinkClick = useCallback((_event: MouseEvent, uri: string) => {
     openUrl(uri).catch(() => {
@@ -233,7 +235,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       else unsubs.push(unlisten);
     });
 
-    term.onData((data) => ptyWrite(idRef.current, data));
+    term.onData((data) => {
+      if (useTerminalStore.getState().sessions[idRef.current]?.isRestored) {
+        dismissSessionRestoredBanner(idRef.current);
+      }
+      ptyWrite(idRef.current, data);
+    });
 
     // Debounce PTY resize to avoid ConPTY prompt-redraw storms during drag
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -276,6 +283,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     registerSerializer,
     unregisterSerializer,
     clearRestoredScrollback,
+    dismissSessionRestoredBanner,
   ]);
 
   if (!session) {
@@ -286,6 +294,33 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     return (
       <div className="terminal-pane terminal-pane-error">
         {session.error ?? "[session failed to start]"}
+      </div>
+    );
+  }
+
+  if (
+    session.status === "loading" ||
+    session.status === "restoring" ||
+    session.status === "spawning"
+  ) {
+    return (
+      <div
+        className="terminal-pane-wrapper"
+        style={{ position: "relative", width: "100%", height: "100%" }}
+      >
+        <TerminalPaneHeader id={id} path={path} onClear={handleClear} />
+        <div className="terminal-loading-skeleton">
+          <div className="terminal-loading-shimmer" />
+          <div className="terminal-loading-content">
+            <span className="terminal-loading-spinner" />
+            <span className="terminal-loading-text">Session loading...</span>
+            {(session.cwd || session.title) && (
+              <span className="terminal-loading-subtext">
+                {session.title || session.cwd}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     );
   }

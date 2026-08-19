@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { X } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { useContextStore } from "../store/contextStore";
 import type { Path } from "../lib/pane-manager/layout";
@@ -83,6 +84,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const session = useTerminalStore((s) => s.sessions[id]);
   const renameSession = useTerminalStore((s) => s.renameSession);
   const setSessionPersona = useTerminalStore((s) => s.setSessionPersona);
+  const dismissSessionRestoredBanner = useTerminalStore((s) => s.dismissSessionRestoredBanner);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
@@ -290,6 +292,34 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           >
             {activePersona.icon} {activePersona.name}
           </span>
+        )}
+        {session?.isRestored && (
+          <div
+            className="terminal-restored-badge"
+            role="status"
+            aria-label="Session restored"
+            title="Session restored from disk checkpoint. Press any key or click to dismiss."
+            onClick={(e) => {
+              e.stopPropagation();
+              dismissSessionRestoredBanner(id);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <span className="restored-dot" />
+            <span className="restored-text">Session restored</span>
+            <button
+              type="button"
+              className="restored-dismiss-btn"
+              aria-label="Dismiss restored banner"
+              onClick={(e) => {
+                e.stopPropagation();
+                dismissSessionRestoredBanner(id);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <X size={10} />
+            </button>
+          </div>
         )}
       </div>
 

@@ -512,5 +512,93 @@ describe("TerminalPaneHeader", () => {
       expect(screen.queryByText("Persona Role")).toBeNull();
     });
   });
+
+  describe("Session Restored Banner", () => {
+    it("renders Session restored badge when session isRestored is true", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: true,
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      const badge = screen.getByRole("status", { name: /session restored/i });
+      expect(badge).toBeTruthy();
+      expect(badge.className).toContain("terminal-restored-badge");
+      expect(badge.textContent).toContain("Session restored");
+    });
+
+    it("does not render Session restored badge when isRestored is false or undefined", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: false,
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+      expect(screen.queryByRole("status", { name: /session restored/i })).toBeNull();
+    });
+
+    it("clicking dismiss button calls dismissSessionRestoredBanner", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: true,
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      const dismissBtn = screen.getByRole("button", { name: /dismiss restored banner/i });
+      fireEvent.click(dismissBtn);
+
+      expect(useTerminalStore.getState().sessions["s1"].isRestored).toBe(false);
+      expect(screen.queryByRole("status", { name: /session restored/i })).toBeNull();
+    });
+
+    it("clicking restored badge pill calls dismissSessionRestoredBanner", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: true,
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      const badge = screen.getByRole("status", { name: /session restored/i });
+      fireEvent.click(badge);
+
+      expect(useTerminalStore.getState().sessions["s1"].isRestored).toBe(false);
+      expect(screen.queryByRole("status", { name: /session restored/i })).toBeNull();
+    });
+  });
 });
 

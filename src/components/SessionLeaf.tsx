@@ -38,6 +38,16 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
 
   // Placeholder while the spawn is in flight (or the leaf has no session yet).
   return (
-    <div ref={nodeRef} className="session-leaf-loading" data-placeholder-id={id} />
+    <div
+      ref={nodeRef}
+      className="session-leaf-loading terminal-loading-skeleton"
+      data-placeholder-id={id}
+    >
+      <div className="terminal-loading-shimmer" />
+      <div className="terminal-loading-content">
+        <span className="terminal-loading-spinner" />
+        <span className="terminal-loading-text">Session loading...</span>
+      </div>
+    </div>
   );
 }
