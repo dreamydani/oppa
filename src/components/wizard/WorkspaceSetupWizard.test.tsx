@@ -378,6 +378,13 @@ describe("WorkspaceSetupWizard full assembly", () => {
     expect(closeSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("renders wizard workbench page with container and minimalist clay styling", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+    const page = screen.getByRole("region", { name: /workspace setup wizard/i });
+    expect(page.className).toContain("wizard-workbench-page");
+    expect(page.querySelector(".wizard-content-container")).not.toBeNull();
+  });
+
   it("renders full-page workbench container without modal overlay", () => {
     const { container } = render(<WorkspaceSetupWizard tabId="tab-wizard-1" />);
     expect(container.querySelector(".wizard-workbench-page")).toBeInTheDocument();
