@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: var(--sidebar);
+  background-color: var(--topbar-bg, #000000);
   border-left: 1px solid var(--sidebar-border);
   position: relative;
   flex-shrink: 0;
@@ -32,7 +32,7 @@
   height: 36px;
   padding: 0 8px;
   border-bottom: 1px solid var(--sidebar-border);
-  background-color: var(--sidebar);
+  background-color: var(--topbar-bg, #000000);
   flex-shrink: 0;
 }
 
