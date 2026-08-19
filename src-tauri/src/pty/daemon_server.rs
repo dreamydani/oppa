@@ -319,6 +319,7 @@ pub async fn run_server_listener(
 
             let pipe_server = match ServerOptions::new()
                 .first_pipe_instance(is_first)
+                .max_instances(254)
                 .create(socket_path)
             {
                 Ok(server) => {

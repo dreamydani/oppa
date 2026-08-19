@@ -107,7 +107,7 @@ pub fn run() {
                         if flag.load(Ordering::SeqCst) {
                             break;
                         }
-                        std::thread::sleep(Duration::from_millis(25));
+                        tokio::time::sleep(Duration::from_millis(25)).await;
                     }
                     if let Some(manager) = window_clone.try_state::<PtyManager>() {
                         let _ = manager.disconnect();
