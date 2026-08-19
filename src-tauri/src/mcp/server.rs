@@ -186,7 +186,7 @@ impl McpServer {
         let category_filter = args.get("category").and_then(|v| v.as_str());
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
-        let mut results = self.context_manager.search_fts(query, self.ws_str())?;
+        let mut results = self.context_manager.search_fts(query, self.ws_str(), Some(limit))?;
         if let Some(cat) = category_filter {
             results.retain(|r| {
                 r.category.eq_ignore_ascii_case(cat)
@@ -232,7 +232,7 @@ impl McpServer {
             Some(p) => Some(p),
             None => {
                 let target = path_opt.or(id_opt).unwrap();
-                let all = self.context_manager.list_pages(self.ws_str(), None)?;
+                let all = self.context_manager.list_pages(self.ws_str(), None, None, None)?.items;
                 all.into_iter().find(|p| {
                     p.path.eq_ignore_ascii_case(target)
                         || p.id.eq_ignore_ascii_case(target)

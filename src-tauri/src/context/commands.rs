@@ -10,7 +10,9 @@ pub fn context_list(
     workspace_path: Option<String>,
     category: Option<String>,
 ) -> Result<Vec<ContextPage>, String> {
-    manager.list_pages(workspace_path.as_deref(), category.as_deref())
+    manager
+        .list_pages(workspace_path.as_deref(), category.as_deref(), None, None)
+        .map(|list| list.items)
 }
 
 #[tauri::command]
@@ -47,7 +49,7 @@ pub fn context_search(
     query: String,
     workspace_path: Option<String>,
 ) -> Result<Vec<ContextSearchResult>, String> {
-    manager.search_fts(&query, workspace_path.as_deref())
+    manager.search_fts(&query, workspace_path.as_deref(), None)
 }
 
 #[tauri::command]
@@ -102,9 +104,9 @@ mod tests {
 
         // Manager method direct check
         manager.upsert_page(&page, None).unwrap();
-        let list = manager.list_pages(None, Some("architecture")).unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, "page-1");
+        let list = manager.list_pages(None, Some("architecture"), None, None).unwrap();
+        assert_eq!(list.items.len(), 1);
+        assert_eq!(list.items[0].id, "page-1");
 
         // Now test command logic directly
         let res = manager.get_page("page-1", None).unwrap();
@@ -134,7 +136,7 @@ mod tests {
         };
 
         manager.upsert_page(&page, None).unwrap();
-        let search_res = manager.search_fts("Kubernetes", None).unwrap();
+        let search_res = manager.search_fts("Kubernetes", None, None).unwrap();
         assert_eq!(search_res.len(), 1);
         assert_eq!(search_res[0].id, "search-1");
 
