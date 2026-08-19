@@ -159,7 +159,7 @@ export function WorkspaceSetupWizard({
         {/* Wizard Top Header */}
         <div className="wizard-page-header">
           <div className="wizard-dialog-title-group">
-            <span className="wizard-logo-tag">OPPA</span>
+            <span className="wizard-logo-tag wizard-logo-badge">OPPA</span>
             <span className="wizard-dialog-heading">Workspace Setup</span>
           </div>
 
@@ -185,7 +185,7 @@ export function WorkspaceSetupWizard({
                 <button
                   type="button"
                   data-testid={`wizard-progress-step-${s.step}`}
-                  className={`wizard-step-pill ${isActive ? "active" : ""} ${
+                  className={`wizard-step-pill wizard-progress-step ${isActive ? "active" : ""} ${
                     isPassed ? "completed" : ""
                   }`}
                   onClick={() => setStep(s.step)}
@@ -196,7 +196,7 @@ export function WorkspaceSetupWizard({
                 </button>
                 {idx < STEPS.length - 1 && (
                   <div
-                    className={`wizard-progress-divider ${
+                    className={`wizard-progress-divider wizard-step-divider ${
                       step > s.step ? "active" : ""
                     }`}
                   />

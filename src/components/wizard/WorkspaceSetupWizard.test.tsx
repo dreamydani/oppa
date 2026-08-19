@@ -452,4 +452,30 @@ describe("WorkspaceSetupWizard full assembly", () => {
 
     expect(closeTabSpy).toHaveBeenCalledWith("tab-wizard-1");
   });
+
+  it("renders pebble stepper with active clay glow and step numbers", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+    const step1 = screen.getByTestId("wizard-progress-step-1");
+    expect(step1.className).toContain("active");
+    expect(step1.querySelector(".wizard-step-num")?.textContent).toBe("1");
+    expect(step1.querySelector(".wizard-step-name")?.textContent).toBe("Start");
+
+    const step2 = screen.getByTestId("wizard-progress-step-2");
+    expect(step2.className).not.toContain("active");
+    expect(step2.querySelector(".wizard-step-num")?.textContent).toBe("2");
+    expect(step2.querySelector(".wizard-step-name")?.textContent).toBe("Layout");
+
+    const step3 = screen.getByTestId("wizard-progress-step-3");
+    expect(step3.className).not.toContain("active");
+    expect(step3.querySelector(".wizard-step-num")?.textContent).toBe("3");
+    expect(step3.querySelector(".wizard-step-name")?.textContent).toBe("Agents");
+  });
+
+  it("renders header topbar with logo badge and close button", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+    expect(screen.getByText("OPPA")).toHaveClass("wizard-logo-badge");
+    expect(screen.getByText("Workspace Setup")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /close wizard/i })).toHaveClass("wizard-close-btn");
+  });
 });
+

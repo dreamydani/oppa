@@ -66,15 +66,17 @@
   gap: 10px;
 }
 
-.wizard-logo-tag {
+.wizard-logo-tag,
+.wizard-logo-badge {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  padding: 2px 7px;
-  border-radius: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
   background: var(--wizard-amber-surface);
   color: var(--wizard-amber-primary);
   border: 1px solid var(--wizard-amber-border);
+  box-shadow: 0 0 8px var(--wizard-amber-glow);
 }
 
 .wizard-dialog-heading {
@@ -85,23 +87,30 @@
 }
 
 .wizard-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--wizard-bg-surface-elevated);
+  border: 1px solid var(--wizard-border);
   color: var(--wizard-text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  box-shadow: var(--wizard-shadow-card);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .wizard-close-btn:hover {
   background: var(--wizard-bg-surface-hover);
-  border-color: var(--wizard-border);
+  border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
+  transform: translateY(-1px);
+}
+
+.wizard-close-btn:active {
+  transform: scale(0.95);
+  box-shadow: var(--wizard-shadow-sunken);
 }
 
 /* Progress Stepper Bar */
@@ -117,7 +126,8 @@
   box-shadow: var(--wizard-shadow-card);
 }
 
-.wizard-step-pill {
+.wizard-step-pill,
+.wizard-progress-step {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -131,14 +141,23 @@
   cursor: pointer;
   box-shadow: var(--wizard-shadow-sunken);
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
 }
 
-.wizard-step-pill:hover {
+.wizard-step-pill:hover,
+.wizard-progress-step:hover {
   border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
+  transform: translateY(-1px);
 }
 
-.wizard-step-pill.active {
+.wizard-step-pill:active,
+.wizard-progress-step:active {
+  transform: scale(0.97);
+}
+
+.wizard-step-pill.active,
+.wizard-progress-step.active {
   background: var(--wizard-bg-surface-elevated);
   border-color: var(--wizard-amber-primary);
   color: var(--wizard-amber-primary);
@@ -147,7 +166,8 @@
   transform: translateY(-1px);
 }
 
-.wizard-step-pill.completed {
+.wizard-step-pill.completed,
+.wizard-progress-step.completed {
   border-color: var(--wizard-border-subtle);
   background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-secondary);
@@ -164,14 +184,18 @@
   font-weight: 700;
   background: var(--wizard-border);
   color: inherit;
+  transition: all 0.18s ease;
 }
 
-.wizard-step-pill.active .wizard-step-num {
+.wizard-step-pill.active .wizard-step-num,
+.wizard-progress-step.active .wizard-step-num {
   background: var(--wizard-amber-primary);
   color: var(--wizard-bg-canvas);
+  box-shadow: 0 0 8px var(--wizard-amber-glow);
 }
 
-.wizard-step-pill.completed .wizard-step-num {
+.wizard-step-pill.completed .wizard-step-num,
+.wizard-progress-step.completed .wizard-step-num {
   background: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
 }
@@ -180,13 +204,16 @@
   font-size: 12px;
 }
 
-.wizard-progress-divider {
+.wizard-progress-divider,
+.wizard-step-divider {
   width: 32px;
   height: 1px;
   background: var(--wizard-border);
+  transition: background 0.18s ease;
 }
 
-.wizard-progress-divider.active {
+.wizard-progress-divider.active,
+.wizard-step-divider.active {
   background: var(--wizard-amber-primary);
 }
 
