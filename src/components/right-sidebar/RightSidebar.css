@@ -3,7 +3,7 @@
   flex-direction: column;
   height: 100%;
   background-color: var(--topbar-bg, #000000);
-  border-left: 1px solid var(--sidebar-border);
+  border-left: none;
   position: relative;
   flex-shrink: 0;
   user-select: none;
@@ -31,7 +31,7 @@
   justify-content: space-between;
   height: 36px;
   padding: 0 8px;
-  border-bottom: 1px solid var(--sidebar-border);
+  border-bottom: none;
   background-color: var(--topbar-bg, #000000);
   flex-shrink: 0;
 }
