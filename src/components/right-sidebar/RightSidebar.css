@@ -94,6 +94,7 @@
 }
 
 .right-sidebar-content {
+  background-color: var(--topbar-bg, #000000);
   flex: 1;
   min-height: 0;
   overflow-y: auto;

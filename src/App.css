@@ -534,8 +534,8 @@ body,
    Right Sidebar (File Explorer)
    ========================================================================== */
 .right-sidebar {
-  background-color: var(--bg-sidebar);
-  border-left: 1px solid var(--border-divider);
+  background-color: var(--topbar-bg, #000000);
+  border-left: none;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -550,7 +550,8 @@ body,
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border-divider);
+  border-bottom: none;
+  background-color: var(--topbar-bg, #000000);
   height: 38px;
   box-sizing: border-box;
 }
@@ -590,6 +591,7 @@ body,
 }
 
 .right-sidebar-content {
+  background-color: var(--topbar-bg, #000000);
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
