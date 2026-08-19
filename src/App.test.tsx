@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, within } from "@testing-library/react";
 import App from "./App";
 import { useTerminalStore } from "./store/terminalStore";
 import * as transport from "./lib/pty/transport";
@@ -736,9 +736,25 @@ describe("App", () => {
       layout: { type: "leaf", id: "" },
     });
 
+    const createWizardTabSpy = vi.spyOn(useTerminalStore.getState(), "createWizardTab");
+
     const { container } = render(<App />);
 
-    expect(container.querySelector('[data-testid="empty-workspace-view"]')).not.toBeNull();
-    expect(container.textContent).toContain("No Open Workspaces");
+    const emptyView = container.querySelector('[data-testid="empty-workspace-view"]');
+    expect(emptyView).not.toBeNull();
+    const emptyScope = within(emptyView as HTMLElement);
+
+    expect(emptyScope.getByText("No Open Workspaces")).toBeTruthy();
+
+    const newWorkspaceBtn = emptyScope.getByRole("button", { name: /New Workspace/i });
+    expect(newWorkspaceBtn).toBeTruthy();
+    expect(newWorkspaceBtn.getAttribute("aria-label")).toBe("New Workspace");
+
+    expect(emptyScope.queryByRole("button", { name: /\+ New Terminal/i })).toBeNull();
+    expect(emptyScope.queryByRole("button", { name: /Setup Wizard/i })).toBeNull();
+
+    fireEvent.click(newWorkspaceBtn);
+    expect(createWizardTabSpy).toHaveBeenCalledTimes(1);
   });
 });
+
