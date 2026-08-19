@@ -1,0 +1,115 @@
+// Settings persistence. The Tauri-free core (`save_settings_at`, `load_settings_at`)
+// is kept separate from `#[tauri::command]` wrappers so logic is testable without Tauri runtime.
+
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GeneralSettings {
+    pub default_cwd_mode: String,
+    pub custom_default_cwd: String,
+    pub startup_behavior: String,
+    pub tab_switch_mode: String,
+    pub confirm_close_tab_with_multiple_panes: bool,
+    pub confirm_quit_with_running_processes: bool,
+    pub editor_word_wrap: bool,
+    pub editor_auto_save_delay: u64,
+    pub browser_search_engine: String,
+    pub browser_home_page: String,
+}
+
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            default_cwd_mode: "home".into(),
+            custom_default_cwd: String::new(),
+            startup_behavior: "restore_previous".into(),
+            tab_switch_mode: "sequential".into(),
+            confirm_close_tab_with_multiple_panes: true,
+            confirm_quit_with_running_processes: true,
+            editor_word_wrap: true,
+            editor_auto_save_delay: 1000,
+            browser_search_engine: "duckduckgo".into(),
+            browser_home_page: "https://duckduckgo.com".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct AppSettings {
+    pub general: GeneralSettings,
+}
+
+/// Persist settings.json to `path`, creating parent directories as needed.
+pub fn save_settings_at(path: &Path, json: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, json)
+}
+
+/// Read settings.json from `path`; `Ok(None)` when the file does not exist.
+pub fn load_settings_at(path: &Path) -> std::io::Result<Option<String>> {
+    if path.exists() {
+        std::fs::read_to_string(path).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn settings_path(app: &AppHandle) -> PathBuf {
+    app.path().app_data_dir().unwrap().join("settings.json")
+}
+
+#[tauri::command]
+pub fn save_settings(app: AppHandle, settings_json: String) -> Result<(), String> {
+    save_settings_at(&settings_path(&app), &settings_json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_settings(app: AppHandle) -> Result<Option<String>, String> {
+    load_settings_at(&settings_path(&app)).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // Unique temp dir per test process so parallel runs never collide.
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("oppa-settings-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn settings_json_round_trips_through_file() {
+        let dir = temp_dir("roundtrip");
+        let path = dir.join("settings.json");
+        let json = r#"{"general":{"default_cwd_mode":"home","custom_default_cwd":"","startup_behavior":"restore_previous","tab_switch_mode":"sequential","confirm_close_tab_with_multiple_panes":true,"confirm_quit_with_running_processes":true,"editor_word_wrap":true,"editor_auto_save_delay":1000,"browser_search_engine":"duckduckgo","browser_home_page":"https://duckduckgo.com"}}"#;
+
+        save_settings_at(&path, json).unwrap();
+        assert_eq!(load_settings_at(&path).unwrap().as_deref(), Some(json));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_settings_returns_none_when_file_does_not_exist() {
+        let dir = temp_dir("nonexistent");
+        let path = dir.join("settings.json");
+        assert_eq!(load_settings_at(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn app_settings_default_serialization() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.general.default_cwd_mode, "home");
+        assert_eq!(settings.general.editor_auto_save_delay, 1000);
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let deserialized: AppSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, settings);
+    }
+}

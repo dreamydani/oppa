@@ -3,6 +3,7 @@ mod fs;
 mod git;
 mod layout;
 pub mod pty;
+pub mod settings;
 mod workspace_presets;
 
 use pty::manager::PtyManager;
@@ -63,6 +64,8 @@ pub fn run() {
             pty::commands::cleanup_stale_scrollbacks,
             layout::save_layout,
             layout::load_layout,
+            settings::save_settings,
+            settings::load_settings,
             fs::fs_read_dir,
             fs::fs_read_file,
             fs::fs_write_file,
