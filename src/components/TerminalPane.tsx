@@ -73,7 +73,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
       theme: {
-        background: "#141414",
+        background: "#000000",
         foreground: "#ededec",
         cursor: "#58a6ff",
         selectionBackground: "rgba(88, 166, 255, 0.25)",

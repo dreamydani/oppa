@@ -8,7 +8,7 @@ describe("Theme tokens", () => {
     const content = fs.readFileSync(cssPath, "utf-8");
 
     expect(content).toContain("--topbar-bg: #000000;");
-    expect(content).toContain("--workspace-bg: #18181b;");
+    expect(content).toContain("--workspace-bg: #000000;");
     expect(content).toContain("--soft-edge-radius: 12px;");
     expect(content).toContain("--background: #18181b;");
     expect(content).toContain("--sidebar: #141416;");
