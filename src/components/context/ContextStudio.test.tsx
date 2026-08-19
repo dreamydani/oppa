@@ -16,6 +16,8 @@ vi.mock("../../lib/context/transport", () => ({
   searchContext: vi.fn(),
   listPersonas: vi.fn(),
   upsertPersona: vi.fn(),
+  exportContext: vi.fn(),
+  importContext: vi.fn(),
 }));
 
 vi.mock("../../lib/pty/transport", () => ({
@@ -67,8 +69,11 @@ const mockPage1: ContextPage = {
   overview_l1: "## L1 Overview\nDetailed multi-process IPC architecture description.",
   details_l2: "### L2 Details\nRaw low-level Tokio named pipes protocol implementation.",
   pinned: false,
+  is_built_in: false,
+  attached_scopes_json: "[]",
   created_at: 1000,
   updated_at: 2000,
+  deleted_at: null,
 };
 
 const mockPage2: ContextPage = {
@@ -82,8 +87,11 @@ const mockPage2: ContextPage = {
   overview_l1: "ConPTY translates CR LF on Windows.",
   details_l2: "Raw details on workaround.",
   pinned: true,
+  is_built_in: false,
+  attached_scopes_json: "[]",
   created_at: 1100,
   updated_at: 2100,
+  deleted_at: null,
 };
 
 const mockPage3: ContextPage = {
@@ -96,8 +104,11 @@ const mockPage3: ContextPage = {
   abstract_l0: "Deployment runbook abstract",
   overview_l1: "Run cargo build and pnpm build.",
   pinned: false,
+  is_built_in: false,
+  attached_scopes_json: "[]",
   created_at: 1200,
   updated_at: 2200,
+  deleted_at: null,
 };
 
 const mockGlobalPage: ContextPage = {
@@ -110,8 +121,11 @@ const mockGlobalPage: ContextPage = {
   abstract_l0: "Global user preferences",
   overview_l1: "Dark-tech theme and Geist font defaults.",
   pinned: false,
+  is_built_in: false,
+  attached_scopes_json: "[]",
   created_at: 900,
   updated_at: 1900,
+  deleted_at: null,
 };
 
 const mockPersona1: AgentPersona = {
@@ -144,17 +158,21 @@ const mockSearchResult: ContextSearchResult = {
   abstract_l0: "L0 summary of the core engine",
   overview_l1: "## L1 Overview\nDetailed multi-process IPC architecture description.",
   snippet: "Multi-process <b>IPC architecture</b> with Tokio named pipes",
+  total: 1,
 };
 
 describe("Context Studio & Workbench Mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(contextTransport.listContextPages).mockResolvedValue([
-      mockPage1,
-      mockPage2,
-      mockPage3,
-      mockGlobalPage,
-    ]);
+    vi.mocked(contextTransport.listContextPages).mockResolvedValue({
+      items: [
+        mockPage1,
+        mockPage2,
+        mockPage3,
+        mockGlobalPage,
+      ],
+      total: 4,
+    });
     vi.mocked(contextTransport.listPersonas).mockResolvedValue([
       mockPersona1,
       mockPersona2,
@@ -163,6 +181,8 @@ describe("Context Studio & Workbench Mode", () => {
     vi.mocked(contextTransport.upsertContextPage).mockResolvedValue(undefined);
     vi.mocked(contextTransport.deleteContextPage).mockResolvedValue(undefined);
     vi.mocked(contextTransport.upsertPersona).mockResolvedValue(undefined);
+    vi.mocked(contextTransport.exportContext).mockResolvedValue('{"version":1,"pages":[],"personas":[]}');
+    vi.mocked(contextTransport.importContext).mockResolvedValue(1);
 
     useTerminalStore.setState({
       activeAppMode: "terminal",
@@ -570,5 +590,50 @@ describe("Context Studio & Workbench Mode", () => {
       expect(screen.getByText(/~[/\\]\.config[/\\]opencode[/\\]opencode\.json/i)).toBeTruthy();
     });
   });
+
+  describe("Export and Import Context", () => {
+    it("renders Export and Import buttons in header", () => {
+      render(<ContextStudio />);
+      expect(screen.getByRole("button", { name: /export context/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /import context/i })).toBeTruthy();
+    });
+
+    it("triggers exportContext and creates download url on export click", async () => {
+      const createObjectURLMock = vi.fn().mockReturnValue("blob:http://localhost/mock-uuid");
+      const revokeObjectURLMock = vi.fn();
+      globalThis.URL.createObjectURL = createObjectURLMock;
+      globalThis.URL.revokeObjectURL = revokeObjectURLMock;
+
+      render(<ContextStudio />);
+      const exportBtn = screen.getByRole("button", { name: /export context/i });
+      fireEvent.click(exportBtn);
+
+      await waitFor(() => {
+        expect(contextTransport.exportContext).toHaveBeenCalledWith("D:/oppa/oppa");
+        expect(createObjectURLMock).toHaveBeenCalled();
+        expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:http://localhost/mock-uuid");
+      });
+    });
+
+    it("prompts file picker and imports context when file is selected", async () => {
+      render(<ContextStudio />);
+      const fileInput = screen.getByTestId("context-import-file-input");
+
+      const fileContent = JSON.stringify({ version: 1, pages: [], personas: [] });
+      const file = new File([fileContent], "oppa-context.json", { type: "application/json" });
+
+      Object.defineProperty(file, "text", {
+        value: () => Promise.resolve(fileContent),
+      });
+
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await waitFor(() => {
+        expect(contextTransport.importContext).toHaveBeenCalledWith("D:/oppa/oppa", fileContent);
+        expect(contextTransport.listContextPages).toHaveBeenCalled();
+      });
+    });
+  });
 });
+
 

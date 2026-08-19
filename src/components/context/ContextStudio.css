@@ -129,7 +129,9 @@
   gap: 8px;
 }
 
-.context-mcp-config-btn {
+.context-mcp-config-btn,
+.context-export-btn,
+.context-import-btn {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -146,7 +148,9 @@
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.context-mcp-config-btn:hover {
+.context-mcp-config-btn:hover,
+.context-export-btn:hover,
+.context-import-btn:hover {
   background-color: var(--ctx-surface-hover);
   border-color: var(--ctx-border-strong);
 }

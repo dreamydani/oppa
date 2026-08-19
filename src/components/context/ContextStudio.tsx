@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactElement } from "react";
+import { useState, useEffect, useRef, type ReactElement } from "react";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
 import { ContextTree } from "./ContextTree";
@@ -14,8 +14,14 @@ import {
   IconPersona,
   IconChevronDown,
   IconServer,
+  IconExport,
+  IconImport,
 } from "./ContextIcons";
-import type { ContextPage } from "../../lib/context/transport";
+import {
+  exportContext,
+  importContext,
+  type ContextPage,
+} from "../../lib/context/transport";
 import "./ContextStudio.css";
 
 export function ContextStudio(): ReactElement {
@@ -32,6 +38,7 @@ export function ContextStudio(): ReactElement {
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load context on initial mount
   useEffect(() => {
@@ -48,6 +55,50 @@ export function ContextStudio(): ReactElement {
     void searchContext("", getActiveCwd());
   };
 
+  const handleExport = async () => {
+    try {
+      const json = await exportContext(getActiveCwd());
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "oppa-context.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export context failed:", err);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text =
+        typeof file.text === "function"
+          ? await file.text()
+          : await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsText(file);
+            });
+      const cwd = getActiveCwd();
+      await importContext(cwd, text);
+      await loadContext(cwd);
+    } catch (err) {
+      console.error("Import context failed:", err);
+    } finally {
+      e.target.value = "";
+    }
+  };
+
   const handleCreateDraftNote = async () => {
     setIsAddMenuOpen(false);
     const draftId = `page-note-${Date.now()}`;
@@ -62,8 +113,11 @@ export function ContextStudio(): ReactElement {
       overview_l1: "",
       details_l2: "",
       pinned: false,
+      is_built_in: false,
+      attached_scopes_json: "[]",
       created_at: Date.now(),
       updated_at: Date.now(),
+      deleted_at: null,
     };
     await savePage(newPage, getActiveCwd());
     selectPage(draftId);
@@ -99,6 +153,38 @@ export function ContextStudio(): ReactElement {
         </div>
 
         <div className="context-studio-actions">
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            aria-label="Import Context JSON file"
+            data-testid="context-import-file-input"
+            onChange={handleFileChange}
+          />
+
+          <button
+            type="button"
+            className="context-export-btn"
+            onClick={handleExport}
+            aria-label="Export Context"
+            title="Export Context (JSON)"
+          >
+            <IconExport size={13} />
+            <span>Export</span>
+          </button>
+
+          <button
+            type="button"
+            className="context-import-btn"
+            onClick={handleImportClick}
+            aria-label="Import Context"
+            title="Import Context (JSON)"
+          >
+            <IconImport size={13} />
+            <span>Import</span>
+          </button>
+
           <button
             type="button"
             className="context-mcp-config-btn"

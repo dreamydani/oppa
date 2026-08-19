@@ -218,3 +218,20 @@ export function IconCopy({ size = 14, className, ...props }: IconProps): ReactEl
   );
 }
 
+export function IconExport({ size = 14, className, ...props }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+      <path d="M2.5 10.5V13.5H13.5V10.5M8 2.5V10.5M4.5 6L8 2.5L11.5 6" />
+    </svg>
+  );
+}
+
+export function IconImport({ size = 14, className, ...props }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+      <path d="M2.5 10.5V13.5H13.5V10.5M8 2.5V10.5M4.5 7L8 10.5L11.5 7" />
+    </svg>
+  );
+}
+
+
