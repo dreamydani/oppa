@@ -1356,6 +1356,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return {
         tabs,
         activeTabId: tabId,
+        wizardStep: 1,
         layout: newTab.layout,
         focusedPath: newTab.focusedPath,
       };

@@ -1849,6 +1849,7 @@ describe("terminalStore", () => {
       expect(wizardTab?.layout).toEqual({ type: "leaf", id: "" });
       expect(wizardTab?.focusedPath).toEqual([]);
       expect(state.layout).toEqual({ type: "leaf", id: "" });
+      expect(state.wizardStep).toBe(1);
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 

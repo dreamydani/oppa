@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { WizardStepAgents } from "./WizardStepAgents";
 import { WorkspaceSetupWizard } from "./WorkspaceSetupWizard";
 import { useTerminalStore } from "../../store/terminalStore";
@@ -548,5 +548,52 @@ describe("WorkspaceSetupWizard full assembly", () => {
     const launchBtn = screen.getByRole("button", { name: /launch workspace/i });
     expect(launchBtn).toHaveClass("wizard-btn-launch");
   });
+
+  it("always starts on step 1 when a wizard tab is mounted, even if previous store step was 3", () => {
+    useTerminalStore.setState({ wizardStep: 3 });
+    render(<WorkspaceSetupWizard tabId="tab-new-wizard" />);
+
+    const step1 = screen.getByTestId("wizard-progress-step-1");
+    expect(step1.className).toContain("active");
+    expect(screen.getByText("Start a workspace")).toBeInTheDocument();
+  });
+
+  it("opens custom clay dropdown, renders shell options, and updates shell on option click", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+
+    const dropdownTrigger = screen.getByTestId("wizard-shell-dropdown-trigger");
+    expect(dropdownTrigger).toHaveTextContent("Default Shell");
+
+    // Click to open custom dropdown
+    fireEvent.click(dropdownTrigger);
+    expect(screen.getByRole("listbox", { name: "Preferred Shell Options" })).toBeInTheDocument();
+
+    // Select PowerShell from custom clay dropdown
+    const listbox = screen.getByRole("listbox", { name: "Preferred Shell Options" });
+    const psOption = within(listbox).getByRole("option", { name: /PowerShell/i });
+    fireEvent.click(psOption);
+
+    expect(dropdownTrigger).toHaveTextContent("PowerShell");
+    expect(screen.queryByRole("listbox", { name: "Preferred Shell Options" })).not.toBeInTheDocument();
+  });
+
+  it("toggles preset switch card and expands preset name input well", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+
+    // Navigate to step 3
+    fireEvent.click(screen.getByTestId("wizard-progress-step-3"));
+
+    const switchCheckbox = screen.getByRole("checkbox", {
+      name: "Save this configuration as a custom preset",
+    });
+    expect(switchCheckbox).not.toBeChecked();
+    expect(screen.queryByPlaceholderText("e.g. Fullstack Dev")).not.toBeInTheDocument();
+
+    // Toggle ON
+    fireEvent.click(switchCheckbox);
+    expect(switchCheckbox).toBeChecked();
+    expect(screen.getByPlaceholderText("e.g. Fullstack Dev")).toBeInTheDocument();
+  });
 });
+
 

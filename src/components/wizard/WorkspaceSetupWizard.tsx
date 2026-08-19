@@ -51,6 +51,13 @@ export function WorkspaceSetupWizard({
     setStoreStep(newStep);
   };
 
+  // Reset to step 1 whenever tabId changes (new workspace tab)
+  useEffect(() => {
+    if (tabId) {
+      setStep(1);
+    }
+  }, [tabId]);
+
   // Sync with storeStep if changed externally
   useEffect(() => {
     if (storeStep && storeStep !== step) {
@@ -272,7 +279,7 @@ export function WorkspaceSetupWizard({
               aria-label="Quick Spawn"
               title="Spawn single 1x1 terminal immediately in folder"
             >
-              <Zap size={14} className="text-amber-400" />
+              <Zap size={14} />
               <span>Quick Spawn</span>
             </button>
           </div>

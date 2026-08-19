@@ -1,5 +1,5 @@
 import React from "react";
-import { Bot, Terminal, Code2, CheckCircle2, Zap, Sparkles } from "lucide-react";
+import { Bot, Terminal, Code2, CheckCircle2, Zap, Sparkles, Bookmark } from "lucide-react";
 import "./WorkspaceSetupWizard.css";
 
 export interface PersonaOption {
@@ -47,15 +47,15 @@ export const PERSONA_OPTIONS: PersonaOption[] = [
 function getPersonaIcon(id: string): React.ReactElement {
   switch (id) {
     case "copilot":
-      return <Sparkles size={16} className="text-amber-400" />;
+      return <Sparkles size={16} className="text-secondary" />;
     case "code-assistant":
-      return <Code2 size={16} className="text-orange-400" />;
+      return <Code2 size={16} className="text-secondary" />;
     case "reviewer":
-      return <CheckCircle2 size={16} className="text-emerald-400" />;
+      return <CheckCircle2 size={16} className="text-secondary" />;
     case "grok":
-      return <Zap size={16} className="text-blue-400" />;
+      return <Zap size={16} className="text-secondary" />;
     case "gpt-5":
-      return <Bot size={16} className="text-purple-400" />;
+      return <Bot size={16} className="text-secondary" />;
     case "none":
     default:
       return <Terminal size={16} className="text-muted-foreground" />;
@@ -180,24 +180,58 @@ export function WizardStepAgents({
         </div>
       </div>
 
-      {/* Save as Preset Section */}
-      <div className="wizard-section wizard-preset-save-section">
-        <label htmlFor="wizard-save-preset-checkbox" className="wizard-checkbox-row">
-          <input
-            id="wizard-save-preset-checkbox"
-            type="checkbox"
-            className="wizard-checkbox"
-            checked={saveAsPreset}
-            onChange={(e) => setSaveAsPreset(e.target.checked)}
-          />
-          <span className="wizard-checkbox-label">
-            Save this configuration as a custom preset
-          </span>
-        </label>
+      {/* Save as Preset Section - Clay Switch Card */}
+      <div
+        className={`wizard-section wizard-preset-save-card ${
+          saveAsPreset ? "active" : ""
+        }`}
+      >
+        <div
+          className="wizard-preset-toggle-row"
+          onClick={() => setSaveAsPreset(!saveAsPreset)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSaveAsPreset(!saveAsPreset);
+            }
+          }}
+        >
+          <div className="wizard-preset-icon-box">
+            <Bookmark size={16} />
+          </div>
+          <div className="wizard-preset-text-col">
+            <span className="wizard-preset-title">
+              Save as workspace preset
+            </span>
+            <span className="wizard-preset-subtitle">
+              Store this layout and persona configuration for quick one-click launching
+            </span>
+          </div>
+          <label
+            htmlFor="wizard-save-preset-checkbox"
+            className="wizard-switch-label"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="sr-only">Save this configuration as a custom preset</span>
+            <input
+              id="wizard-save-preset-checkbox"
+              type="checkbox"
+              className="wizard-switch-input"
+              checked={saveAsPreset}
+              onChange={(e) => setSaveAsPreset(e.target.checked)}
+            />
+            <span className="wizard-switch-slider" />
+          </label>
+        </div>
 
         {saveAsPreset && (
           <div className="wizard-preset-name-wrapper">
-            <label htmlFor="wizard-preset-name-input" className="wizard-label">
+            <label
+              htmlFor="wizard-preset-name-input"
+              className="wizard-label"
+            >
               Preset Name
             </label>
             <div className="wizard-input-wrapper">
