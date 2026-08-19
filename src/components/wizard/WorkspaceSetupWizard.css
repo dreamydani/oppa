@@ -337,6 +337,22 @@
   padding-left: 36px;
 }
 
+.wizard-input-wrapper.with-select-chevron {
+  position: relative;
+}
+
+.wizard-select-chevron {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: var(--wizard-text-muted);
+  transition: color 0.15s ease;
+}
+
+.wizard-input-wrapper.with-select-chevron:focus-within .wizard-select-chevron {
+  color: var(--wizard-amber-primary);
+}
+
 .wizard-text-input,
 .wizard-select-input {
   width: 100%;
@@ -364,6 +380,10 @@
 .wizard-select-input {
   cursor: pointer;
   background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 36px;
 }
 
 .wizard-select-input option {
@@ -414,11 +434,12 @@
 .wizard-cd-kbd {
   font-size: 10px;
   font-family: var(--font-mono, monospace);
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 4px;
   background: var(--wizard-bg-surface-elevated);
   color: var(--wizard-text-muted);
   border: 1px solid var(--wizard-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.3);
   user-select: none;
 }
 
@@ -433,16 +454,24 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  box-shadow: var(--wizard-shadow-card);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .wizard-cd-submit-btn:hover {
   background: var(--wizard-amber-primary);
   color: var(--wizard-bg-canvas);
   border-color: var(--wizard-amber-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px var(--wizard-amber-glow);
 }
 
-/* Grid Layout Selector Tiles */
+.wizard-cd-submit-btn:active {
+  transform: translateY(1px) scale(0.95);
+  box-shadow: var(--wizard-shadow-sunken);
+}
+
+/* Mechanical Keycap Grid Selector Tiles */
 .wizard-grid-tiles-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -461,20 +490,28 @@
   gap: 6px;
   min-height: 64px;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.15s ease;
+  box-shadow: var(--wizard-shadow-sunken), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
 .wizard-grid-tile:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--wizard-shadow-card), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+}
+
+.wizard-grid-tile:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .wizard-grid-tile.active {
   border-color: var(--wizard-amber-primary);
   background: var(--wizard-amber-surface);
-  box-shadow: var(--wizard-shadow-tile-active);
+  box-shadow: var(--wizard-shadow-tile-active), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
 }
 
 /* Mini Tile Preview Boxes */
@@ -485,17 +522,21 @@
   height: 24px;
   background: var(--wizard-bg-canvas);
   padding: 2px;
-  border-radius: 2px;
+  border-radius: 3px;
   box-sizing: border-box;
+  border: 1px solid var(--wizard-border-subtle);
+  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .tile-box {
   background: var(--wizard-border-highlight);
   border-radius: 1px;
+  transition: background 0.15s ease;
 }
 
 .wizard-grid-tile.active .tile-box {
   background: var(--wizard-amber-primary);
+  box-shadow: 0 0 3px var(--wizard-amber-glow);
 }
 
 .tile-grid-1 { grid-template-columns: 1fr; }
@@ -523,9 +564,10 @@
   height: 5px;
   border-radius: 50%;
   background: var(--wizard-amber-primary);
+  box-shadow: 0 0 4px var(--wizard-amber-glow);
 }
 
-/* Recents Section */
+/* Recents Bento Section */
 .wizard-recents-empty {
   padding: 16px;
   background: var(--wizard-bg-sunken);
@@ -549,16 +591,22 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.15s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .wizard-recent-card:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--wizard-shadow-card);
+}
+
+.wizard-recent-card:active {
+  transform: translateY(1px) scale(0.99);
 }
 
 .recent-card-icon-col {
@@ -592,7 +640,8 @@
 
 .recent-card-terminals-badge {
   font-size: 10px;
-  padding: 2px 6px;
+  font-weight: 500;
+  padding: 2px 8px;
   background: var(--wizard-bg-surface-elevated);
   color: var(--wizard-text-muted);
   border: 1px solid var(--wizard-border-subtle);
@@ -611,18 +660,24 @@
   background: var(--wizard-bg-surface-elevated);
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-primary);
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-radius: 9999px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   box-shadow: var(--wizard-shadow-card);
-  transition: all 0.15s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .wizard-preset-chip:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
+  transform: translateY(-1px);
+  color: var(--wizard-text-primary);
+}
+
+.wizard-preset-chip:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .wizard-new-preset-chip {
@@ -635,6 +690,7 @@
 .wizard-new-preset-chip:hover {
   border-color: var(--wizard-amber-primary);
   background: rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 10px var(--wizard-amber-glow);
 }
 
 /* AI Personas Grid & Cards */

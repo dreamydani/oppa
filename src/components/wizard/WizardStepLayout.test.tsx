@@ -53,6 +53,23 @@ describe("WizardStepStart", () => {
     fireEvent.change(select, { target: { value: "wsl.exe" } });
     expect(setShell).toHaveBeenCalledWith("wsl.exe");
   });
+
+  it("renders shell select in sunken input wrapper with custom dropdown chevron", () => {
+    const setName = vi.fn();
+    const setShell = vi.fn();
+    const { container } = render(
+      <WizardStepStart
+        name=""
+        setName={setName}
+        shell=""
+        setShell={setShell}
+      />,
+    );
+
+    const wrappers = container.querySelectorAll(".wizard-input-wrapper");
+    expect(wrappers.length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector(".wizard-select-chevron")).toBeInTheDocument();
+  });
 });
 
 describe("resolveCdPath helper", () => {
@@ -195,6 +212,49 @@ describe("WizardStepLayout", () => {
 
     fireEvent.click(tile6);
     expect(mockSetTerminalCount).toHaveBeenCalledWith(6);
+  });
+
+  it("renders tactile mechanical keycap tiles for grid options", () => {
+    render(
+      <WizardStepLayout
+        cwd="D:\\oppa"
+        setCwd={mockSetCwd}
+        terminalCount={4}
+        setTerminalCount={mockSetTerminalCount}
+        onSelectRecent={mockOnSelectRecent}
+        onSelectPreset={mockOnSelectPreset}
+        recentWorkspaces={[]}
+        workspacePresets={[]}
+      />,
+    );
+
+    const tile4 = screen.getByRole("button", { name: "4 terminals layout" });
+    expect(tile4.className).toContain("active");
+    expect(tile4.querySelector(".tile-indicator-dot")).toBeInTheDocument();
+
+    const tile8 = screen.getByRole("button", { name: "8 terminals layout" });
+    expect(tile8.className).not.toContain("active");
+    fireEvent.click(tile8);
+    expect(mockSetTerminalCount).toHaveBeenCalledWith(8);
+  });
+
+  it("renders sunken quick jump cd well with kbd badge and submit button", () => {
+    render(
+      <WizardStepLayout
+        cwd="/workspace"
+        setCwd={mockSetCwd}
+        terminalCount={1}
+        setTerminalCount={mockSetTerminalCount}
+        onSelectRecent={mockOnSelectRecent}
+        onSelectPreset={mockOnSelectPreset}
+        recentWorkspaces={[]}
+        workspacePresets={[]}
+      />,
+    );
+
+    expect(screen.getByText("> cd")).toBeInTheDocument();
+    expect(screen.getByText("Enter ↵")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /jump/i })).toBeInTheDocument();
   });
 
   it("shows empty recents message when recentWorkspaces is empty", () => {

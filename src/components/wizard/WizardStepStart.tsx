@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronDown } from "lucide-react";
 import "./WorkspaceSetupWizard.css";
 
 export interface WizardStepStartProps {
@@ -45,7 +46,7 @@ export function WizardStepStart({
           <label htmlFor="wizard-shell-select" className="wizard-label">
             Preferred Shell
           </label>
-          <div className="wizard-input-wrapper">
+          <div className="wizard-input-wrapper with-select-chevron">
             <select
               id="wizard-shell-select"
               className="wizard-select-input"
@@ -60,6 +61,7 @@ export function WizardStepStart({
               <option value="/bin/bash">Bash</option>
               <option value="/bin/zsh">Zsh</option>
             </select>
+            <ChevronDown size={14} className="wizard-select-chevron" />
           </div>
         </div>
       </div>
