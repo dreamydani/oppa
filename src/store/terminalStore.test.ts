@@ -1852,6 +1852,47 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
+    it("createWizardTab generates unique non-colliding ID when tab-1 and tab-2 already exist", () => {
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-1", title: "fixing", layout: { type: "leaf", id: "s-1" }, focusedPath: [] },
+          { id: "tab-2", title: "taste-skills", layout: { type: "leaf", id: "s-2" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-2",
+        ready: true,
+      });
+
+      const wizardTabId = useTerminalStore.getState().createWizardTab();
+      const state = useTerminalStore.getState();
+
+      expect(wizardTabId).toBe("tab-3");
+      expect(state.activeTabId).toBe("tab-3");
+      expect(state.tabs).toHaveLength(3);
+      expect(state.tabs[0].id).toBe("tab-1");
+      expect(state.tabs[1].id).toBe("tab-2");
+      expect(state.tabs[2].id).toBe("tab-3");
+      expect(state.tabs[2].isWizard).toBe(true);
+    });
+
+    it("createTab generates unique non-colliding ID when multiple tabs exist", async () => {
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("s-new"));
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-1", title: "Shell 1", layout: { type: "leaf", id: "s-1" }, focusedPath: [] },
+          { id: "tab-2", title: "Shell 2", layout: { type: "leaf", id: "s-2" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-2",
+        ready: true,
+      });
+
+      const newTabId = await useTerminalStore.getState().createTab();
+      const state = useTerminalStore.getState();
+
+      expect(newTabId).toBe("tab-3");
+      expect(state.activeTabId).toBe("tab-3");
+      expect(state.tabs).toHaveLength(3);
+    });
+
     it("selectTab allows switching between terminal tabs and wizard tabs", () => {
       useTerminalStore.setState({
         tabs: [

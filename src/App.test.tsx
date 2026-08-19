@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import App from "./App";
 import { useTerminalStore } from "./store/terminalStore";
 import * as transport from "./lib/pty/transport";
@@ -581,6 +581,29 @@ describe("App", () => {
       activeTabId: "tab-wizard",
     });
     const { getByRole } = render(<App />);
+
+    expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
+  });
+
+  it("navigates to WorkspaceSetupWizard when clicking the + button in left sidebar with existing tabs", () => {
+    useTerminalStore.setState({
+      tabs: [
+        { id: "tab-1", title: "fixing", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        { id: "tab-2", title: "taste-skills", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+      ],
+      activeTabId: "tab-2",
+      ready: true,
+      leftSidebarOpen: true,
+      activeAppMode: "terminal",
+      sessions: {
+        s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    const { getByRole, getByTitle } = render(<App />);
+
+    const newTabBtn = getByTitle("New Tab");
+    fireEvent.click(newTabBtn);
 
     expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();
   });

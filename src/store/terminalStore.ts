@@ -185,11 +185,29 @@ export interface TabState {
   isWizard?: boolean;
 }
 
-// Monotonic counter for synthetic error-session ids and tab ids. Avoids
+// Monotonic counter for synthetic error-session ids. Avoids
 // crypto.randomUUID (not available in insecure/non-secure contexts) and stays
 // unique within the session without depending on a global UUID source.
 let nextErrorId = 0;
-let nextTabId = 1;
+
+export function generateNextTabId(existingTabs: TabState[]): string {
+  const existingIds = new Set(existingTabs.map((t) => t.id));
+  let maxId = 0;
+  for (const t of existingTabs) {
+    const match = /^tab-(\d+)$/.exec(t.id);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxId) {
+        maxId = num;
+      }
+    }
+  }
+  let candidate = maxId + 1;
+  while (existingIds.has(`tab-${candidate}`)) {
+    candidate++;
+  }
+  return `tab-${candidate}`;
+}
 
 export const DEFAULT_COLS = 80;
 export const DEFAULT_ROWS = 24;
@@ -632,15 +650,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   createTab: async (cwd) => {
     const sessionId = await get().spawnSession(cwd);
-    const tabId = `tab-${++nextTabId}`;
+    const currentTabs = getSyncedTabs(get());
+    const tabId = generateNextTabId(currentTabs);
     const newTab: TabState = {
       id: tabId,
       layout: { type: "leaf", id: sessionId },
       focusedPath: [],
     };
     set((state) => {
-      const currentTabs = getSyncedTabs(state);
-      const tabs = [...currentTabs, newTab];
+      const current = getSyncedTabs(state);
+      const tabs = [...current, newTab];
       return {
         tabs,
         activeTabId: tabId,
@@ -1104,6 +1123,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           return;
         }
         for (const tab of parsed.tabs) {
+          if (tab.isWizard) continue;
           for (const oldId of leafIds(tab.layout)) {
             if (oldId === "" || remap[oldId]) continue;
             const savedSession = byId.get(oldId);
@@ -1150,11 +1170,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         }
 
         const restoredTabs: TabState[] = parsed.tabs.map((tab) => {
+          if (tab.isWizard) {
+            return {
+              id: tab.id,
+              ...(tab.title !== undefined ? { title: tab.title } : {}),
+              isWizard: true,
+              layout: { type: "leaf", id: "" },
+              focusedPath: [],
+            };
+          }
           const remappedLayout = remapLeafIds(tab.layout, remap);
           return {
             id: tab.id,
             ...(tab.title !== undefined ? { title: tab.title } : {}),
-            ...(tab.isWizard !== undefined ? { isWizard: tab.isWizard } : {}),
             layout: remappedLayout,
             focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
           };
@@ -1313,7 +1341,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   createWizardTab: () => {
-    const tabId = `tab-${++nextTabId}`;
+    const currentTabs = getSyncedTabs(get());
+    const tabId = generateNextTabId(currentTabs);
     const newTab: TabState = {
       id: tabId,
       title: "New Workspace",
@@ -1322,8 +1351,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       focusedPath: [],
     };
     set((state) => {
-      const currentTabs = getSyncedTabs(state);
-      const tabs = [...currentTabs, newTab];
+      const current = getSyncedTabs(state);
+      const tabs = [...current, newTab];
       return {
         tabs,
         activeTabId: tabId,
@@ -1405,7 +1434,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const layout = createGridLayout(count, sessionIds);
-    const tabId = `tab-${++nextTabId}`;
+    const currentTabs = getSyncedTabs(get());
+    const tabId = generateNextTabId(currentTabs);
 
     let title = config.name?.trim();
     if (!title && config.cwd) {
@@ -1425,8 +1455,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
 
     set((state) => {
-      const currentTabs = getSyncedTabs(state);
-      const tabs = [...currentTabs, newTab];
+      const current = getSyncedTabs(state);
+      const tabs = [...current, newTab];
       return {
         tabs,
         activeTabId: tabId,

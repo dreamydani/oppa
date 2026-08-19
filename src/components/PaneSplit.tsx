@@ -93,11 +93,13 @@ export function PaneSplit() {
     );
   };
 
-  if (tabs.length > 1) {
+  const terminalTabs = tabs.filter((t) => !t.isWizard);
+
+  if (terminalTabs.length > 1) {
     return (
       <>
-        {tabs.map((tab) => {
-          const isTabActive = tab.id === (activeTabId || tabs[0].id);
+        {terminalTabs.map((tab) => {
+          const isTabActive = tab.id === (activeTabId || terminalTabs[0].id);
           const tabLayout = isTabActive ? layout : tab.layout;
           const tabFocusedPath = isTabActive ? focusedPath : tab.focusedPath;
           return (
@@ -119,6 +121,13 @@ export function PaneSplit() {
         })}
       </>
     );
+  }
+
+  if (terminalTabs.length === 1) {
+    const isTabActive = terminalTabs[0].id === (activeTabId || terminalTabs[0].id);
+    const tabLayout = isTabActive ? layout : terminalTabs[0].layout;
+    const tabFocusedPath = isTabActive ? focusedPath : terminalTabs[0].focusedPath;
+    return renderTree(tabLayout, tabFocusedPath, isTabActive);
   }
 
   return renderTree(layout, focusedPath, true);

@@ -322,6 +322,24 @@ describe("PaneSplit", () => {
     expect(panes).toHaveLength(2);
   });
 
+  it("filters out wizard tabs so empty wizard leaves are never rendered into terminal pane splits", () => {
+    setSessions(["s1"]);
+    useTerminalStore.setState({
+      tabs: [
+        { id: "tab-1", title: "Project 1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        { id: "tab-2", title: "New Workspace", isWizard: true, layout: { type: "leaf", id: "" }, focusedPath: [] },
+      ],
+      activeTabId: "tab-1",
+      layout: { type: "leaf", id: "s1" },
+    });
+
+    const { container } = render(<PaneSplit />);
+    const tabWrappers = container.querySelectorAll(".tab-split-wrapper") as NodeListOf<HTMLElement>;
+    expect(tabWrappers).toHaveLength(0); // single terminal tab does not need wrapper
+    const panes = container.querySelectorAll(".terminal-pane");
+    expect(panes).toHaveLength(1);
+  });
+
   it("renders drop overlay in target quadrant and dims drag source leaf during pane drag", async () => {
     const { usePaneDragStore } = await import("../lib/pane-manager/dragState");
     setSessions(["a", "b"]);
