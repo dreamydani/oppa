@@ -153,6 +153,70 @@ describe("terminalStore", () => {
     expect(session.personaId).toBe("designer");
   });
 
+  it("spawnSession inherits personaId from existingId session when personaId parameter is omitted", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "existing-1": {
+          id: "existing-1",
+          title: "existing-1",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          personaId: "architect",
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({
+      id: "existing-1",
+      is_new: false,
+      pid: 1234,
+      cols: 80,
+      rows: 24,
+    });
+    const id = await useTerminalStore.getState().spawnSession(undefined, undefined, "existing-1");
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      id: "existing-1",
+      persona_id: "architect",
+    });
+    expect(id).toBe("existing-1");
+    const session = useTerminalStore.getState().sessions["existing-1"];
+    expect(session).toBeDefined();
+    expect(session.personaId).toBe("architect");
+  });
+
+  it("spawnSession overrides personaId when explicitly provided with existingId", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "existing-2": {
+          id: "existing-2",
+          title: "existing-2",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          personaId: "architect",
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({
+      id: "existing-2",
+      is_new: false,
+      pid: 1234,
+      cols: 80,
+      rows: 24,
+    });
+    const id = await useTerminalStore
+      .getState()
+      .spawnSession(undefined, undefined, "existing-2", "reviewer");
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      id: "existing-2",
+      persona_id: "reviewer",
+    });
+    expect(id).toBe("existing-2");
+    const session = useTerminalStore.getState().sessions["existing-2"];
+    expect(session).toBeDefined();
+    expect(session.personaId).toBe("reviewer");
+  });
+
   it("spawnSession records restoredScrollbacks when is_new is false and snapshot is present", async () => {
     ptySpawnMock.mockResolvedValue({
       id: "s-warm",
@@ -402,6 +466,83 @@ describe("terminalStore", () => {
       b: { type: "leaf", id: "y" },
     });
     expect(focusedPath).toEqual([0, 1]);
+  });
+
+  it("splitPane inherits personaId from the focused session", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s2"));
+    useTerminalStore.setState({
+      sessions: {
+        root: {
+          id: "root",
+          title: "root",
+          status: "running",
+          cwd: "D:\\oppa\\project",
+          cols: 80,
+          rows: 24,
+          personaId: "code-reviewer",
+        },
+      },
+      layout: { type: "leaf", id: "root" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().splitPane("v");
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      cwd: "D:\\oppa\\project",
+      persona_id: "code-reviewer",
+    });
+    const { layout, focusedPath, sessions } = useTerminalStore.getState();
+    expect(layout).toEqual({
+      type: "split",
+      dir: "v",
+      ratio: 0.5,
+      a: { type: "leaf", id: "root" },
+      b: { type: "leaf", id: "s2" },
+    });
+    expect(focusedPath).toEqual([1]);
+    expect(sessions["s2"]).toBeDefined();
+    expect(sessions["s2"].personaId).toBe("code-reviewer");
+  });
+
+  it("splitPane splits at an explicit path and inherits that leaf's personaId", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s2"));
+    useTerminalStore.setState({
+      sessions: {
+        x: {
+          id: "x",
+          title: "x",
+          status: "running",
+          cwd: "C:\\path\\x",
+          cols: 80,
+          rows: 24,
+          personaId: "debugger",
+        },
+        y: {
+          id: "y",
+          title: "y",
+          status: "running",
+          cwd: "C:\\path\\y",
+          cols: 80,
+          rows: 24,
+          personaId: "tester",
+        },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "x" },
+        b: { type: "leaf", id: "y" },
+      },
+      focusedPath: [1],
+    });
+    await useTerminalStore.getState().splitPane("v", [0]);
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      cwd: "C:\\path\\x",
+      persona_id: "debugger",
+    });
+    const { sessions } = useTerminalStore.getState();
+    expect(sessions["s2"]).toBeDefined();
+    expect(sessions["s2"].personaId).toBe("debugger");
   });
 
   it("closePane removes the leaf, kills its session, and re-focuses a remaining leaf", async () => {

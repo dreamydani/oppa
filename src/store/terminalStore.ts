@@ -429,11 +429,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   spawnSession: async (cwd, shell, existingId, personaId) => {
     try {
+      const existingSession = existingId ? get().sessions[existingId] : undefined;
+      const resolvedPersonaId = personaId ?? existingSession?.personaId ?? null;
       const opts: PtySpawnOptions = {};
       if (existingId) opts.id = existingId;
       if (cwd) opts.cwd = cwd;
       if (shell) opts.shell = shell;
-      if (personaId) opts.persona_id = personaId;
+      if (resolvedPersonaId) opts.persona_id = resolvedPersonaId;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
@@ -474,7 +476,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               cwd: resolvedCwd || existingSession?.cwd,
               cols,
               rows,
-              personaId: personaId ?? existingSession?.personaId ?? null,
+              personaId: resolvedPersonaId ?? existingSession?.personaId ?? null,
               ...(isColdRestored || existingSession?.isRestored ? { isRestored: true } : {}),
             },
           },
