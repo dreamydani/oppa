@@ -66,12 +66,13 @@ impl ContextManager {
             other => return Err(format!("Invalid scope: {}", other)),
         };
 
+        let is_built_in_int: i32 = if page.is_built_in { 1 } else { 0 };
         let mut stmt = conn
             .prepare_cached(
                 r#"
                 INSERT INTO context_pages (
-                    id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                    id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at, is_built_in, attached_scopes_json, deleted_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                 ON CONFLICT(id) DO UPDATE SET
                     scope = excluded.scope,
                     category = excluded.category,
@@ -82,7 +83,10 @@ impl ContextManager {
                     overview_l1 = excluded.overview_l1,
                     details_l2 = excluded.details_l2,
                     pinned = excluded.pinned,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    is_built_in = excluded.is_built_in,
+                    attached_scopes_json = excluded.attached_scopes_json,
+                    deleted_at = excluded.deleted_at
                 "#,
             )
             .map_err(|e| e.to_string())?;
@@ -102,6 +106,9 @@ impl ContextManager {
             pinned_int,
             page.created_at,
             page.updated_at,
+            is_built_in_int,
+            page.attached_scopes_json,
+            page.deleted_at,
         ])
         .map_err(|e| e.to_string())?;
 
@@ -233,7 +240,7 @@ impl ContextManager {
     fn query_single_page(conn: &Connection, id: &str) -> rusqlite::Result<Option<ContextPage>> {
         let mut stmt = conn.prepare_cached(
             r#"
-            SELECT id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at
+            SELECT id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at, is_built_in, attached_scopes_json, deleted_at
             FROM context_pages
             WHERE id = ?1
             "#,
@@ -248,7 +255,7 @@ impl ContextManager {
     }
 
     fn query_pages(conn: &Connection, category: Option<&str>) -> rusqlite::Result<Vec<ContextPage>> {
-        let mut sql = "SELECT id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at FROM context_pages".to_string();
+        let mut sql = "SELECT id, scope, category, path, title, icon, abstract_l0, overview_l1, details_l2, pinned, created_at, updated_at, is_built_in, attached_scopes_json, deleted_at FROM context_pages".to_string();
         if category.is_some() {
             sql.push_str(" WHERE category = ?1");
         }
@@ -291,6 +298,7 @@ impl ContextManager {
 
     fn row_to_page(row: &rusqlite::Row) -> rusqlite::Result<ContextPage> {
         let pinned_int: i32 = row.get(9)?;
+        let is_built_in_int: i32 = row.get(12)?;
         Ok(ContextPage {
             id: row.get(0)?,
             scope: row.get(1)?,
@@ -302,8 +310,11 @@ impl ContextManager {
             overview_l1: row.get(7)?,
             details_l2: row.get(8)?,
             pinned: pinned_int != 0,
+            is_built_in: is_built_in_int != 0,
+            attached_scopes_json: row.get(13)?,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,
+            deleted_at: row.get(14)?,
         })
     }
 
@@ -318,6 +329,7 @@ impl ContextManager {
             abstract_l0: row.get(6)?,
             overview_l1: row.get(7)?,
             snippet: row.get(8)?,
+            total: 0,
         })
     }
 }
@@ -362,8 +374,11 @@ mod tests {
             overview_l1: "Rust pauses PTY read loop at 256KB and resumes at 32KB.".to_string(),
             details_l2: Some("Full stack trace and ACK implementation log.".to_string()),
             pinned: true,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 1000,
             updated_at: 1000,
+            deleted_at: None,
         };
 
         manager.upsert_page(&page, Some(&ws_path)).unwrap();
@@ -396,8 +411,11 @@ mod tests {
             overview_l1: "Vim modal editing configuration.".to_string(),
             details_l2: None,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 100,
             updated_at: 100,
+            deleted_at: None,
         };
 
         // Write to global scope
@@ -420,8 +438,11 @@ mod tests {
             overview_l1: "Custom tab sizes for this repo.".to_string(),
             details_l2: None,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 200,
             updated_at: 200,
+            deleted_at: None,
         };
         manager.upsert_page(&ws_override, Some(&ws_path)).unwrap();
 
@@ -451,8 +472,11 @@ mod tests {
             overview_l1: "Architecture overview.".to_string(),
             details_l2: None,
             pinned: true,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 300,
             updated_at: 300,
+            deleted_at: None,
         };
         manager.upsert_page(&ws_page, Some(&ws_path)).unwrap();
 
@@ -484,8 +508,11 @@ mod tests {
             overview_l1: "Deploy details.".to_string(),
             details_l2: None,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 400,
             updated_at: 400,
+            deleted_at: None,
         };
         manager.upsert_page(&ws_page, Some(&ws_path)).unwrap();
 
@@ -533,8 +560,11 @@ mod tests {
             overview_l1: "Use spawn_blocking for CPU-bound tasks.".to_string(),
             details_l2: None,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 500,
             updated_at: 500,
+            deleted_at: None,
         };
         manager.upsert_page(&page, Some(&ws_path)).unwrap();
 

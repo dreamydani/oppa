@@ -343,8 +343,11 @@ impl McpServer {
             overview_l1,
             details_l2,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at,
             updated_at: now,
+            deleted_at: None,
         };
 
         self.context_manager.upsert_page(&page, self.ws_str())?;

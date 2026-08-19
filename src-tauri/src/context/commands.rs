@@ -93,8 +93,11 @@ mod tests {
             overview_l1: "Overview 1".to_string(),
             details_l2: Some("Details 2".to_string()),
             pinned: true,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 1000,
             updated_at: 2000,
+            deleted_at: None,
         };
 
         // Manager method direct check
@@ -123,8 +126,11 @@ mod tests {
             overview_l1: "Step by step Kubernetes deployment".to_string(),
             details_l2: None,
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 1000,
             updated_at: 2000,
+            deleted_at: None,
         };
 
         manager.upsert_page(&page, None).unwrap();
@@ -173,8 +179,11 @@ mod tests {
             overview_l1: "Detailed PTY explanation".to_string(),
             details_l2: Some("{\"key\":\"val\"}".to_string()),
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]".to_string(),
             created_at: 100,
             updated_at: 200,
+            deleted_at: None,
         };
 
         let json = serde_json::to_string(&page).unwrap();
@@ -191,6 +200,7 @@ mod tests {
             abstract_l0: "PTY handles CR-LF".to_string(),
             overview_l1: "Detailed PTY explanation".to_string(),
             snippet: "PTY handles <b>CR-LF</b>".to_string(),
+            total: 1,
         };
         let search_json = serde_json::to_string(&search_res).unwrap();
         let search_deserialized: ContextSearchResult = serde_json::from_str(&search_json).unwrap();
