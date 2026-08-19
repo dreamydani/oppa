@@ -222,7 +222,7 @@ pub fn get_oppa_mcp_tools() -> Vec<McpTool> {
                     },
                     "category": {
                         "type": "string",
-                        "enum": ["architecture", "quirk", "runbook", "persona", "preferences", "standards"],
+                        "enum": ["architecture", "quirk", "runbook", "preference", "persona"],
                         "description": "Optional category filter"
                     },
                     "limit": {
@@ -259,7 +259,7 @@ pub fn get_oppa_mcp_tools() -> Vec<McpTool> {
                 properties: serde_json::json!({
                     "category": {
                         "type": "string",
-                        "enum": ["architecture", "quirk", "runbook", "persona", "preferences", "standards"]
+                        "enum": ["architecture", "quirk", "runbook", "preference", "persona"]
                     },
                     "title": {
                         "type": "string"
@@ -397,5 +397,8 @@ mod tests {
         assert!(required.contains(&"title".to_string()));
         assert!(required.contains(&"abstract_l0".to_string()));
         assert!(required.contains(&"overview_l1".to_string()));
+
+        let save_cats = save_tool.input_schema.properties["category"]["enum"].as_array().unwrap();
+        assert_eq!(save_cats, &vec!["architecture", "quirk", "runbook", "preference", "persona"]);
     }
 }

@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::str::FromStr;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
+use crate::context::enums::ContextCategory;
 use crate::context::manager::ContextManager;
 use crate::context::models::ContextPage;
 use crate::mcp::protocol::{
@@ -164,10 +166,43 @@ impl McpServer {
                 } else {
                     p.attached_scopes.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n")
                 };
-                let text = format!(
+                let mut text = format!(
                     "# Persona: {} (`{}`)\n\n**Tagline**: {}\n\n## Behavioral Guidelines\n{}\n\n## Mounted Context Scopes\n{}",
                     p.name, p.id, p.tagline, p.system_prompt, scopes_str
                 );
+
+                let mut resolved_pages = Vec::new();
+                let mut seen_ids = std::collections::HashSet::new();
+
+                if p.attached_scopes.is_empty() {
+                    for token in &["global", "workspace"] {
+                        if let Ok(pages) = self.context_manager.list_pages_for_scope_token(token, self.ws_str()) {
+                            for page in pages {
+                                if seen_ids.insert(page.id.clone()) {
+                                    resolved_pages.push(page);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for token in &p.attached_scopes {
+                        if let Ok(pages) = self.context_manager.list_pages_for_scope_token(token, self.ws_str()) {
+                            for page in pages {
+                                if seen_ids.insert(page.id.clone()) {
+                                    resolved_pages.push(page);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !resolved_pages.is_empty() {
+                    text.push_str("\n\n## Resolved Notes (L0)");
+                    for page in &resolved_pages {
+                        text.push_str(&format!("\n- **{}** (`{}`): {}", page.title, page.path, page.abstract_l0));
+                    }
+                }
+
                 Ok(McpCallToolResult::success(text))
             }
             None => Ok(McpCallToolResult::error(format!(
@@ -183,15 +218,20 @@ impl McpServer {
             Some(q) if !q.trim().is_empty() => q.trim(),
             _ => return Ok(McpCallToolResult::error("Missing required parameter: 'query'")),
         };
-        let category_filter = args.get("category").and_then(|v| v.as_str());
+        let category_filter = match args.get("category").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+            Some(c) => match ContextCategory::from_str(c.trim()) {
+                Ok(cat) => Some(cat.as_str().to_string()),
+                Err(e) => return Ok(McpCallToolResult::error(e)),
+            },
+            None => None,
+        };
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
         let mut results = self.context_manager.search_fts(query, self.ws_str(), Some(limit))?;
-        if let Some(cat) = category_filter {
-            results.retain(|r| {
-                r.category.eq_ignore_ascii_case(cat)
-                    || r.category.to_lowercase().starts_with(&cat.to_lowercase())
-            });
+        let total = results.first().map(|r| r.total).unwrap_or(results.len() as i64);
+
+        if let Some(ref cat) = category_filter {
+            results.retain(|r| r.category.eq_ignore_ascii_case(cat));
         }
         results.truncate(limit);
 
@@ -202,11 +242,12 @@ impl McpServer {
             )));
         }
 
-        let mut formatted = format!("Found {} context note(s) matching '{}':\n\n", results.len(), query);
+        let mut formatted = format!("Found {} of {} total context notes matching '{}':\n\n", results.len(), total, query);
         for (idx, r) in results.iter().enumerate() {
+            let snippet = r.snippet.replace("<b>", "**").replace("</b>", "**");
             formatted.push_str(&format!(
                 "{}. **{}** (`{}`)\n   - **ID**: {}\n   - **Category**: {} | **Scope**: {}\n   - **Summary (L0)**: {}\n   - **Snippet**: {}\n\n",
-                idx + 1, r.title, r.path, r.id, r.category, r.scope, r.abstract_l0, r.snippet
+                idx + 1, r.title, r.path, r.id, r.category, r.scope, r.abstract_l0, snippet
             ));
         }
 
@@ -217,29 +258,31 @@ impl McpServer {
     fn tool_get_context_note(&self, args: &serde_json::Value) -> Result<McpCallToolResult, String> {
         let id_opt = args.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
         let path_opt = args.get("path").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let scope_opt = args.get("scope").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
 
         if id_opt.is_none() && path_opt.is_none() {
             return Ok(McpCallToolResult::error("Either 'id' or 'path' must be provided"));
         }
 
-        let page = if let Some(id) = id_opt {
+        let mut page = if let Some(id) = id_opt {
             self.context_manager.get_page(id, self.ws_str())?
         } else {
             None
         };
 
-        let page = match page {
-            Some(p) => Some(p),
-            None => {
-                let target = path_opt.or(id_opt).unwrap();
-                let all = self.context_manager.list_pages(self.ws_str(), None, None, None)?.items;
-                all.into_iter().find(|p| {
-                    p.path.eq_ignore_ascii_case(target)
-                        || p.id.eq_ignore_ascii_case(target)
-                        || p.path.ends_with(target)
-                })
+        if page.is_none() {
+            let target_path = path_opt.or(id_opt).unwrap();
+            if let Some(scope) = scope_opt {
+                page = self.context_manager.get_page_by_path(scope, target_path, self.ws_str())?;
+            } else {
+                if self.ws_str().is_some() {
+                    page = self.context_manager.get_page_by_path("workspace", target_path, self.ws_str())?;
+                }
+                if page.is_none() {
+                    page = self.context_manager.get_page_by_path("global", target_path, self.ws_str())?;
+                }
             }
-        };
+        }
 
         match page {
             Some(p) => {
@@ -264,9 +307,13 @@ impl McpServer {
 
     // Tool: oppa_save_context_note
     fn tool_save_context_note(&self, args: &serde_json::Value) -> Result<McpCallToolResult, String> {
-        let category = match args.get("category").and_then(|v| v.as_str()) {
-            Some(c) if !c.trim().is_empty() => c.trim().to_string(),
+        let category_raw = match args.get("category").and_then(|v| v.as_str()) {
+            Some(c) if !c.trim().is_empty() => c.trim(),
             _ => return Ok(McpCallToolResult::error("Missing required parameter: 'category'")),
+        };
+        let category = match ContextCategory::from_str(category_raw) {
+            Ok(cat) => cat.as_str().to_string(),
+            Err(e) => return Ok(McpCallToolResult::error(e)),
         };
         let title = match args.get("title").and_then(|v| v.as_str()) {
             Some(t) if !t.trim().is_empty() => t.trim().to_string(),
@@ -319,12 +366,11 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| match category.as_str() {
-                "quirk" | "quirks" => "🐛".to_string(),
+                "quirk" => "🐛".to_string(),
                 "architecture" => "🏗️".to_string(),
-                "runbook" | "runbooks" => "🚀".to_string(),
-                "persona" | "personas" => "👤".to_string(),
-                "preference" | "preferences" => "⚙️".to_string(),
-                "standard" | "standards" => "📏".to_string(),
+                "runbook" => "🚀".to_string(),
+                "persona" => "👤".to_string(),
+                "preference" => "⚙️".to_string(),
                 _ => "📝".to_string(),
             });
 
@@ -686,5 +732,189 @@ mod tests {
         let content = get_res["result"]["content"][0]["text"].as_str().unwrap();
         assert!(content.contains("Global Tooling"));
         assert!(content.contains("global"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_scope_resolver_returns_matching_l0() {
+        let temp_dir = TempDir::new().unwrap();
+        let server = McpServer::new_with_dir(temp_dir.path().to_path_buf());
+
+        // Save a quirk in workspace
+        let save_quirk = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 70,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_save_context_note",
+                "arguments": {
+                    "id": "pty-ack-quirk",
+                    "scope": "workspace",
+                    "category": "quirk",
+                    "title": "PTY ACK Flow Control",
+                    "abstract_l0": "ACK backpressure flow control mechanism",
+                    "overview_l1": "Pauses at 256KB and resumes at 32KB"
+                }
+            }
+        });
+        server.handle_request(save_quirk).await.unwrap();
+
+        // Save an architecture note in workspace
+        let save_arch = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 71,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_save_context_note",
+                "arguments": {
+                    "id": "ipc-pipe-arch",
+                    "scope": "workspace",
+                    "category": "architecture",
+                    "title": "IPC Pipe Architecture",
+                    "abstract_l0": "Named pipe IPC architecture overview",
+                    "overview_l1": "Tokio named pipes"
+                }
+            }
+        });
+        server.handle_request(save_arch).await.unwrap();
+
+        // Create a custom persona with attached_scopes = ["quirk"]
+        let persona = crate::context::models::AgentPersona {
+            id: "specialist".to_string(),
+            name: "Specialist Agent".to_string(),
+            icon: "🔬".to_string(),
+            tagline: "Quirks specialist".to_string(),
+            system_prompt: "Focus on quirks".to_string(),
+            attached_scopes: vec!["quirk".to_string()],
+            is_built_in: false,
+        };
+        server.context_manager.upsert_persona(&persona, server.ws_str()).unwrap();
+
+        // Request active persona with persona_id = "specialist"
+        let persona_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 72,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_get_active_persona",
+                "arguments": { "persona_id": "specialist" }
+            }
+        });
+        let res = server.handle_request(persona_req).await.unwrap();
+        let content = res["result"]["content"][0]["text"].as_str().unwrap();
+
+        assert!(content.contains("## Resolved Notes (L0)"));
+        assert!(content.contains("PTY ACK Flow Control"));
+        assert!(content.contains("ACK backpressure flow control mechanism"));
+        // Architecture note should NOT be in resolved notes since attached_scopes only has "quirk"
+        assert!(!content.contains("IPC Pipe Architecture"));
+
+        // Built-in persona with empty scopes should resolve default scopes (global & workspace)
+        let default_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 73,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_get_active_persona",
+                "arguments": { "persona_id": "debugger" }
+            }
+        });
+        let default_res = server.handle_request(default_req).await.unwrap();
+        let default_content = default_res["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(default_content.contains("## Resolved Notes (L0)"));
+        assert!(default_content.contains("PTY ACK Flow Control"));
+        assert!(default_content.contains("IPC Pipe Architecture"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_workspace_flag_writes_to_workspace_db() {
+        let temp_dir = TempDir::new().unwrap();
+        let ws_dir = temp_dir.path().to_path_buf();
+        let server = McpServer::new_with_dir(ws_dir.clone());
+
+        // Save note with workspace scope
+        let save_ws = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 80,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_save_context_note",
+                "arguments": {
+                    "id": "ws-note-1",
+                    "scope": "workspace",
+                    "category": "quirk",
+                    "title": "Workspace Quirk",
+                    "abstract_l0": "Workspace specific quirk",
+                    "overview_l1": "Detailed resolution"
+                }
+            }
+        });
+        let res = server.handle_request(save_ws).await.unwrap();
+        assert!(!res["result"]["isError"].as_bool().unwrap_or(false));
+
+        // Workspace SQLite DB file should exist at <ws_dir>/.oppa/context.sqlite
+        let ws_db_path = ws_dir.join(".oppa").join("context.sqlite");
+        assert!(ws_db_path.exists(), "Workspace DB must exist after workspace save");
+
+        // Verify page exists in workspace DB by exact path lookup
+        let get_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 81,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_get_context_note",
+                "arguments": {
+                    "path": "quirk/workspace-quirk",
+                    "scope": "workspace"
+                }
+            }
+        });
+        let get_res = server.handle_request(get_req).await.unwrap();
+        let content = get_res["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(content.contains("Workspace Quirk"));
+        assert!(content.contains("workspace"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_invalid_category_returns_tool_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let server = McpServer::new_with_dir(temp_dir.path().to_path_buf());
+
+        // Save note with plural / invalid category
+        let bad_save = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 90,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_save_context_note",
+                "arguments": {
+                    "category": "preferences",
+                    "title": "Bad Category Note",
+                    "abstract_l0": "Summary",
+                    "overview_l1": "Overview"
+                }
+            }
+        });
+        let save_res = server.handle_request(bad_save).await.unwrap();
+        assert_eq!(save_res["result"]["isError"], true);
+        let text = save_res["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Invalid category 'preferences'"));
+
+        // Search with invalid category filter
+        let bad_search = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "tools/call",
+            "params": {
+                "name": "oppa_search_context",
+                "arguments": {
+                    "query": "something",
+                    "category": "standards"
+                }
+            }
+        });
+        let search_res = server.handle_request(bad_search).await.unwrap();
+        assert_eq!(search_res["result"]["isError"], true);
+        let search_err_text = search_res["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(search_err_text.contains("Invalid category 'standards'"));
     }
 }
