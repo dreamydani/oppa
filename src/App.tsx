@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Sparkles } from "lucide-react";
 import { PlusIcon, TerminalIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
@@ -233,26 +232,21 @@ function App() {
               <div className="empty-workspace-view" data-testid="empty-workspace-view">
                 <div className="empty-workspace-card">
                   <div className="empty-workspace-icon">
-                    <TerminalIcon size={28} />
+                    <TerminalIcon size={26} />
                   </div>
                   <h2 className="empty-workspace-title">No Open Workspaces</h2>
                   <p className="empty-workspace-subtitle">
-                    Create a new terminal session, configure a project workspace with the setup wizard, or press <kbd>Ctrl+N</kbd> to launch.
+                    Configure an active project workspace with terminal layouts, shells, and agent personas.
                   </p>
                   <div className="empty-workspace-actions">
                     <button
                       type="button"
                       className="empty-action-btn primary"
-                      onClick={() => void createTab()}
-                    >
-                      <PlusIcon size={14} /> New Terminal
-                    </button>
-                    <button
-                      type="button"
-                      className="empty-action-btn secondary"
                       onClick={() => createWizardTab()}
+                      aria-label="New Workspace"
                     >
-                      <Sparkles size={14} /> Setup Wizard
+                      <PlusIcon size={15} />
+                      <span>New Workspace</span>
                     </button>
                   </div>
                   <div className="empty-workspace-shortcut-hint">
