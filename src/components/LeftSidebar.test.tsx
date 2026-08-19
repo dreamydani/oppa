@@ -230,4 +230,40 @@ describe("LeftSidebar", () => {
 
     expect(screen.getByText("No Matches")).toBeDefined();
   });
+
+  it("renders sidebar footer with settings and shortcuts buttons", () => {
+    const { container } = render(<LeftSidebar />);
+    const footer = container.querySelector(".left-sidebar-footer");
+    expect(footer).not.toBeNull();
+
+    const settingsBtn = screen.getByRole("button", { name: "Settings" });
+    expect(settingsBtn).toBeDefined();
+    expect(settingsBtn.getAttribute("title")).toBe("Settings (Ctrl+, / Cmd+,)");
+
+    const shortcutsBtn = screen.getByRole("button", { name: "Keyboard Shortcuts" });
+    expect(shortcutsBtn).toBeDefined();
+    expect(shortcutsBtn.getAttribute("title")).toBe("Keyboard Shortcuts (F1 / Ctrl+/)");
+  });
+
+  it("opens settings tab when settings button is clicked", () => {
+    render(<LeftSidebar />);
+
+    const settingsBtn = screen.getByRole("button", { name: "Settings" });
+    fireEvent.click(settingsBtn);
+
+    const state = useTerminalStore.getState();
+    expect(state.isSettingsOpen).toBe(true);
+    expect(state.activeSettingsTab).toBe("general");
+  });
+
+  it("opens shortcuts settings tab when shortcuts button is clicked", () => {
+    render(<LeftSidebar />);
+
+    const shortcutsBtn = screen.getByRole("button", { name: "Keyboard Shortcuts" });
+    fireEvent.click(shortcutsBtn);
+
+    const state = useTerminalStore.getState();
+    expect(state.isSettingsOpen).toBe(true);
+    expect(state.activeSettingsTab).toBe("shortcuts");
+  });
 });

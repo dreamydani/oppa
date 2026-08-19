@@ -7,7 +7,10 @@ import {
   PlusIcon,
   TerminalIcon,
   CloseIcon,
+  SettingsIcon,
+  HelpIcon,
 } from "./icons/MinimalIcons";
+import "./LeftSidebar.css";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -22,6 +25,7 @@ export function LeftSidebar(): React.ReactElement | null {
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
+  const openSettings = useTerminalStore((s) => s.openSettings);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -245,6 +249,27 @@ export function LeftSidebar(): React.ReactElement | null {
           })
         )}
         </div>
+      </div>
+
+      <div className="left-sidebar-footer">
+        <button
+          type="button"
+          className="sidebar-footer-btn"
+          title="Settings (Ctrl+, / Cmd+,)"
+          aria-label="Settings"
+          onClick={() => openSettings("general")}
+        >
+          <SettingsIcon size={14} />
+        </button>
+        <button
+          type="button"
+          className="sidebar-footer-btn"
+          title="Keyboard Shortcuts (F1 / Ctrl+/)"
+          aria-label="Keyboard Shortcuts"
+          onClick={() => openSettings("shortcuts")}
+        >
+          <HelpIcon size={14} />
+        </button>
       </div>
 
       <div
