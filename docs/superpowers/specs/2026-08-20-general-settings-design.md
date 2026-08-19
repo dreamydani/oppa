@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-20  
 **Status:** Approved  
-**Topic:** Settings Architecture, UI Foundation, and Group 1 (General Settings)
+**Topic:** Settings Architecture, Full-Page Settings UI, and Group 1 (General Settings)
 
 ---
 
@@ -11,50 +11,54 @@
 This specification defines the core **Settings System** for OPPA, establishing:
 1. **Persistent Backend Storage**: A clean, Rust-managed `settings.json` stored in `app_data_dir()`, loaded on startup and updated via async Tauri commands.
 2. **Left Sidebar UI Entry Points**: A dedicated footer in `LeftSidebar.tsx` with:
-   - **Settings Button (`⚙`)**: Opens the Settings Modal on the active or default tab (<kbd>Cmd/Ctrl</kbd> + <kbd>,</kbd>).
-   - **Shortcuts Button (`?`)**: Opens the Settings Modal directly on the **Shortcuts** reference cheat sheet (<kbd>Cmd/Ctrl</kbd> + <kbd>/</kbd> or <kbd>F1</kbd>).
-3. **Settings Modal Foundation**: A claymorphic modal overlay containing a tabbed navigation rail (`General`, `Appearance`, `Terminal`, `Shortcuts`).
+   - **Settings Button (`⚙`)**: Opens the Full-Page Settings View on the General tab (<kbd>Cmd/Ctrl</kbd> + <kbd>,</kbd>).
+   - **Shortcuts Button (`?`)**: Opens the Full-Page Settings View directly on the **Shortcuts** reference cheat sheet (<kbd>Cmd/Ctrl</kbd> + <kbd>/</kbd> or <kbd>F1</kbd>).
+3. **Full-Page Settings View Layout**: A dedicated 2-column settings page with:
+   - **Left Column**: Top `← Back` button (<kbd>Esc</kbd>) + list of setting categories (`General`, `Appearance`, `Terminal`, `Shortcuts`).
+   - **Main Right Column**: Spacious, scrollable pane with claymorphic cards and functional setting controls.
 4. **Group 1 (General Settings) Live Functionality**: Complete, functional integration for all general settings — every toggle, dropdown, and text input directly controls app behavior (zero non-functional or placeholder controls).
 
 ---
 
-## 2. Architecture & Data Flow
+## 2. Full-Page UI Layout & Architecture
 
-```mermaid
-flowchart TD
-    subgraph RustBackend [Rust Backend - src-tauri]
-        RustSettings[src-tauri/src/settings.rs]
-        DiskSettings[(app_data_dir/settings.json)]
-        RustSettings <--> DiskSettings
-    end
-
-    subgraph FrontendTransport [Frontend Transport - src/lib/settings]
-        Transport[src/lib/settings/transport.ts]
-        Transport <-->|invoke: save_settings / load_settings| RustSettings
-    end
-
-    subgraph FrontendStore [Zustand Store - src/store/terminalStore.ts]
-        Store[useTerminalStore]
-        SettingsSlice[Settings State & Actions]
-        Store --- SettingsSlice
-        SettingsSlice <--> Transport
-    end
-
-    subgraph UIComponents [UI Components]
-        LeftSidebarFooter[LeftSidebar.tsx - Footer Icons] -->|openSettings| Store
-        SettingsModal[components/modal/SettingsModal.tsx] <--> Store
-        GeneralPane[components/settings/GeneralSettingsPane.tsx] <--> Store
-        ShortcutsPane[components/settings/ShortcutsSettingsPane.tsx] <--> Store
-    end
-
-    subgraph LiveConsumers [Live Feature Consumers]
-        Store -.-> TabSpawn[createTab / spawnSession default CWD]
-        Store -.-> TabNav[App.tsx - Ctrl+Tab MRU vs Sequential]
-        Store -.-> Startup[App.tsx - Startup Behavior]
-        Store -.-> CloseSafety[closeTab pane count confirmation]
-        Store -.-> EditorConfig[CodeEditor auto-save & word wrap]
-        Store -.-> BrowserConfig[BrowserOmnibox search engine & home page]
-    end
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│  oppa                            Settings                                   —  □  ✕   │  <-- Titlebar
+├───────────────────┬────────────────────────────────────────────────────────────────────┤
+│  ← Back           │                                                                    │
+│  ──────────────── │   General                                                          │
+│                   │   Workspace behavior, navigation, and defaults.                    │
+│  ⚙ General        │                                                                    │
+│  🎨 Appearance    │   ┌────────────────────────────────────────────────────────────┐   │
+│  💻 Terminal      │   │  Workspace & Startup                                       │   │
+│  ⌨ Shortcuts      │   │  Default Working Directory                                 │   │
+│                   │   │  [ Home (~) ]  [ Last Active ]  [ Custom Path ]            │   │
+│                   │   │                                                            │   │
+│                   │   │  Startup Behavior                                          │   │
+│                   │   │  [ Restore Session ]  [ Launcher ]  [ Fresh Terminal ]     │   │
+│                   │   └────────────────────────────────────────────────────────────┘   │
+│                   │                                                                    │
+│                   │   ┌────────────────────────────────────────────────────────────┐   │
+│                   │   │  Navigation & Confirmations                                │   │
+│                   │   │  Tab Switching Mode (Ctrl+Tab)                             │   │
+│                   │   │  [ Sequential (1→2→3) ]  [ MRU (Recent First) ]            │   │
+│                   │   │                                                            │   │
+│                   │   │  Confirm before closing multi-pane tabs             ( ON ) │   │
+│                   │   │  Confirm quit with running processes                ( ON ) │   │
+│                   │   └────────────────────────────────────────────────────────────┘   │
+│                   │                                                                    │
+│                   │   ┌────────────────────────────────────────────────────────────┐   │
+│                   │   │  Code Editor & Web Browser                                 │   │
+│                   │   │  Editor Word Wrap                                   ( ON ) │   │
+│                   │   │  Editor Auto-Save Delay                [ 1000 ms (1s)  ▼ ] │   │
+│                   │   │  Search Engine                         [ DuckDuckGo    ▼ ] │   │
+│                   │   │  Home Page URL                         [ https://...     ] │   │
+│                   │   └────────────────────────────────────────────────────────────┘   │
+│                   │                                                                    │
+├───────────────────┴────────────────────────────────────────────────────────────────────┤
+│  ⑂ no git    📁 oppa                                                      80x24  ● Ready│  <-- Status Bar
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -68,6 +72,7 @@ export type DefaultCwdMode = "home" | "last_active" | "custom";
 export type StartupBehavior = "restore_previous" | "workspace_launcher" | "fresh_terminal";
 export type TabSwitchMode = "sequential" | "mru";
 export type BrowserSearchEngine = "duckduckgo" | "google" | "bing";
+export type SettingsTabId = "general" | "appearance" | "terminal" | "shortcuts";
 
 export interface GeneralSettings {
   defaultCwdMode: DefaultCwdMode;
@@ -84,7 +89,6 @@ export interface GeneralSettings {
 
 export interface AppSettings {
   general: GeneralSettings;
-  // Future setting groups (Appearance, Terminal) will plug into this top-level schema
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -151,20 +155,23 @@ pub struct AppSettings {
 
 ---
 
-## 4. Left Sidebar Footer Specification
+## 4. Full-Page Settings View & Navigation
 
-In [`src/components/LeftSidebar.tsx`](file:///d:/oppa/oppa/src/components/LeftSidebar.tsx):
-- Positioned permanently at the bottom of the sidebar (`.left-sidebar-footer`), above the window status bar.
-- Contains two claymorphic action icon buttons with tooltips and accessible labels:
-  1. **Settings Icon Button**:
-     - Icon: `SettingsIcon` (from `MinimalIcons.tsx`)
-     - Label / Title: `Settings (Ctrl+, / Cmd+,)`
-     - Action: calls `openSettings("general")`
-  2. **Shortcuts Icon Button**:
-     - Icon: `HelpIcon` / `HelpCircle` (from `lucide-react` or `MinimalIcons.tsx`)
-     - Label / Title: `Keyboard Shortcuts (F1 / Ctrl+/)`
-     - Action: calls `openSettings("shortcuts")`
-- Resizing logic: The footer stays docked at the bottom while `.left-sidebar-body` scrolls vertically if there are many workspace tabs.
+1. **Store State**:
+   - `isSettingsOpen: boolean` (default `false`)
+   - `activeSettingsTab: SettingsTabId` (default `"general"`)
+   - `openSettings: (tab?: SettingsTabId) => void`
+   - `closeSettings: () => void`
+   - `settings: AppSettings`
+   - `updateSettings: (partial: Partial<AppSettings>) => void`
+2. **Left Sidebar Switch**:
+   - When `isSettingsOpen === false`: Normal workspace tab list + Bottom footer (`⚙ Settings` and `? Shortcuts` icon buttons).
+   - When `isSettingsOpen === true`: Renders `SettingsSidebar.tsx`:
+     - Top `← Back` button (with tooltip / shortcut indicator `Esc`).
+     - Category items (`General`, `Appearance`, `Terminal`, `Shortcuts`).
+3. **Main Viewport Switch**:
+   - When `isSettingsOpen === true`: Renders `SettingsView.tsx` with `GeneralSettingsPane.tsx` or `ShortcutsSettingsPane.tsx`.
+   - When `isSettingsOpen === false`: Renders active workbench (terminal / browser / editor).
 
 ---
 
@@ -213,31 +220,7 @@ Every setting in Group 1 is directly wired to live features:
 
 ---
 
-## 6. Settings Modal UI Specification
-
-- **Modal Container**:
-  - Centered overlay (`.settings-modal-backdrop` and `.settings-modal-card`).
-  - Dimensions: `720px` max width, `520px` height.
-  - Keyboard: <kbd>Esc</kbd> closes modal.
-- **Left Navigation Rail**:
-  - Tabs:
-    - ⚙️ **General** (Active in Group 1)
-    - 🎨 **Appearance** (Disabled/Coming next)
-    - 💻 **Terminal** (Disabled/Coming next)
-    - ⌨️ **Shortcuts** (Active — searchable cheatsheet)
-- **General Settings Pane**:
-  - Divided into clean, readable cards/sections with subheaders:
-    - **Workspace & Startup**: Default CWD, Startup Behavior
-    - **Navigation & Tabs**: Tab Switch Mode
-    - **Confirmations & Safety**: Close Tab with multiple panes prompt, Quit with running processes prompt
-    - **Code Editor**: Word Wrap, Auto-Save Delay
-    - **Web Browser**: Search Engine, Home Page
-- **Shortcuts Cheatsheet Pane**:
-  - Displays categorised hotkey cards for Tabs, Panes, Sidebars, App Modes, and Launcher.
-
----
-
-## 7. Testing Strategy
+## 6. Testing Strategy
 
 1. **Rust Backend Tests (`src-tauri/src/settings.rs`)**:
    - `save_settings_at` and `load_settings_at` roundtrip serialization test.
@@ -250,4 +233,4 @@ Every setting in Group 1 is directly wired to live features:
    - Multi-pane tab close confirmation triggers when enabled.
 3. **UI Component Tests**:
    - `LeftSidebar.test.tsx`: Tests that footer settings and shortcuts buttons render and trigger `openSettings`.
-   - `SettingsModal.test.tsx`: Tests tab navigation, control changes, and modal dismissal.
+   - `SettingsView.test.tsx`: Tests navigation between categories, back button, control interactions, and full page rendering.
