@@ -4,7 +4,7 @@ import { ContextInspector } from "./ContextInspector";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as contextTransport from "../../lib/context/transport";
-import type { ContextPage, AgentPersona } from "../../lib/context/transport";
+import type { ContextPage } from "../../lib/context/transport";
 
 vi.mock("../../lib/context/transport", () => ({
   deleteContextPage: vi.fn(),

@@ -27,6 +27,7 @@ const mockHeaderResult: ContextSearchResult = {
   abstract_l0: "Abstract H",
   overview_l1: "Overview H",
   snippet: "Header match with <b>term</b>",
+  total: 1,
 };
 
 const mockSandboxResult: ContextSearchResult = {
@@ -39,6 +40,7 @@ const mockSandboxResult: ContextSearchResult = {
   abstract_l0: "Abstract S",
   overview_l1: "Overview S",
   snippet: "conpty <b>newline</b> bug with <b>windows</b> fix",
+  total: 1,
 };
 
 describe("ContextStatusPanel", () => {
@@ -222,8 +224,11 @@ describe("ContextStatusPanel", () => {
             abstract_l0: "",
             overview_l1: "",
             pinned: true,
+            is_built_in: false,
+            attached_scopes_json: "[]",
             created_at: 0,
             updated_at: 0,
+            deleted_at: null,
           },
           {
             id: "p2",
@@ -235,8 +240,11 @@ describe("ContextStatusPanel", () => {
             abstract_l0: "",
             overview_l1: "",
             pinned: false,
+            is_built_in: false,
+            attached_scopes_json: "[]",
             created_at: 0,
             updated_at: 0,
+            deleted_at: null,
           },
         ],
       });
