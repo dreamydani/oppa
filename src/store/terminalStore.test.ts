@@ -168,6 +168,43 @@ describe("terminalStore", () => {
     expect(useTerminalStore.getState().restoredScrollbacks["s-warm"]).toBe("warm shell snapshot content");
   });
 
+  it("spawnSession handles cold restore payload, sets session.isRestored = true, and stores restoredScrollbacks", async () => {
+    ptySpawnMock.mockResolvedValue({
+      id: "s-cold",
+      is_new: true,
+      is_warm: false,
+      cold_scrollback: "historical scrollback\n$ ",
+      pid: 5679,
+      cols: 80,
+      rows: 24,
+      cwd: "/home/user/project",
+    });
+    const id = await useTerminalStore.getState().spawnSession("/home/user/project", undefined, "s-cold");
+    expect(id).toBe("s-cold");
+    const session = useTerminalStore.getState().sessions["s-cold"];
+    expect(session).toBeDefined();
+    expect(session.isRestored).toBe(true);
+    expect(useTerminalStore.getState().restoredScrollbacks["s-cold"]).toBe("historical scrollback\n$ ");
+  });
+
+  it("dismissSessionRestoredBanner clears session.isRestored", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-cold": {
+          id: "s-cold",
+          title: "s-cold",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          isRestored: true,
+        },
+      },
+    });
+    useTerminalStore.getState().dismissSessionRestoredBanner("s-cold");
+    expect(useTerminalStore.getState().sessions["s-cold"].isRestored).toBe(false);
+  });
+
+
   it("spawnSession records an error status when spawn fails", async () => {
     ptySpawnMock.mockRejectedValue(new Error("shell not found"));
     await useTerminalStore.getState().spawnSession();
@@ -1078,7 +1115,41 @@ describe("terminalStore", () => {
       expect(deleteScrollbackMock).not.toHaveBeenCalledWith("old-2");
     });
 
+    it("preserves cold restored sessions, sets isRestored, and applies cold scrollback", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          layout: {
+            type: "leaf",
+            id: "cold-session-1",
+          },
+          sessions: [
+            { id: "cold-session-1", title: "my-build", status: "running", cwd: "/project/app", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock.mockResolvedValueOnce({
+        id: "cold-session-1",
+        is_new: true,
+        is_warm: false,
+        cold_scrollback: "previous cold output",
+        pid: 1234,
+        cols: 80,
+        rows: 24,
+        cwd: "/project/app",
+      });
+
+      await useTerminalStore.getState().loadLayout();
+
+      const state = useTerminalStore.getState();
+      const session = state.sessions["cold-session-1"];
+      expect(session).toBeDefined();
+      expect(session.isRestored).toBe(true);
+      expect(session.title).toBe("my-build");
+      expect(state.restoredScrollbacks["cold-session-1"]).toBe("previous cold output");
+    });
+
     it("keeps a leaf as an error session when its spawn fails", async () => {
+
       loadLayoutMock.mockResolvedValue(
         JSON.stringify({
           layout: { type: "leaf", id: "old-a" },

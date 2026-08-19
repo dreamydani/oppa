@@ -52,7 +52,14 @@ export interface WorkspaceConfig {
   agentPersona?: string;
 }
 
-export type SessionStatus = "running" | "exited" | "error";
+export type SessionStatus =
+  | "spawning"
+  | "loading"
+  | "restoring"
+  | "running"
+  | "exited"
+  | "error";
+
 
 export type AppMode = "terminal" | "browser" | "editor" | "context";
 export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
@@ -165,7 +172,9 @@ export interface SessionInfo {
   cols: number;
   rows: number;
   personaId?: string | null;
+  isRestored?: boolean;
 }
+
 
 export interface TabState {
   id: string;
@@ -253,7 +262,9 @@ export interface TerminalState {
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
+  dismissSessionRestoredBanner: (sessionId: string) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
+
   renameSession: (id: string, title: string) => void;
   setSessionPersona: (sessionId: string, personaId: string | null) => void;
   substituteSessionId: (from: string, to: string) => void;
@@ -426,10 +437,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
+      const isWarm = typeof res === "string" ? !isNew : (res.is_warm ?? !isNew);
       const snapshot = typeof res === "string" ? null : res.snapshot;
+      const coldScrollback = typeof res === "string" ? null : res.cold_scrollback;
       const cols = (typeof res !== "string" && res.cols) || DEFAULT_COLS;
       const rows = (typeof res !== "string" && res.rows) || DEFAULT_ROWS;
       const resolvedCwd = (typeof res !== "string" && res.cwd) || cwd;
+
+      const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
       if (!isNew && snapshot) {
         set((state) => ({
@@ -438,24 +453,36 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             [id]: snapshot,
           },
         }));
+      } else if (isColdRestored && coldScrollback) {
+        set((state) => ({
+          restoredScrollbacks: {
+            ...state.restoredScrollbacks,
+            [id]: coldScrollback,
+          },
+        }));
       }
 
-      set((state) => ({
-        sessions: {
-          ...state.sessions,
-          [id]: {
-            id,
-            title: id,
-            status: "running",
-            cwd: resolvedCwd,
-            cols,
-            rows,
-            personaId: personaId ?? null,
+      set((state) => {
+        const existingSession = state.sessions[id];
+        return {
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              id,
+              title: existingSession?.title || id,
+              status: "running",
+              cwd: resolvedCwd || existingSession?.cwd,
+              cols,
+              rows,
+              personaId: personaId ?? existingSession?.personaId ?? null,
+              ...(isColdRestored || existingSession?.isRestored ? { isRestored: true } : {}),
+            },
           },
-        },
-      }));
+        };
+      });
       return id;
     } catch (error) {
+
       // Failed spawns surface as an inline pane error in TerminalPane;
       // record a synthetic entry so the pane can render + retry. The id comes
       // from a monotonic local counter (not crypto.randomUUID) so it works in
@@ -529,6 +556,20 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     });
   },
+
+  dismissSessionRestoredBanner: (sessionId) => {
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, isRestored: false },
+        },
+      };
+    });
+  },
+
 
   updateSessionCwd: (id, cwd) => {
     let updated = false;
@@ -1063,6 +1104,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const byId = new Map((parsed.sessions ?? []).map((s) => [s.id, s]));
       const remap: Record<string, string> = {};
 
+      // Seed sessions with restoring status so the UI knows restore is in flight.
+      if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+        set((state) => {
+          const updatedSessions = { ...state.sessions };
+          for (const s of parsed.sessions!) {
+            if (s.id) {
+              updatedSessions[s.id] = {
+                id: s.id,
+                title: s.title || s.id,
+                status: "restoring",
+                cwd: s.cwd,
+                cols: s.cols || DEFAULT_COLS,
+                rows: s.rows || DEFAULT_ROWS,
+                personaId: s.personaId ?? null,
+                ...(s.isRestored ? { isRestored: true } : {}),
+              };
+            }
+          }
+          return { sessions: updatedSessions };
+        });
+      }
+
       if (Array.isArray(parsed.tabs)) {
         if (parsed.tabs.length === 0) {
           set({
@@ -1084,11 +1147,33 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               savedSession?.personaId ?? undefined
             );
             remap[oldId] = newId;
+            if (oldId !== newId) {
+              set((state) => {
+                const sessions = { ...state.sessions };
+                delete sessions[oldId];
+                return { sessions };
+              });
+            }
+
+            if (savedSession?.title && savedSession.title !== newId) {
+              get().renameSession(newId, savedSession.title);
+            }
+
 
             const prev = await loadScrollback(oldId);
             if (prev) {
               if (!get().restoredScrollbacks[newId]) {
                 get().setRestoredScrollback(newId, prev);
+                set((state) => {
+                  const sess = state.sessions[newId];
+                  if (!sess) return state;
+                  return {
+                    sessions: {
+                      ...state.sessions,
+                      [newId]: { ...sess, isRestored: true },
+                    },
+                  };
+                });
               }
               await saveScrollback(newId, prev);
               if (oldId !== newId) {
@@ -1132,11 +1217,33 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             savedSession?.personaId ?? undefined
           );
           remap[oldId] = newId;
+          if (oldId !== newId) {
+            set((state) => {
+              const sessions = { ...state.sessions };
+              delete sessions[oldId];
+              return { sessions };
+            });
+          }
+
+          if (savedSession?.title && savedSession.title !== newId) {
+            get().renameSession(newId, savedSession.title);
+          }
+
 
           const prev = await loadScrollback(oldId);
           if (prev) {
             if (!get().restoredScrollbacks[newId]) {
               get().setRestoredScrollback(newId, prev);
+              set((state) => {
+                const sess = state.sessions[newId];
+                if (!sess) return state;
+                return {
+                  sessions: {
+                    ...state.sessions,
+                    [newId]: { ...sess, isRestored: true },
+                  },
+                };
+              });
             }
             await saveScrollback(newId, prev);
             if (oldId !== newId) {
@@ -1161,6 +1268,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       set({ ready: true });
     }
   },
+
 
   toggleLeftSidebar: () =>
     set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),

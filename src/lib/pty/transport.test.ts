@@ -199,4 +199,24 @@ describe("pty transport", () => {
       activeIds: ["term-1", "term-2"],
     });
   });
+
+  it("ptySpawn handles is_warm and cold_scrollback fields in PtySpawnResult", async () => {
+    const mockResult: PtySpawnResult = {
+      id: "cold-1",
+      is_new: true,
+      is_warm: false,
+      cold_scrollback: "persisted terminal scrollback\n",
+      pid: 4567,
+      cols: 80,
+      rows: 24,
+      cwd: "/workspace",
+    };
+    invokeMock.mockResolvedValue(mockResult);
+    const result = await ptySpawn({ id: "cold-1" });
+    expect(invokeMock).toHaveBeenCalledWith("pty_spawn", { id: "cold-1" });
+    expect(result).toEqual(mockResult);
+    expect(result.is_warm).toBe(false);
+    expect(result.cold_scrollback).toBe("persisted terminal scrollback\n");
+  });
 });
+

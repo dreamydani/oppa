@@ -20,12 +20,15 @@ export interface PtyCwdPayload {
 export interface PtySpawnResult {
   id: string;
   is_new: boolean;
+  is_warm?: boolean;
   snapshot?: string | null;
-  pid: number;
+  cold_scrollback?: string | null;
+  pid?: number;
   cols?: number;
   rows?: number;
   cwd?: string | null;
 }
+
 
 // Type alias (not interface) so it satisfies InvokeArgs' index signature.
 export type PtySpawnOptions = {
