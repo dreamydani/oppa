@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { useContextStore } from "../../store/contextStore";
 import { useTerminalStore } from "../../store/terminalStore";
 import {
@@ -8,20 +8,45 @@ import {
   IconSparkles,
 } from "./ContextIcons";
 
+/**
+ * Safely parse snippet text and SQLite FTS5 <b>...</b> tags.
+ * Splits on <b> and </b> and renders matching terms inside <mark>,
+ * escaping all text to prevent HTML injection without dangerouslySetInnerHTML.
+ */
+export function renderSnippet(snippet: string): ReactNode {
+  if (!snippet) return null;
+  const tokens = snippet.split(/(<b>|<\/b>)/g);
+  let inMark = false;
+  return tokens
+    .map((token, i) => {
+      if (token === "<b>") {
+        inMark = true;
+        return null;
+      }
+      if (token === "</b>") {
+        inMark = false;
+        return null;
+      }
+      if (!token) return null;
+      return inMark ? <mark key={i}>{token}</mark> : <span key={i}>{token}</span>;
+    })
+    .filter(Boolean);
+}
+
 export function ContextStatusPanel(): ReactElement {
   const pages = useContextStore((s) => s.pages);
   const personas = useContextStore((s) => s.personas);
-  const searchResults = useContextStore((s) => s.searchResults);
+  const sandboxQuery = useContextStore((s) => s.sandboxQuery);
+  const searchResultsSandbox = useContextStore((s) => s.searchResultsSandbox);
   const selectPage = useContextStore((s) => s.selectPage);
+  const searchContextSandbox = useContextStore((s) => s.searchContextSandbox);
+  const setSandboxQuery = useContextStore((s) => s.setSandboxQuery);
 
   const sessions = useTerminalStore((s) => s.sessions);
   const setSessionPersona = useTerminalStore((s) => s.setSessionPersona);
   const getActiveCwd = useTerminalStore((s) => s.getActiveCwd);
 
-  const [sandboxQuery, setSandboxQuery] = useState("");
-  const searchContext = useContextStore((s) => s.searchContext);
-
-  const sessionList = Object.values(sessions);
+  const sessionList = Object.values(sessions ?? {});
 
   // Scope statistics
   const totalPages = pages.length;
@@ -31,7 +56,7 @@ export function ContextStatusPanel(): ReactElement {
 
   const handleSandboxSearch = (q: string) => {
     setSandboxQuery(q);
-    void searchContext(q, getActiveCwd());
+    void searchContextSandbox(q, getActiveCwd());
   };
 
   return (
@@ -118,8 +143,8 @@ export function ContextStatusPanel(): ReactElement {
           </div>
 
           <div className="sandbox-results-list">
-            {searchResults.length > 0 ? (
-              searchResults.map((res) => (
+            {searchResultsSandbox.length > 0 ? (
+              searchResultsSandbox.map((res) => (
                 <div
                   key={res.id}
                   className="sandbox-result-card"
@@ -131,10 +156,9 @@ export function ContextStatusPanel(): ReactElement {
                     <span className="result-title">{res.title}</span>
                     <span className="result-scope-pill monospace">{res.scope}</span>
                   </div>
-                  <div
-                    className="result-snippet monospace"
-                    dangerouslySetInnerHTML={{ __html: res.snippet }}
-                  />
+                  <div className="result-snippet monospace">
+                    {renderSnippet(res.snippet)}
+                  </div>
                 </div>
               ))
             ) : (

@@ -494,8 +494,8 @@ describe("Context Studio & Workbench Mode", () => {
 
     it("renders FTS5 search results with snippet highlights and selects on click", () => {
       useContextStore.setState({
-        searchQuery: "IPC architecture",
-        searchResults: [mockSearchResult],
+        sandboxQuery: "IPC architecture",
+        searchResultsSandbox: [mockSearchResult],
       });
       const { container } = render(<ContextStudio />);
       const statusPanel = container.querySelector(".context-status-panel")!;
