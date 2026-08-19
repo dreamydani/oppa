@@ -182,7 +182,7 @@ export function WizardStepAgents({
 
       {/* Save as Preset Section */}
       <div className="wizard-section wizard-preset-save-section">
-        <label className="wizard-checkbox-row">
+        <label htmlFor="wizard-save-preset-checkbox" className="wizard-checkbox-row">
           <input
             id="wizard-save-preset-checkbox"
             type="checkbox"

@@ -77,13 +77,59 @@ describe("WizardStepAgents", () => {
 
     expect(screen.getByText("Shell Copilot")).toBeInTheDocument();
     expect(screen.getByText("Code Assistant")).toBeInTheDocument();
+    expect(screen.getByText("Code Reviewer")).toBeInTheDocument();
+    expect(screen.getByText("Grok")).toBeInTheDocument();
+    expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
+
+    // Check badges
+    expect(screen.getByText("Popular")).toBeInTheDocument();
+    expect(screen.getByText("Smart")).toBeInTheDocument();
 
     const copilotCard = screen.getByTestId("persona-copilot");
     fireEvent.click(copilotCard);
     expect(mockSetAgentPersona).toHaveBeenCalledWith("copilot");
   });
 
-  it("renders command inputs matching terminalCount and updates commands", () => {
+  it("applies active class to selected persona card", () => {
+    const { rerender } = render(
+      <WizardStepAgents
+        agentPersona="copilot"
+        setAgentPersona={mockSetAgentPersona}
+        terminalCount={1}
+        commands={[""]}
+        setCommands={mockSetCommands}
+        saveAsPreset={false}
+        setSaveAsPreset={mockSetSaveAsPreset}
+        presetName=""
+        setPresetName={mockSetPresetName}
+      />,
+    );
+
+    const copilotCard = screen.getByTestId("persona-copilot");
+    expect(copilotCard.className).toContain("active");
+
+    const noneCard = screen.getByTestId("persona-none");
+    expect(noneCard.className).not.toContain("active");
+
+    rerender(
+      <WizardStepAgents
+        agentPersona="grok"
+        setAgentPersona={mockSetAgentPersona}
+        terminalCount={1}
+        commands={[""]}
+        setCommands={mockSetCommands}
+        saveAsPreset={false}
+        setSaveAsPreset={mockSetSaveAsPreset}
+        presetName=""
+        setPresetName={mockSetPresetName}
+      />,
+    );
+
+    expect(screen.getByTestId("persona-grok").className).toContain("active");
+    expect(copilotCard.className).not.toContain("active");
+  });
+
+  it("renders physical clay tags (P1, P2, ...) and command inputs", () => {
     render(
       <WizardStepAgents
         agentPersona="none"
@@ -97,6 +143,10 @@ describe("WizardStepAgents", () => {
         setPresetName={mockSetPresetName}
       />,
     );
+
+    expect(screen.getByText("P1")).toHaveClass("wizard-command-badge");
+    expect(screen.getByText("P2")).toHaveClass("wizard-command-badge");
+    expect(screen.getByText("P3")).toHaveClass("wizard-command-badge");
 
     expect(screen.getByLabelText("Terminal 1 Command")).toHaveValue("pnpm dev");
     expect(screen.getByLabelText("Terminal 2 Command")).toHaveValue("");
@@ -476,6 +526,27 @@ describe("WorkspaceSetupWizard full assembly", () => {
     expect(screen.getByText("OPPA")).toHaveClass("wizard-logo-badge");
     expect(screen.getByText("Workspace Setup")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /close wizard/i })).toHaveClass("wizard-close-btn");
+  });
+
+  it("renders 3D tactile action footer with back, quick spawn, and next/launch buttons", () => {
+    render(<WorkspaceSetupWizard tabId="tab-test" />);
+
+    const backBtn = screen.getByRole("button", { name: /back/i });
+    expect(backBtn).toHaveClass("wizard-btn-back");
+    expect(backBtn).toBeDisabled();
+
+    const quickBtn = screen.getByRole("button", { name: /quick spawn/i });
+    expect(quickBtn).toHaveClass("wizard-btn-quick");
+
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    expect(nextBtn).toHaveClass("wizard-btn-next");
+
+    // Go to step 3
+    fireEvent.click(screen.getByTestId("wizard-progress-step-3"));
+    expect(backBtn).not.toBeDisabled();
+
+    const launchBtn = screen.getByRole("button", { name: /launch workspace/i });
+    expect(launchBtn).toHaveClass("wizard-btn-launch");
   });
 });
 
