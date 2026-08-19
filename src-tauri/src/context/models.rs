@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
+pub use crate::context::context_page_list::ContextPageList;
 use crate::context::enums::{ContextCategory, ContextScope};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
