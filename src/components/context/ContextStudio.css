@@ -959,6 +959,67 @@
   color: var(--ctx-text-secondary);
 }
 
+button.persona-scope-chip {
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+button.persona-scope-chip:hover {
+  background-color: var(--ctx-surface-hover);
+  color: var(--ctx-text-primary);
+}
+
+button.persona-scope-chip.active {
+  background-color: var(--ctx-accent-soft);
+  border-color: var(--ctx-accent-border);
+  color: var(--ctx-accent);
+  font-weight: 500;
+}
+
+.persona-scopes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.persona-scopes-help {
+  font-size: 11px;
+  color: var(--ctx-text-secondary);
+  margin: 0;
+}
+
+.inspector-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--ctx-red-soft);
+  border: 1px solid var(--ctx-red);
+  border-radius: 6px;
+  color: var(--ctx-red);
+  font-size: 12px;
+  margin-bottom: 16px;
+  gap: 8px;
+}
+
+.inspector-error-dismiss-btn {
+  background: transparent;
+  border: 1px solid var(--ctx-red);
+  border-radius: 4px;
+  color: var(--ctx-red);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.inspector-error-dismiss-btn:hover {
+  background-color: var(--ctx-red);
+  color: #ffffff;
+}
+
 /* ==========================================================================
    Column 3: Status & Sandbox Panel
    ========================================================================== */

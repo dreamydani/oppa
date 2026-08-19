@@ -11,13 +11,62 @@ import {
   IconBrain,
   IconPlus,
   IconPersona,
-  IconFile,
 } from "./ContextIcons";
 import type { ContextPage, AgentPersona, ContextCategory } from "../../lib/context/transport";
 
 export interface ContextInspectorProps {
   onOpenNewNote?: () => void;
   onOpenNewPersona?: () => void;
+}
+
+export interface ScopeChipEditorProps {
+  scopes: string[];
+  onChange: (scopes: string[]) => void;
+  disabled?: boolean;
+}
+
+export const SCOPE_TOKEN_OPTIONS = [
+  "global",
+  "workspace",
+  "architecture",
+  "quirks",
+  "runbooks",
+  "preferences",
+  "personas",
+];
+
+export function ScopeChipEditor({
+  scopes,
+  onChange,
+  disabled,
+}: ScopeChipEditorProps): ReactElement {
+  const toggle = (token: string) => {
+    if (disabled) return;
+    onChange(
+      scopes.includes(token) ? scopes.filter((s) => s !== token) : [...scopes, token]
+    );
+  };
+
+  return (
+    <div className="persona-scopes-editor">
+      <p className="persona-scopes-help">Toggle the memory folders this persona mounts:</p>
+      <div className="persona-scopes-list">
+        {SCOPE_TOKEN_OPTIONS.map((token) => {
+          const active = scopes.includes(token);
+          return (
+            <button
+              key={token}
+              type="button"
+              className={`persona-scope-chip monospace ${active ? "active" : ""}`}
+              onClick={() => toggle(token)}
+            >
+              {token}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function ContextInspector({
@@ -34,12 +83,15 @@ export function ContextInspector({
   const setIsEditing = useContextStore((s) => s.setIsEditing);
   const savePage = useContextStore((s) => s.savePage);
   const deletePage = useContextStore((s) => s.deletePage);
+  const restorePage = useContextStore((s) => s.restorePage);
   const savePersona = useContextStore((s) => s.savePersona);
+  const lastError = useContextStore((s) => s.lastError);
+  const clearError = useContextStore((s) => s.clearError);
 
   const getActiveCwd = useTerminalStore((s) => s.getActiveCwd);
 
-  const selectedPage = pages.find((p) => p.id === selectedPageId);
-  const selectedPersona = personas.find((p) => p.id === selectedPersonaId);
+  const selectedPage = (pages ?? []).find((p) => p.id === selectedPageId);
+  const selectedPersona = (personas ?? []).find((p) => p.id === selectedPersonaId);
 
   // Local edit states for page
   const [draftTitle, setDraftTitle] = useState("");
@@ -61,6 +113,14 @@ export function ContextInspector({
       setDraftAbstract(selectedPage.abstract_l0 || "");
       setDraftOverview(selectedPage.overview_l1 || "");
       setDraftDetails(selectedPage.details_l2 || "");
+      if (selectedPage.category === "persona") {
+        try {
+          const parsed = JSON.parse(selectedPage.attached_scopes_json || "[]");
+          setDraftPersonaScopes(Array.isArray(parsed) ? parsed : []);
+        } catch {
+          setDraftPersonaScopes([]);
+        }
+      }
     }
   }, [selectedPage]);
 
@@ -74,6 +134,7 @@ export function ContextInspector({
   // Handle saving page edits
   const handleSavePage = async () => {
     if (!selectedPage) return;
+    const isPersona = selectedPage.category === "persona";
     const updatedPage: ContextPage = {
       ...selectedPage,
       title: draftTitle.trim() || selectedPage.title,
@@ -81,7 +142,10 @@ export function ContextInspector({
       path: draftPath.trim() || selectedPage.path,
       abstract_l0: draftAbstract,
       overview_l1: draftOverview,
-      details_l2: draftDetails,
+      details_l2: isPersona ? undefined : draftDetails,
+      attached_scopes_json: isPersona
+        ? JSON.stringify(draftPersonaScopes)
+        : selectedPage.attached_scopes_json,
       updated_at: Date.now(),
     };
     await savePage(updatedPage, getActiveCwd());
@@ -102,6 +166,12 @@ export function ContextInspector({
   const handleDeletePage = async () => {
     if (!selectedPage) return;
     await deletePage(selectedPage.id, selectedPage.scope, getActiveCwd());
+  };
+
+  // Handle restore
+  const handleRestorePage = async () => {
+    if (!selectedPage) return;
+    await restorePage(selectedPage.id, selectedPage.scope, getActiveCwd());
   };
 
   // Handle save persona prompt / scopes
@@ -234,6 +304,19 @@ export function ContextInspector({
 
         {/* Content Body */}
         <div className="inspector-body">
+          {lastError && (
+            <div className="inspector-error-banner" role="alert">
+              <span>{lastError}</span>
+              <button
+                type="button"
+                className="inspector-error-dismiss-btn"
+                onClick={clearError}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {activeTier === "l0" && (
             <div className="persona-l0-view">
               <div className="persona-meta-grid">
@@ -290,20 +373,10 @@ export function ContextInspector({
                 <h4>Mounted Context Folders</h4>
                 <p>When this persona is assigned to a terminal, these memory folders are loaded into context.</p>
               </div>
-              <div className="persona-scopes-list">
-                {selectedPersona.attached_scopes.length > 0 ? (
-                  selectedPersona.attached_scopes.map((scope) => (
-                    <div key={scope} className="persona-scope-chip monospace">
-                      <IconFile size={12} />
-                      <span>{scope}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="persona-scope-empty">
-                    <span>Inherits all workspace context by default</span>
-                  </div>
-                )}
-              </div>
+              <ScopeChipEditor
+                scopes={draftPersonaScopes}
+                onChange={setDraftPersonaScopes}
+              />
             </div>
           )}
         </div>
@@ -312,6 +385,8 @@ export function ContextInspector({
   }
 
   if (!selectedPage) return null;
+
+  const isPersonaPage = selectedPage.category === "persona";
 
   // Render Memory Page View
   return (
@@ -349,52 +424,68 @@ export function ContextInspector({
         </div>
 
         <div className="inspector-actions">
-          <button
-            type="button"
-            className={`inspector-action-btn pin ${selectedPage.pinned ? "active" : ""}`}
-            onClick={handleTogglePin}
-            title={selectedPage.pinned ? "Unpin memory" : "Pin memory"}
-          >
-            <IconPin size={13} />
-            <span>{selectedPage.pinned ? "Pinned" : "Pin"}</span>
-          </button>
-          {isEditing ? (
+          {selectedPage.deleted_at ? (
+            <button
+              type="button"
+              className="inspector-action-btn restore"
+              onClick={handleRestorePage}
+              title="Restore deleted memory page"
+            >
+              <IconCheck size={12} />
+              <span>Restore</span>
+            </button>
+          ) : (
             <>
               <button
                 type="button"
-                className="inspector-action-btn cancel"
-                onClick={() => setIsEditing(false)}
+                className={`inspector-action-btn pin ${selectedPage.pinned ? "active" : ""}`}
+                onClick={handleTogglePin}
+                title={selectedPage.pinned ? "Unpin memory" : "Pin memory"}
               >
-                <IconClose size={12} />
-                <span>Cancel</span>
+                <IconPin size={13} />
+                <span>{selectedPage.pinned ? "Pinned" : "Pin"}</span>
               </button>
-              <button
-                type="button"
-                className="inspector-action-btn save"
-                onClick={handleSavePage}
-              >
-                <IconCheck size={12} />
-                <span>Save</span>
-              </button>
+              {isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    className="inspector-action-btn cancel"
+                    onClick={() => setIsEditing(false)}
+                  >
+                    <IconClose size={12} />
+                    <span>Cancel</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="inspector-action-btn save"
+                    onClick={handleSavePage}
+                  >
+                    <IconCheck size={12} />
+                    <span>Save</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="inspector-action-btn edit"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <IconEdit size={12} />
+                  <span>Edit</span>
+                </button>
+              )}
+              {!selectedPage.is_built_in && (
+                <button
+                  type="button"
+                  className="inspector-action-btn delete"
+                  onClick={handleDeletePage}
+                  title="Delete memory page"
+                >
+                  <IconTrash size={13} />
+                </button>
+              )}
             </>
-          ) : (
-            <button
-              type="button"
-              className="inspector-action-btn edit"
-              onClick={() => setIsEditing(true)}
-            >
-              <IconEdit size={12} />
-              <span>Edit</span>
-            </button>
           )}
-          <button
-            type="button"
-            className="inspector-action-btn delete"
-            onClick={handleDeletePage}
-            title="Delete memory page"
-          >
-            <IconTrash size={13} />
-          </button>
         </div>
       </div>
 
@@ -405,35 +496,54 @@ export function ContextInspector({
           className={`tier-tab-btn ${activeTier === "l0" ? "active" : ""}`}
           onClick={() => setActiveTier("l0")}
         >
-          <span>L0 Abstract</span>
-          <span className="tier-pill">~100 Tokens</span>
+          <span>{isPersonaPage ? "L0 Summary" : "L0 Abstract"}</span>
+          <span className="tier-pill">{isPersonaPage ? "Abstract" : "~100 Tokens"}</span>
         </button>
         <button
           type="button"
           className={`tier-tab-btn ${activeTier === "l1" ? "active" : ""}`}
           onClick={() => setActiveTier("l1")}
         >
-          <span>L1 Overview</span>
-          <span className="tier-pill">~1.5k Tokens</span>
+          <span>{isPersonaPage ? "L1 System Rules" : "L1 Overview"}</span>
+          <span className="tier-pill">{isPersonaPage ? "Prompt" : "~1.5k Tokens"}</span>
         </button>
         <button
           type="button"
           className={`tier-tab-btn ${activeTier === "l2" ? "active" : ""}`}
           onClick={() => setActiveTier("l2")}
         >
-          <span>L2 Raw Details</span>
-          <span className="tier-pill">Full Text</span>
+          <span>{isPersonaPage ? "L2 Attached Scopes" : "L2 Raw Details"}</span>
+          <span className="tier-pill">{isPersonaPage ? "Knowledge" : "Full Text"}</span>
         </button>
       </div>
 
       {/* Content Body */}
       <div className="inspector-body">
+        {lastError && (
+          <div className="inspector-error-banner" role="alert">
+            <span>{lastError}</span>
+            <button
+              type="button"
+              className="inspector-error-dismiss-btn"
+              onClick={clearError}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {activeTier === "l0" && (
           <div className="tier-content l0-content">
             <div className="tier-info-banner">
-              <span className="tier-info-title">L0 Abstract (System Prompt Injection)</span>
+              <span className="tier-info-title">
+                {isPersonaPage
+                  ? "L0 Role Summary (System Injection)"
+                  : "L0 Abstract (System Prompt Injection)"}
+              </span>
               <span className="tier-info-desc">
-                High-density 1-2 sentence summary used for fast scanning and prompt routing.
+                {isPersonaPage
+                  ? "Tagline and concise high-level description for this agent role."
+                  : "High-density 1-2 sentence summary used for fast scanning and prompt routing."}
               </span>
             </div>
             {isEditing ? (
@@ -442,7 +552,11 @@ export function ContextInspector({
                 rows={5}
                 value={draftAbstract}
                 onChange={(e) => setDraftAbstract(e.target.value)}
-                placeholder="Write a concise ~100-token summary..."
+                placeholder={
+                  isPersonaPage
+                    ? "Write a concise role summary tagline..."
+                    : "Write a concise ~100-token summary..."
+                }
               />
             ) : (
               <div className="rendered-abstract-box">
@@ -455,9 +569,15 @@ export function ContextInspector({
         {activeTier === "l1" && (
           <div className="tier-content l1-content">
             <div className="tier-info-banner">
-              <span className="tier-info-title">L1 Structured Overview (Markdown)</span>
+              <span className="tier-info-title">
+                {isPersonaPage
+                  ? "L1 System Rules (System Prompt)"
+                  : "L1 Structured Overview (Markdown)"}
+              </span>
               <span className="tier-info-desc">
-                Core architectural documentation, key endpoints, resolution steps, and patterns.
+                {isPersonaPage
+                  ? "Core behavioral instructions and system prompt for agent sessions."
+                  : "Core architectural documentation, key endpoints, resolution steps, and patterns."}
               </span>
             </div>
             {isEditing ? (
@@ -466,12 +586,19 @@ export function ContextInspector({
                 rows={14}
                 value={draftOverview}
                 onChange={(e) => setDraftOverview(e.target.value)}
-                placeholder="Write structured Markdown overview..."
+                placeholder={
+                  isPersonaPage
+                    ? "Write system rules and behavioral prompt..."
+                    : "Write structured Markdown overview..."
+                }
               />
             ) : (
               <div className="rendered-markdown-wrapper">
                 <MarkdownViewer
-                  content={selectedPage.overview_l1 || "*No overview documentation.*"}
+                  content={
+                    selectedPage.overview_l1 ||
+                    (isPersonaPage ? "*No system prompt defined.*" : "*No overview documentation.*")
+                  }
                 />
               </div>
             )}
@@ -481,12 +608,21 @@ export function ContextInspector({
         {activeTier === "l2" && (
           <div className="tier-content l2-content">
             <div className="tier-info-banner">
-              <span className="tier-info-title">L2 Raw Details (On-Demand Retrieval)</span>
+              <span className="tier-info-title">
+                {isPersonaPage ? "L2 Attached Scopes" : "L2 Raw Details (On-Demand Retrieval)"}
+              </span>
               <span className="tier-info-desc">
-                Uncompressed stack traces, code snippets, logs, or original diffs.
+                {isPersonaPage
+                  ? "Memory folders this persona automatically loads into agent context."
+                  : "Uncompressed stack traces, code snippets, logs, or original diffs."}
               </span>
             </div>
-            {isEditing ? (
+            {isPersonaPage ? (
+              <ScopeChipEditor
+                scopes={draftPersonaScopes}
+                onChange={setDraftPersonaScopes}
+              />
+            ) : isEditing ? (
               <textarea
                 className="inspector-textarea monospace"
                 rows={14}
