@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, within } from "@testing-library/react";
+import { render, fireEvent, within, act } from "@testing-library/react";
 import App from "./App";
 import { useTerminalStore } from "./store/terminalStore";
 import * as transport from "./lib/pty/transport";
@@ -875,6 +875,78 @@ describe("App", () => {
     await vi.waitFor(() => {
       expect(useTerminalStore.getState().tabs.length).toBeGreaterThan(0);
     });
+  });
+
+  it("updates data-theme, uiZoom, and --font-sans on documentElement when appearance changes", () => {
+    render(<App />);
+
+    act(() => {
+      useTerminalStore.getState().updateAppearanceSettings({
+        appTheme: "light",
+        uiZoom: 1.1,
+        appFontFamily: "Inter, sans-serif",
+      });
+    });
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(document.documentElement.style.zoom).toBe("1.1");
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("Inter, sans-serif");
+
+    act(() => {
+      useTerminalStore.getState().updateAppearanceSettings({
+        appTheme: "dark",
+        uiZoom: 0.9,
+        appFontFamily: "Geist, sans-serif",
+      });
+    });
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.style.zoom).toBe("0.9");
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("Geist, sans-serif");
+  });
+
+  it("resolves and tracks system media query when appTheme is system", () => {
+    let matchMediaListener: ((e: { matches: boolean }) => void) | undefined;
+    const addEventListenerMock = vi.fn((event: string, handler: any) => {
+      if (event === "change") {
+        matchMediaListener = handler;
+      }
+    });
+    const removeEventListenerMock = vi.fn();
+
+    let matchesDark = true;
+
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: matchesDark,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: addEventListenerMock,
+      removeEventListener: removeEventListenerMock,
+      dispatchEvent: vi.fn(),
+    }));
+
+    const { unmount } = render(<App />);
+
+    act(() => {
+      useTerminalStore.getState().updateAppearanceSettings({
+        appTheme: "system",
+      });
+    });
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(addEventListenerMock).toHaveBeenCalled();
+
+    // Simulate system preference change to light
+    matchesDark = false;
+    act(() => {
+      matchMediaListener?.({ matches: false });
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    unmount();
+    expect(removeEventListenerMock).toHaveBeenCalled();
   });
 });
 

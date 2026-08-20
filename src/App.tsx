@@ -55,8 +55,47 @@ function App() {
 
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
+  const appearance = useTerminalStore((s) => s.settings.appearance);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  // Dynamically apply app theme, UI zoom scale, and font family to the root document.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    if (appearance.appFontFamily) {
+      document.documentElement.style.setProperty("--font-sans", appearance.appFontFamily);
+    }
+    if (appearance.uiZoom) {
+      document.documentElement.style.zoom = String(appearance.uiZoom);
+    }
+
+    if (appearance.appTheme === "system") {
+      const mediaQuery =
+        typeof window !== "undefined" && typeof window.matchMedia === "function"
+          ? window.matchMedia("(prefers-color-scheme: dark)")
+          : null;
+
+      const updateSystemTheme = (e?: MediaQueryListEvent | { matches: boolean }) => {
+        const isDark = typeof e?.matches === "boolean" ? e.matches : (mediaQuery ? mediaQuery.matches : false);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+      };
+
+      updateSystemTheme();
+
+      if (mediaQuery) {
+        if (typeof mediaQuery.addEventListener === "function") {
+          mediaQuery.addEventListener("change", updateSystemTheme);
+          return () => mediaQuery.removeEventListener("change", updateSystemTheme);
+        } else if (typeof (mediaQuery as any).addListener === "function") {
+          (mediaQuery as any).addListener(updateSystemTheme);
+          return () => (mediaQuery as any).removeListener(updateSystemTheme);
+        }
+      }
+    } else {
+      document.documentElement.setAttribute("data-theme", appearance.appTheme);
+    }
+  }, [appearance.appTheme, appearance.uiZoom, appearance.appFontFamily]);
 
   // Restore persisted layout and apply startup behavior on initial mount.
   const restoredRef = useRef(false);

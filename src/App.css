@@ -1,5 +1,6 @@
 /* CSS Theme Variables */
-:root {
+:root,
+[data-theme="dark"] {
   --bg-window: var(--background, #141414);
   --bg-sidebar: var(--sidebar, #212120);
   --bg-terminal: #141414;
@@ -10,8 +11,240 @@
   --text-primary: var(--foreground, #ededec);
   --text-muted: var(--muted-foreground, #9e9e9a);
   --accent-blue: #58a6ff;
+  --topbar-bg: #000000;
+  --workspace-bg: #18181b;
+  --background: #18181b;
+  --foreground: #ededec;
+  --card: #222225;
+  --card-foreground: #ededec;
+  --sidebar: #141416;
+  --sidebar-foreground: #ededec;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.07);
+  --muted: #27272a;
+  --muted-foreground: #9e9e9a;
+  --accent: #27272a;
+  --accent-foreground: #ffffff;
+  --primary: #ededec;
+  --primary-foreground: #141414;
+  --destructive: #e05252;
+  --ring: rgba(255, 255, 255, 0.20);
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', Consolas, 'Cascadia Code', monospace;
+}
+
+[data-theme="light"] {
+  --bg-window: #fbfbfa;
+  --bg-sidebar: #f4f4f2;
+  --bg-terminal: #141414;
+  --bg-card-active: #ffffff;
+  --bg-card-hover: #ebebea;
+  --border-divider: rgba(0, 0, 0, 0.08);
+  --border-active: rgba(0, 0, 0, 0.22);
+  --text-primary: #18181b;
+  --text-muted: #71717a;
+  --accent-blue: #0969da;
+  --topbar-bg: #f4f4f2;
+  --workspace-bg: #f4f4f2;
+  --background: #fbfbfa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --sidebar: #f4f4f2;
+  --sidebar-foreground: #18181b;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --border: rgba(0, 0, 0, 0.08);
+  --muted: #ebebea;
+  --muted-foreground: #71717a;
+  --accent: #ebebea;
+  --accent-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #ffffff;
+  --destructive: #e05252;
+  --ring: rgba(0, 0, 0, 0.22);
+}
+
+/* Light Theme Component Overrides */
+[data-theme="light"] .mode-switcher-pill {
+  background-color: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .mode-tab {
+  color: #71717a;
+}
+
+[data-theme="light"] .mode-tab:hover:not(.disabled):not(.active) {
+  color: #18181b;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .mode-tab.active {
+  background-color: #ffffff;
+  color: #18181b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .settings-titlebar-heading {
+  background-color: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #18181b;
+}
+
+[data-theme="light"] .tab-card.active {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .tab-card-avatar {
+  background-color: #e4e4e2;
+  color: #71717a;
+}
+
+[data-theme="light"] .tab-card.active .tab-card-avatar {
+  background-color: #dcdcd8;
+  color: #18181b;
+}
+
+[data-theme="light"] .tab-card-close:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .sidebar-footer-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .left-sidebar-body::-webkit-scrollbar-thumb,
+[data-theme="light"] .right-sidebar-content::-webkit-scrollbar-thumb,
+[data-theme="light"] .settings-content-area::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .settings-view,
+[data-theme="light"] .settings-content-area,
+[data-theme="light"] .settings-pane,
+[data-theme="light"] .appearance-settings-pane {
+  background-color: var(--bg-window);
+}
+
+[data-theme="light"] .settings-pane-title {
+  color: #18181b;
+}
+
+[data-theme="light"] .settings-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .settings-card-title {
+  color: #71717a;
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .settings-row-label {
+  color: #18181b;
+}
+
+[data-theme="light"] .settings-row:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .settings-row {
+  border-bottom-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .settings-sub-row {
+  background: #f4f4f2;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .settings-segmented-group {
+  background: #ebebea;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .settings-segmented-btn {
+  color: #71717a;
+}
+
+[data-theme="light"] .settings-segmented-btn:hover:not(.active) {
+  color: #18181b;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .settings-segmented-btn.active {
+  background: #ffffff;
+  color: #18181b;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .settings-switch {
+  background: rgba(0, 0, 0, 0.12);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .settings-switch.checked {
+  background: #18181b;
+  border-color: #18181b;
+}
+
+[data-theme="light"] .settings-switch-thumb {
+  background: #ffffff;
+}
+
+[data-theme="light"] .settings-switch.checked .settings-switch-thumb {
+  background: #ffffff;
+}
+
+[data-theme="light"] .settings-input,
+[data-theme="light"] .settings-select {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #18181b;
+}
+
+[data-theme="light"] .settings-select option {
+  background: #ffffff;
+  color: #18181b;
+}
+
+[data-theme="light"] .settings-sidebar {
+  background-color: var(--bg-sidebar);
+  border-right-color: var(--border-divider);
+}
+
+[data-theme="light"] .settings-sidebar-header {
+  border-bottom-color: var(--border-divider);
+}
+
+[data-theme="light"] .settings-back-btn {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .settings-back-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #000000;
+}
+
+[data-theme="light"] .settings-nav-item:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .settings-nav-item.active {
+  background: #ffffff;
+  color: var(--text-primary);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .settings-section-divider {
+  border-top-color: rgba(0, 0, 0, 0.08);
 }
 
 *,
