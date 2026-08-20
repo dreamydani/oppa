@@ -18,8 +18,17 @@ export type TerminalThemeId =
   | "minimal_light";
 
 export type TerminalCursorStyle = "block" | "bar" | "underline";
+export type AppThemeMode = "dark" | "light" | "system";
+export type SidebarLaunchMode = "open" | "collapsed";
 
 export interface AppearanceSettings {
+  appTheme: AppThemeMode;
+  appFontFamily: string;
+  uiZoom: number;
+  sidebarOnLaunch: SidebarLaunchMode;
+  showStatusBar: boolean;
+  showTitlebarLogo: boolean;
+
   themeName: TerminalThemeId;
   fontFamily: string;
   fontSize: number;
@@ -48,6 +57,13 @@ export interface AppSettings {
 }
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
+  appTheme: "dark",
+  appFontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  uiZoom: 1.0,
+  sidebarOnLaunch: "open",
+  showStatusBar: true,
+  showTitlebarLogo: true,
+
   themeName: "oppa_dark",
   fontFamily: "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace",
   fontSize: 14,

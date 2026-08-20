@@ -810,6 +810,7 @@ describe("TerminalPane", () => {
       settings: {
         ...DEFAULT_APP_SETTINGS,
         appearance: {
+          ...DEFAULT_APP_SETTINGS.appearance,
           themeName: "dracula",
           fontFamily: "'Fira Code', monospace",
           fontSize: 16,

@@ -57,6 +57,8 @@ export type {
   AppSettings,
   GeneralSettings,
   AppearanceSettings,
+  AppThemeMode,
+  SidebarLaunchMode,
   TerminalThemeId,
   TerminalCursorStyle,
   DefaultCwdMode,

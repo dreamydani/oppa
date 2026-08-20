@@ -75,6 +75,49 @@ describe("settings transport", () => {
       });
     });
 
+    it("merges legacy appearance settings and fills in default app & ui appearance fields", async () => {
+      const legacy = {
+        appearance: {
+          themeName: "dracula",
+          fontSize: 16,
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(legacy));
+      const result = await loadSettings();
+      expect(result?.appearance.themeName).toBe("dracula");
+      expect(result?.appearance.appTheme).toBe("dark");
+      expect(result?.appearance.appFontFamily).toBe(
+        "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      );
+      expect(result?.appearance.uiZoom).toBe(1.0);
+      expect(result?.appearance.sidebarOnLaunch).toBe("open");
+      expect(result?.appearance.showStatusBar).toBe(true);
+      expect(result?.appearance.showTitlebarLogo).toBe(true);
+    });
+
+    it("preserves custom app & ui appearance fields", async () => {
+      const custom = {
+        appearance: {
+          appTheme: "light",
+          appFontFamily: "Inter, sans-serif",
+          uiZoom: 1.1,
+          sidebarOnLaunch: "collapsed",
+          showStatusBar: false,
+          showTitlebarLogo: false,
+          themeName: "solarized_dark",
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(custom));
+      const result = await loadSettings();
+      expect(result?.appearance.appTheme).toBe("light");
+      expect(result?.appearance.appFontFamily).toBe("Inter, sans-serif");
+      expect(result?.appearance.uiZoom).toBe(1.1);
+      expect(result?.appearance.sidebarOnLaunch).toBe("collapsed");
+      expect(result?.appearance.showStatusBar).toBe(false);
+      expect(result?.appearance.showTitlebarLogo).toBe(false);
+      expect(result?.appearance.themeName).toBe("solarized_dark");
+    });
+
     it("returns null if load_settings returns null", async () => {
       invokeMock.mockResolvedValueOnce(null);
       const result = await loadSettings();

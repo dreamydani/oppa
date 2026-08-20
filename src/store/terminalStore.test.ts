@@ -2973,6 +2973,14 @@ describe("terminalStore", () => {
     it("initializes appearance settings with DEFAULT_APPEARANCE_SETTINGS", () => {
       const { settings } = useTerminalStore.getState();
       expect(settings.appearance).toEqual(DEFAULT_APPEARANCE_SETTINGS);
+      expect(settings.appearance.appTheme).toBe("dark");
+      expect(settings.appearance.appFontFamily).toBe(
+        "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      );
+      expect(settings.appearance.uiZoom).toBe(1.0);
+      expect(settings.appearance.sidebarOnLaunch).toBe("open");
+      expect(settings.appearance.showStatusBar).toBe(true);
+      expect(settings.appearance.showTitlebarLogo).toBe(true);
       expect(settings.appearance.themeName).toBe("oppa_dark");
       expect(settings.appearance.fontSize).toBe(14);
       expect(settings.appearance.lineHeight).toBe(1.2);
@@ -2986,6 +2994,22 @@ describe("terminalStore", () => {
       useTerminalStore.getState().updateAppearanceSettings({ fontSize: 18 });
       expect(useTerminalStore.getState().settings.appearance.fontSize).toBe(18);
       expect(useTerminalStore.getState().settings.appearance.themeName).toBe("oppa_dark");
+
+      // App & UI appearance updates
+      useTerminalStore.getState().updateAppearanceSettings({
+        appTheme: "light",
+        uiZoom: 1.25,
+        sidebarOnLaunch: "collapsed",
+        showStatusBar: false,
+        showTitlebarLogo: false,
+      });
+
+      const appearanceAfter = useTerminalStore.getState().settings.appearance;
+      expect(appearanceAfter.appTheme).toBe("light");
+      expect(appearanceAfter.uiZoom).toBe(1.25);
+      expect(appearanceAfter.sidebarOnLaunch).toBe("collapsed");
+      expect(appearanceAfter.showStatusBar).toBe(false);
+      expect(appearanceAfter.showTitlebarLogo).toBe(false);
 
       // Multiple keys update
       useTerminalStore.getState().updateAppearanceSettings({
