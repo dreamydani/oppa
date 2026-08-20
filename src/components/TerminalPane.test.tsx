@@ -529,7 +529,7 @@ describe("TerminalPane", () => {
     expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
   });
 
-  it("debounces saving scrollback to disk and caching in store after terminal write parsed events", async () => {
+  it("does not periodically serialize or save scrollback on write parsed events", async () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
@@ -539,28 +539,14 @@ describe("TerminalPane", () => {
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
 
-    // Before 500ms debounce
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(2000);
     expect(saveScrollbackMock).not.toHaveBeenCalled();
-
-    // Another parsed event resets debounce timer
-    parsedHandler();
-    vi.advanceTimersByTime(400);
-    expect(saveScrollbackMock).not.toHaveBeenCalled();
-
-    // After remaining time
-    vi.advanceTimersByTime(100);
-    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
-    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBeUndefined();
   });
 
-  it("flushes scrollback immediately to disk and cancels pending debounce timer on unmount", async () => {
+  it("flushes scrollback to cache and disk on unmount", async () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
-
-    vi.useFakeTimers();
-    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
-    parsedHandler();
 
     expect(saveScrollbackMock).not.toHaveBeenCalled();
 
@@ -568,10 +554,6 @@ describe("TerminalPane", () => {
     expect(saveScrollbackMock).toHaveBeenCalledTimes(1);
     expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
     expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
-
-    // Advancing timers should not cause another saveScrollback call
-    vi.advanceTimersByTime(1000);
-    expect(saveScrollbackMock).toHaveBeenCalledTimes(1);
   });
 
   it("replays restored scrollback, prints Session Restored banner, and clears restored state on mount", async () => {

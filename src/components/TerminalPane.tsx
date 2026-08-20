@@ -207,7 +207,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       return true;
     });
 
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const flushScrollback = () => {
       const buffer = serializeAddonRef.current?.serialize();
       if (buffer) {
@@ -221,8 +220,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         ackSession(idRef.current, parsedRef.current);
         parsedRef.current = 0;
       }
-      if (flushTimer) clearTimeout(flushTimer);
-      flushTimer = setTimeout(flushScrollback, 500);
     });
 
     onPtyData((p) => {
@@ -266,10 +263,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     ro.observe(containerRef.current!);
 
     return () => {
-      if (flushTimer) {
-        clearTimeout(flushTimer);
-        flushTimer = null;
-      }
       if (resizeTimer) {
         clearTimeout(resizeTimer);
         resizeTimer = null;

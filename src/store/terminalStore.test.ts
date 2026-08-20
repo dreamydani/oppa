@@ -726,7 +726,8 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).not.toHaveBeenCalled();
     });
 
-    it("updateSessionCwd persists the updated cwd", () => {
+    it("updateSessionCwd debounces layout persistence by 2000ms", () => {
+      vi.useFakeTimers();
       useTerminalStore.setState({
         sessions: {
           s1: { id: "s1", title: "s1", status: "running", cwd: "/old/dir", cols: 80, rows: 24 },
@@ -734,10 +735,38 @@ describe("terminalStore", () => {
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().updateSessionCwd("s1", "/new/dir");
-      expect(saveLayoutMock).toHaveBeenCalled();
+      expect(useTerminalStore.getState().sessions["s1"].cwd).toBe("/new/dir");
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      // Advancing 1000ms should still not call saveLayout
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      // Advancing remaining 1000ms triggers saveLayout
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("updateSessionCwd collapses rapid successive updates into a single debounced save", () => {
+      vi.useFakeTimers();
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cwd: "/old/dir", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().updateSessionCwd("s1", "/dir1");
+      vi.advanceTimersByTime(1000);
+      useTerminalStore.getState().updateSessionCwd("s1", "/dir2");
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).toHaveBeenCalledTimes(1);
     });
 
     it("updateSessionCwd does not persist if cwd is unchanged or session is missing", () => {
+      vi.useFakeTimers();
       useTerminalStore.setState({
         sessions: {
           s1: { id: "s1", title: "s1", status: "running", cwd: "/same/dir", cols: 80, rows: 24 },
@@ -746,6 +775,7 @@ describe("terminalStore", () => {
       saveLayoutMock.mockClear();
       useTerminalStore.getState().updateSessionCwd("s1", "/same/dir");
       useTerminalStore.getState().updateSessionCwd("nonexistent", "/any/dir");
+      vi.advanceTimersByTime(2500);
       expect(saveLayoutMock).not.toHaveBeenCalled();
     });
   });
@@ -1614,7 +1644,8 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().sessions["missing"]).toBeUndefined();
     });
 
-    it("renameSession persists layout change when ready", () => {
+    it("renameSession debounces layout persistence by 2000ms", () => {
+      vi.useFakeTimers();
       useTerminalStore.setState({
         ready: true,
         sessions: {
@@ -1623,7 +1654,33 @@ describe("terminalStore", () => {
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().renameSession("s1", "Server");
-      expect(saveLayoutMock).toHaveBeenCalled();
+      expect(useTerminalStore.getState().sessions["s1"].title).toBe("Server");
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("renameSession collapses rapid successive renames into a single debounced save", () => {
+      vi.useFakeTimers();
+      useTerminalStore.setState({
+        ready: true,
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        },
+      });
+      saveLayoutMock.mockClear();
+      useTerminalStore.getState().renameSession("s1", "Server 1");
+      vi.advanceTimersByTime(1000);
+      useTerminalStore.getState().renameSession("s1", "Server 2");
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1000);
+      expect(saveLayoutMock).toHaveBeenCalledTimes(1);
     });
 
     it("toggleMaximizePane sets maximizedSessionId when provided an id", () => {

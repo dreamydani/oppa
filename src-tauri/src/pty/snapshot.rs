@@ -90,7 +90,6 @@ impl SnapshotStorage {
         {
             let mut file = File::create(&tmp_path)?;
             file.write_all(json_data.as_bytes())?;
-            file.sync_all()?;
         }
 
         fs::rename(&tmp_path, &target_path)?;
@@ -147,7 +146,6 @@ impl SnapshotStorage {
         {
             let mut file = File::create(&tmp_path)?;
             file.write_all(slice.as_bytes())?;
-            file.sync_all()?;
         }
 
         fs::rename(&tmp_path, &target_path)?;

@@ -433,6 +433,15 @@ function getActiveTab(state: TerminalState): TabState | undefined {
 
 let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let editorAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function triggerDebouncedSaveLayout(get: () => TerminalState, delayMs = 2000) {
+  if (layoutSaveTimer) clearTimeout(layoutSaveTimer);
+  layoutSaveTimer = setTimeout(() => {
+    layoutSaveTimer = null;
+    void get().saveLayout().catch(() => {});
+  }, delayMs);
+}
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
@@ -657,7 +666,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     });
     if (updated) {
-      void get().saveLayout().catch(() => {});
+      triggerDebouncedSaveLayout(get);
     }
   },
 
@@ -676,7 +685,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     });
     if (updated) {
-      void get().saveLayout().catch(() => {});
+      triggerDebouncedSaveLayout(get);
     }
   },
 
