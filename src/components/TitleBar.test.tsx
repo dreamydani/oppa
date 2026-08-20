@@ -42,9 +42,9 @@ describe("TitleBar", () => {
 
   it("renders mode switcher tabs (browser, terminal, editor)", () => {
     const { container } = render(<TitleBar />);
-    const browserTab = screen.getByText("browser");
-    const terminalTab = screen.getByText(/terminal/);
-    const editorTab = screen.getByText("editor");
+    const browserTab = screen.getByText("Browser");
+    const terminalTab = screen.getByText("Terminal");
+    const editorTab = screen.getByText("Editor");
 
     expect(browserTab).toBeTruthy();
     expect(terminalTab).toBeTruthy();

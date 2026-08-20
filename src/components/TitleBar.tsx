@@ -55,7 +55,26 @@ export function TitleBar(): ReactElement {
         >
           <PanelLeftIcon />
         </button>
-        {showTitlebarLogo && <span className="app-brand-title">oppa</span>}
+        {showTitlebarLogo && (
+          <div className="app-brand">
+            <span className="app-brand-mark" aria-hidden="true">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </span>
+            <span className="app-brand-title">oppa</span>
+          </div>
+        )}
       </div>
 
       <div className="title-bar-center" data-tauri-drag-region>
@@ -73,7 +92,7 @@ export function TitleBar(): ReactElement {
               aria-label="Browser"
               aria-pressed={activeAppMode === "browser"}
             >
-              browser
+              Browser
             </button>
             <button
               type="button"
@@ -83,7 +102,7 @@ export function TitleBar(): ReactElement {
               aria-label="Terminal"
               aria-pressed={activeAppMode === "terminal"}
             >
-              terminal
+              Terminal
             </button>
             <button
               type="button"
@@ -93,7 +112,7 @@ export function TitleBar(): ReactElement {
               aria-label="Editor"
               aria-pressed={activeAppMode === "editor"}
             >
-              editor
+              Editor
             </button>
           </div>
         )}

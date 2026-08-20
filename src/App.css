@@ -301,12 +301,35 @@ body,
   -webkit-app-region: no-drag;
 }
 
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+}
+
+.app-brand-mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.22), rgba(168, 85, 247, 0.22));
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-blue);
+  box-shadow: 0 0 10px rgba(88, 166, 255, 0.2);
+  flex-shrink: 0;
+}
+
 .app-brand-title {
-  font-size: 13.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--text-primary, #ededec);
-  margin-left: 2px;
+  font-family: var(--font-sans);
+  line-height: 1;
 }
 
 .title-bar-center {
@@ -320,11 +343,11 @@ body,
 .mode-switcher-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px;
+  gap: 2px;
+  padding: 2px 3px;
   background-color: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
+  border-radius: 8px;
   position: relative;
   -webkit-app-region: no-drag;
 }
@@ -347,11 +370,11 @@ body,
 }
 
 .mode-tab {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: -0.01em;
   padding: 4px 14px;
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--text-muted, #71717a);
   position: relative;
   user-select: none;
@@ -360,16 +383,16 @@ body,
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   outline: none;
   font-family: inherit;
   line-height: normal;
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .mode-tab:hover:not(.disabled):not(.active) {
   color: var(--text-primary, #ededec);
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .mode-tab.disabled {
@@ -379,10 +402,11 @@ body,
 }
 
 .mode-tab.active {
-  background-color: rgba(255, 255, 255, 0.10);
-  color: var(--text-primary, #ededec);
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .title-bar-right {
