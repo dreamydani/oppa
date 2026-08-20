@@ -1,37 +1,37 @@
 import { type ReactElement } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import { PlusIcon, CloseIcon } from "../icons/MinimalIcons";
+import { Plus, X, FileCode, FileText, FileJson, FileSpreadsheet, File } from "lucide-react";
 
-function getFileLanguageBadge(name: string, language: string): { label: string; color: string } {
+function getFileIcon(name: string, language: string) {
   const ext = name.split(".").pop()?.toLowerCase() || "";
   switch (ext) {
     case "ts":
     case "tsx":
-      return { label: "TS", color: "#3178c6" };
+      return { icon: FileCode, color: "#60a5fa" };
     case "js":
     case "jsx":
-      return { label: "JS", color: "#f7df1e" };
+      return { icon: FileCode, color: "#facc15" };
     case "rs":
-      return { label: "RS", color: "#dea584" };
+      return { icon: FileCode, color: "#fb923c" };
     case "py":
-      return { label: "PY", color: "#3572a5" };
+      return { icon: FileCode, color: "#38bdf8" };
     case "json":
-      return { label: "{}", color: "#cbcb41" };
+      return { icon: FileJson, color: "#fcd34d" };
     case "md":
     case "markdown":
-      return { label: "MD", color: "#519aba" };
+      return { icon: FileText, color: "#a5b4fc" };
     case "css":
     case "scss":
     case "less":
-      return { label: "#", color: "#563d7c" };
     case "html":
-      return { label: "<>", color: "#e34c26" };
-    case "toml":
-    case "yaml":
-    case "yml":
-      return { label: "YML", color: "#cb171e" };
+      return { icon: FileCode, color: "#f472b6" };
+    case "csv":
+      return { icon: FileSpreadsheet, color: "#4ade80" };
     default:
-      return { label: language.slice(0, 2).toUpperCase() || "TXT", color: "#9e9e9a" };
+      return {
+        icon: language === "markdown" ? FileText : File,
+        color: "#94a3b8",
+      };
   }
 }
 
@@ -53,7 +53,8 @@ export function EditorTabBar(): ReactElement {
       <div className="editor-tab-list">
         {editorTabs.map((tab) => {
           const isActive = tab.path === activeEditorPath;
-          const badge = getFileLanguageBadge(tab.name, tab.language);
+          const fileInfo = getFileIcon(tab.name, tab.language);
+          const IconComponent = fileInfo.icon;
 
           return (
             <div
@@ -63,11 +64,11 @@ export function EditorTabBar(): ReactElement {
               title={tab.path}
             >
               <span
-                className="editor-tab-lang-badge"
-                style={{ color: badge.color }}
+                className="editor-tab-icon-wrapper"
+                style={{ color: fileInfo.color }}
                 aria-hidden="true"
               >
-                {badge.label}
+                <IconComponent size={14} strokeWidth={1.75} />
               </span>
               <span className="editor-tab-title">{tab.name}</span>
               {tab.isDirty && (
@@ -79,12 +80,13 @@ export function EditorTabBar(): ReactElement {
                 type="button"
                 className="editor-tab-close"
                 aria-label={`Close ${tab.name}`}
+                title="Close"
                 onClick={(e) => {
                   e.stopPropagation();
                   closeEditorTab(tab.path);
                 }}
               >
-                <CloseIcon size={12} />
+                <X size={12} strokeWidth={2} />
               </button>
             </div>
           );
@@ -99,7 +101,7 @@ export function EditorTabBar(): ReactElement {
           title="New File"
           onClick={handleCreateNewFile}
         >
-          <PlusIcon size={14} />
+          <Plus size={14} strokeWidth={2} />
         </button>
       </div>
     </div>
