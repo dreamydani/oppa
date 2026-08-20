@@ -40,7 +40,7 @@ export function CodeEditor({
   const saveActiveFile = useTerminalStore((s) => s.saveActiveFile);
   const pendingAiDiff = useTerminalStore((s) => s.pendingAiDiff);
   const editorWordWrap = useTerminalStore((s) => s.settings.general.editorWordWrap);
-  const appTheme = useTerminalStore((s) => s.settings.appearance.theme);
+  const appTheme = useTerminalStore((s) => s.settings.appearance.appTheme);
 
   const activeTab = editorTabs.find((t) => t.path === activeEditorPath);
   const content = value !== undefined ? value : activeTab ? activeTab.content : "";

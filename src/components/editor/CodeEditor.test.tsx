@@ -3,47 +3,6 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { CodeEditor } from "./CodeEditor";
 
-// Mock @monaco-editor/react for fast and deterministic DOM unit testing
-vi.mock("@monaco-editor/react", () => {
-  return {
-    __esModule: true,
-    default: ({ value, language, theme, onChange, onMount, options }: any) => {
-      if (onMount) {
-        onMount(
-          {
-            addCommand: vi.fn(),
-          },
-          {
-            KeyMod: { CtrlCmd: 2048 },
-            KeyCode: { KeyS: 49 },
-          },
-        );
-      }
-      return (
-        <div data-testid="monaco-editor-mock" data-language={language} data-theme={theme}>
-          <textarea
-            data-testid="monaco-mock-textarea"
-            value={value}
-            readOnly={options?.readOnly}
-            onChange={(e) => onChange && onChange(e.target.value)}
-          />
-        </div>
-      );
-    },
-    DiffEditor: ({ original, modified, language, theme, options }: any) => (
-      <div
-        data-testid="monaco-diff-mock"
-        data-language={language}
-        data-theme={theme}
-        data-side-by-side={options?.renderSideBySide ? "true" : "false"}
-      >
-        <div data-testid="diff-original">{original}</div>
-        <div data-testid="diff-modified">{modified}</div>
-      </div>
-    ),
-  };
-});
-
 describe("CodeEditor", () => {
   beforeEach(() => {
     useTerminalStore.setState({
@@ -64,7 +23,7 @@ describe("CodeEditor", () => {
         ...useTerminalStore.getState().settings,
         appearance: {
           ...useTerminalStore.getState().settings.appearance,
-          theme: "dark",
+          appTheme: "dark",
         },
         general: {
           ...useTerminalStore.getState().settings.general,
@@ -81,13 +40,13 @@ describe("CodeEditor", () => {
     expect(editor).toHaveAttribute("data-language", "rust");
     expect(editor).toHaveAttribute("data-theme", "oppa-dark");
 
-    const textarea = screen.getByTestId("monaco-mock-textarea");
+    const textarea = screen.getByLabelText("Code Editor");
     expect((textarea as HTMLTextAreaElement).value).toBe('fn main() { println!("Hello OPPA"); }');
   });
 
   it("updates store content when code changes", () => {
     render(<CodeEditor />);
-    const textarea = screen.getByTestId("monaco-mock-textarea");
+    const textarea = screen.getByLabelText("Code Editor");
     fireEvent.change(textarea, { target: { value: 'fn main() { println!("Updated"); }' } });
 
     const activeTab = useTerminalStore.getState().editorTabs.find((t) => t.path === "src/main.rs");
@@ -99,7 +58,7 @@ describe("CodeEditor", () => {
     const customOnChange = vi.fn();
     render(<CodeEditor value="initial code" onChange={customOnChange} language="html" />);
 
-    const textarea = screen.getByTestId("monaco-mock-textarea");
+    const textarea = screen.getByLabelText("Code Editor");
     fireEvent.change(textarea, { target: { value: "<div>hello</div>" } });
 
     expect(customOnChange).toHaveBeenCalledWith("<div>hello</div>");
