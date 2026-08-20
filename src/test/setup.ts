@@ -1,11 +1,61 @@
-import { afterEach } from "vitest";
+import React from "react";
+import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-// RTL only auto-cleans between tests when vitest globals are enabled (they
-// are not — tests import from "vitest" explicitly). Without this, mounted
-// trees leak across tests: components from earlier tests keep re-running
-// effects when the shared store is reset, corrupting mock/instance counts.
+// Mock @monaco-editor/react for fast and deterministic DOM unit testing
+vi.mock("@monaco-editor/react", () => {
+  return {
+    __esModule: true,
+    default: ({ value, language, theme, onChange, onMount, options }: any) => {
+      React.useEffect(() => {
+        if (onMount) {
+          onMount(
+            {
+              addCommand: vi.fn(),
+            },
+            {
+              KeyMod: { CtrlCmd: 2048 },
+              KeyCode: { KeyS: 49 },
+            },
+          );
+        }
+      }, [onMount]);
+
+      return React.createElement(
+        "div",
+        {
+          "data-testid": "monaco-editor-mock",
+          "data-language": language,
+          "data-theme": theme,
+          "data-word-wrap": options?.wordWrap,
+        },
+        React.createElement("textarea", {
+          "aria-label": "Code Editor",
+          value: value ?? "",
+          readOnly: options?.readOnly,
+          wrap: options?.wordWrap === "on" ? "soft" : "off",
+          "data-word-wrap": options?.wordWrap,
+          onChange: (e: any) => onChange && onChange(e.target.value),
+        }),
+      );
+    },
+    DiffEditor: ({ original, modified, language, theme, options }: any) => {
+      return React.createElement(
+        "div",
+        {
+          "data-testid": "monaco-diff-mock",
+          "data-language": language,
+          "data-theme": theme,
+          "data-side-by-side": options?.renderSideBySide ? "true" : "false",
+        },
+        React.createElement("div", { "data-testid": "diff-original" }, original),
+        React.createElement("div", { "data-testid": "diff-modified" }, modified),
+      );
+    },
+  };
+});
+
 afterEach(() => {
   cleanup();
 });
