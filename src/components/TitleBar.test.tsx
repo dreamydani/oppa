@@ -211,4 +211,32 @@ describe("TitleBar", () => {
     const minimizeBtn = screen.getByTitle("Minimize");
     expect(() => fireEvent.click(minimizeBtn)).not.toThrow();
   });
+
+  it("renders oppa brand logo when showTitlebarLogo is true", () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          showTitlebarLogo: true,
+        },
+      },
+    });
+    render(<TitleBar />);
+    expect(screen.getByText("oppa")).toBeInTheDocument();
+  });
+
+  it("hides oppa brand logo when showTitlebarLogo is false", () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          showTitlebarLogo: false,
+        },
+      },
+    });
+    render(<TitleBar />);
+    expect(screen.queryByText("oppa")).toBeNull();
+  });
 });

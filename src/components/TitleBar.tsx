@@ -17,6 +17,7 @@ export function TitleBar(): ReactElement {
   const activeAppMode = useTerminalStore((s) => s.activeAppMode);
   const setAppMode = useTerminalStore((s) => s.setAppMode);
   const isSettingsOpen = useTerminalStore((s) => s.isSettingsOpen);
+  const showTitlebarLogo = useTerminalStore((s) => s.settings.appearance.showTitlebarLogo);
 
   const handleMinimize = () => {
     try {
@@ -54,7 +55,7 @@ export function TitleBar(): ReactElement {
         >
           <PanelLeftIcon />
         </button>
-        <span className="app-brand-title">oppa</span>
+        {showTitlebarLogo && <span className="app-brand-title">oppa</span>}
       </div>
 
       <div className="title-bar-center" data-tauri-drag-region>

@@ -56,6 +56,7 @@ function App() {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const appearance = useTerminalStore((s) => s.settings.appearance);
+  const showStatusBar = useTerminalStore((s) => s.settings.appearance.showStatusBar);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -110,6 +111,9 @@ function App() {
         // pane (loadLayout still marks the store ready).
       }
       const currentSettings = useTerminalStore.getState().settings;
+      if (currentSettings.appearance.sidebarOnLaunch === "collapsed") {
+        useTerminalStore.setState({ leftSidebarOpen: false });
+      }
       if (currentSettings.general.startupBehavior === "workspace_launcher") {
         useTerminalStore.getState().openWorkspaceLauncher();
       } else if (currentSettings.general.startupBehavior === "fresh_terminal") {
@@ -395,7 +399,7 @@ function App() {
           )}
         </div>
       )}
-      <StatusBar />
+      {showStatusBar && <StatusBar />}
       <WorkspaceLauncherModal />
     </div>
   );

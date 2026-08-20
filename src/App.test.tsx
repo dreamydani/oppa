@@ -948,5 +948,53 @@ describe("App", () => {
     unmount();
     expect(removeEventListenerMock).toHaveBeenCalled();
   });
+
+  it("renders StatusBar when showStatusBar is true", () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          showStatusBar: true,
+        },
+      },
+    });
+    const { container } = render(<App />);
+    expect(container.querySelector(".status-bar")).not.toBeNull();
+  });
+
+  it("does not render StatusBar when showStatusBar is false", () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          showStatusBar: false,
+        },
+      },
+    });
+    const { container } = render(<App />);
+    expect(container.querySelector(".status-bar")).toBeNull();
+  });
+
+  it("collapses left sidebar on initial load when sidebarOnLaunch is 'collapsed'", async () => {
+    useTerminalStore.setState({
+      leftSidebarOpen: true,
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          sidebarOnLaunch: "collapsed",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+    });
+  });
 });
+
 
