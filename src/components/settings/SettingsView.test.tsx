@@ -16,6 +16,11 @@ describe("SettingsView", () => {
     expect(screen.getByRole("region", { name: /general settings/i })).toBeInTheDocument();
     expect(screen.getByText(/workspace & startup/i)).toBeInTheDocument();
 
+    useTerminalStore.setState({ activeSettingsTab: "appearance" });
+    rerender(<SettingsView />);
+    expect(screen.getByRole("region", { name: /appearance settings/i })).toBeInTheDocument();
+    expect(screen.getByText(/live preview/i)).toBeInTheDocument();
+
     useTerminalStore.setState({ activeSettingsTab: "shortcuts" });
     rerender(<SettingsView />);
     expect(screen.getByRole("region", { name: /keyboard shortcuts/i })).toBeInTheDocument();
@@ -25,6 +30,11 @@ describe("SettingsView", () => {
   it("navigates between categories using sidebar buttons", () => {
     render(<SettingsView />);
     expect(screen.getByRole("region", { name: /general settings/i })).toBeInTheDocument();
+
+    const appearanceTab = screen.getByRole("button", { name: /appearance/i });
+    fireEvent.click(appearanceTab);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("appearance");
+    expect(screen.getByRole("region", { name: /appearance settings/i })).toBeInTheDocument();
 
     const shortcutsTab = screen.getByRole("button", { name: /shortcuts/i });
     fireEvent.click(shortcutsTab);
@@ -37,13 +47,9 @@ describe("SettingsView", () => {
     expect(screen.getByRole("region", { name: /general settings/i })).toBeInTheDocument();
   });
 
-  it("renders placeholder pane for appearance and terminal tabs", () => {
-    useTerminalStore.setState({ activeSettingsTab: "appearance" });
-    const { rerender } = render(<SettingsView />);
-    expect(screen.getByText(/appearance settings coming soon/i)).toBeInTheDocument();
-
+  it("renders placeholder pane for terminal tab", () => {
     useTerminalStore.setState({ activeSettingsTab: "terminal" });
-    rerender(<SettingsView />);
+    render(<SettingsView />);
     expect(screen.getByText(/terminal settings coming soon/i)).toBeInTheDocument();
   });
 

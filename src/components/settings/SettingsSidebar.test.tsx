@@ -45,9 +45,12 @@ describe("SettingsSidebar", () => {
   it("switches category tab when an enabled category is clicked", () => {
     render(<SettingsSidebar />);
 
+    const appearanceBtn = screen.getByRole("button", { name: /appearance/i });
+    fireEvent.click(appearanceBtn);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("appearance");
+
     const shortcutsBtn = screen.getByRole("button", { name: /shortcuts/i });
     fireEvent.click(shortcutsBtn);
-
     expect(useTerminalStore.getState().activeSettingsTab).toBe("shortcuts");
   });
 
@@ -66,10 +69,10 @@ describe("SettingsSidebar", () => {
     const appearanceBtn = screen.getByRole("button", { name: /appearance/i });
     const terminalBtn = screen.getByRole("button", { name: /terminal/i });
 
-    expect(appearanceBtn).toBeDisabled();
+    expect(appearanceBtn).not.toBeDisabled();
     expect(terminalBtn).toBeDisabled();
 
     const badges = screen.getAllByText("Coming Soon");
-    expect(badges.length).toBeGreaterThanOrEqual(2);
+    expect(badges.length).toBe(1);
   });
 });

@@ -2,6 +2,7 @@ import React from "react";
 import { SettingsSidebar } from "./SettingsSidebar";
 import { GeneralSettingsPane } from "./GeneralSettingsPane";
 import { ShortcutsSettingsPane } from "./ShortcutsSettingsPane";
+import { AppearanceSettingsPane } from "./AppearanceSettingsPane";
 import { useTerminalStore } from "../../store/terminalStore";
 import "./SettingsView.css";
 
@@ -13,20 +14,8 @@ export function SettingsView(): React.ReactElement {
       <SettingsSidebar />
       <div className="settings-content-area" data-testid="settings-content-area">
         {activeSettingsTab === "general" && <GeneralSettingsPane />}
+        {activeSettingsTab === "appearance" && <AppearanceSettingsPane />}
         {activeSettingsTab === "shortcuts" && <ShortcutsSettingsPane />}
-        {activeSettingsTab === "appearance" && (
-          <div className="settings-pane settings-placeholder-pane">
-            <div className="settings-pane-container">
-              <div className="settings-pane-header">
-                <h2 className="settings-pane-title">Appearance</h2>
-                <p className="settings-pane-desc">Themes, fonts, and window styling options.</p>
-              </div>
-              <div className="settings-placeholder-content">
-                <p>Appearance settings coming soon.</p>
-              </div>
-            </div>
-          </div>
-        )}
         {activeSettingsTab === "terminal" && (
           <div className="settings-pane settings-placeholder-pane">
             <div className="settings-pane-container">

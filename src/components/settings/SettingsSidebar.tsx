@@ -22,8 +22,6 @@ const CATEGORIES: SettingsCategory[] = [
     id: "appearance",
     label: "Appearance",
     icon: Palette,
-    disabled: true,
-    badge: "Coming Soon",
   },
   {
     id: "terminal",
