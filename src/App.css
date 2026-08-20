@@ -498,15 +498,6 @@ body,
   background-color: var(--bg-terminal);
   position: relative;
   overflow: hidden;
-  margin: 8px 8px 8px 8px;
-  border-radius: 12px;
-  border: 1px solid var(--border-divider);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-[data-theme="light"] .main-viewport {
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
 }
 
 /* ==========================================================================
@@ -810,18 +801,29 @@ body,
 }
 
 /* ==========================================================================
-   Right Sidebar (File Explorer)
+   Right Sidebar (Floating Drawer)
    ========================================================================== */
 .right-sidebar {
-  background-color: var(--topbar-bg, #000000);
-  border-left: none;
+  background-color: var(--bg-sidebar);
+  border: 1px solid var(--border-divider);
+  border-radius: 12px;
+  margin: 8px 8px 8px 0;
+  height: calc(100% - 16px);
   display: flex;
   flex-direction: column;
-  height: 100%;
   position: relative;
   flex-shrink: 0;
   user-select: none;
-  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  z-index: 15;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+[data-theme="light"] .right-sidebar {
+  background-color: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .right-sidebar-header {
