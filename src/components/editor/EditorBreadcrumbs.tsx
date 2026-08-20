@@ -1,5 +1,15 @@
 import { type ReactElement } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
+import {
+  ChevronRight,
+  GitCompare,
+  Sparkles,
+  Save,
+  Check,
+  Code,
+  Eye,
+  Columns2,
+} from "lucide-react";
 
 export function EditorBreadcrumbs(): ReactElement | null {
   const activeEditorPath = useTerminalStore((s) => s.activeEditorPath);
@@ -36,31 +46,31 @@ export function EditorBreadcrumbs(): ReactElement | null {
         const formatted = JSON.stringify(parsed, null, 2) + "\n";
         updateEditorContent(activeTab.path, formatted);
       } else {
-        // General clean formatting: trim trailing spaces and add trailing newline
         const lines = activeTab.content.split("\n");
         const trimmed = lines.map((l) => l.trimEnd()).join("\n").replace(/\n+$/, "\n");
         updateEditorContent(activeTab.path, trimmed);
       }
     } catch {
-      // If formatting fails (e.g. invalid JSON syntax), keep content as-is
+      // Ignore syntax errors on invalid formats
     }
   };
 
   return (
     <div className="editor-breadcrumbs" data-testid="editor-breadcrumbs">
       <div className="editor-breadcrumbs-trail">
-        {pathSegments.map((segment, index) => (
-          <span key={index} className="editor-breadcrumb-item">
-            {index > 0 && <span className="editor-breadcrumb-separator">›</span>}
-            <span
-              className={`editor-breadcrumb-segment ${
-                index === pathSegments.length - 1 ? "current" : ""
-              }`}
-            >
-              {segment}
+        {pathSegments.map((segment, index) => {
+          const isLast = index === pathSegments.length - 1;
+          return (
+            <span key={index} className="editor-breadcrumb-item">
+              {index > 0 && (
+                <ChevronRight size={12} className="editor-breadcrumb-separator" strokeWidth={1.5} />
+              )}
+              <span className={`editor-breadcrumb-segment ${isLast ? "current" : ""}`}>
+                {segment}
+              </span>
             </span>
-          </span>
-        ))}
+          );
+        })}
         {activeTab.isDirty && <span className="editor-breadcrumb-dirty">●</span>}
       </div>
 
@@ -74,7 +84,8 @@ export function EditorBreadcrumbs(): ReactElement | null {
               title="Code view"
               onClick={() => setEditorViewMode("edit")}
             >
-              &lt;/&gt; Code
+              <Code size={13} strokeWidth={1.75} />
+              <span>Code</span>
             </button>
             <button
               type="button"
@@ -85,7 +96,8 @@ export function EditorBreadcrumbs(): ReactElement | null {
               title="Markdown preview"
               onClick={() => setEditorViewMode("markdown-preview")}
             >
-              👁 Preview
+              <Eye size={13} strokeWidth={1.75} />
+              <span>Preview</span>
             </button>
             <button
               type="button"
@@ -96,7 +108,8 @@ export function EditorBreadcrumbs(): ReactElement | null {
               title="Split view"
               onClick={() => setEditorViewMode("markdown-split")}
             >
-              ◫ Split
+              <Columns2 size={13} strokeWidth={1.75} />
+              <span>Split</span>
             </button>
           </div>
         )}
@@ -108,7 +121,8 @@ export function EditorBreadcrumbs(): ReactElement | null {
           title="Toggle Diff comparison"
           onClick={handleToggleDiff}
         >
-          ⇄ Diff
+          <GitCompare size={13} strokeWidth={1.75} />
+          <span>Diff</span>
         </button>
 
         <button
@@ -118,7 +132,8 @@ export function EditorBreadcrumbs(): ReactElement | null {
           title="Format code"
           onClick={handleFormatCode}
         >
-          ⌥ Format
+          <Sparkles size={13} strokeWidth={1.75} />
+          <span>Format</span>
         </button>
 
         <button
@@ -128,7 +143,12 @@ export function EditorBreadcrumbs(): ReactElement | null {
           title={`Save file (${saveShortcut})`}
           onClick={() => void saveActiveFile()}
         >
-          {activeTab.isDirty ? "Save" : "Saved"}
+          {activeTab.isDirty ? (
+            <Save size={13} strokeWidth={1.75} />
+          ) : (
+            <Check size={13} strokeWidth={2} />
+          )}
+          <span>{activeTab.isDirty ? "Save" : "Saved"}</span>
           <span className="editor-shortcut-hint">{saveShortcut}</span>
         </button>
       </div>
