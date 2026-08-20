@@ -166,7 +166,8 @@ export function WorkspaceSetupWizard({
         {/* Wizard Top Header */}
         <div className="wizard-page-header">
           <div className="wizard-dialog-title-group">
-            <span className="wizard-logo-tag wizard-logo-badge">OPPA</span>
+            <img src="/logo.png" alt="OPPA" className="wizard-logo-img" />
+            <span className="wizard-logo-tag wizard-logo-badge sr-only">OPPA</span>
             <span className="wizard-dialog-heading">Workspace Setup</span>
           </div>
 

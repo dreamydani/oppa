@@ -301,6 +301,21 @@ body,
   -webkit-app-region: no-drag;
 }
 
+.app-brand-container {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  user-select: none;
+}
+
+.app-brand-logo-img {
+  height: 22px;
+  width: auto;
+  border-radius: 4px;
+  object-fit: contain;
+  display: block;
+}
+
 .app-brand-title {
   font-size: 13px;
   font-weight: 700;
@@ -1314,6 +1329,14 @@ body,
   justify-content: center;
   color: var(--text-primary);
   margin-bottom: 14px;
+}
+
+.empty-workspace-logo-img {
+  height: 26px;
+  width: auto;
+  border-radius: 4px;
+  object-fit: contain;
+  display: block;
 }
 
 [data-theme="light"] .empty-workspace-icon {

@@ -55,7 +55,12 @@ export function TitleBar(): ReactElement {
         >
           <PanelLeftIcon />
         </button>
-        {showTitlebarLogo && <span className="app-brand-title">oppa</span>}
+        {showTitlebarLogo && (
+          <div className="app-brand-container">
+            <img src="/logo.png" alt="oppa" className="app-brand-logo-img" />
+            <span className="app-brand-title sr-only">oppa</span>
+          </div>
+        )}
       </div>
 
       <div className="title-bar-center" data-tauri-drag-region>

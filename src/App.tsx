@@ -345,7 +345,7 @@ function App() {
                 <div className="empty-workspace-view" data-testid="empty-workspace-view">
                   <div className="empty-workspace-card">
                     <div className="empty-workspace-icon">
-                      <TerminalIcon size={26} />
+                      <img src="/logo.png" alt="OPPA" className="empty-workspace-logo-img" />
                     </div>
                     <h2 className="empty-workspace-title">No Open Workspaces</h2>
                     <p className="empty-workspace-subtitle">
