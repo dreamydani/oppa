@@ -11,3 +11,4 @@ pub mod screen_mirror;
 pub mod session;
 pub mod shell_args;
 pub mod snapshot;
+pub mod utf8_decoder;

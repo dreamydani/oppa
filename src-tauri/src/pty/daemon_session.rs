@@ -2,6 +2,7 @@ use crate::pty::ipc_protocol::DaemonEvent;
 use crate::pty::osc_scanner::OscScanner;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
+use crate::pty::utf8_decoder::Utf8ChunkDecoder;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::Write;
@@ -154,6 +155,7 @@ impl DaemonSession {
         std::thread::spawn(move || {
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
+            let mut utf8_decoder = Utf8ChunkDecoder::new();
             loop {
                 if paused.load(Ordering::SeqCst) {
                     if pending.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
@@ -193,7 +195,7 @@ impl DaemonSession {
                         let seq_num = seq.fetch_add(1, Ordering::SeqCst);
                         let _ = broadcast_tx.send(DaemonEvent::Data {
                             session_id: id.clone(),
-                            data: String::from_utf8_lossy(chunk).into_owned(),
+                            data: utf8_decoder.decode(chunk),
                             bytes: chunk.len(),
                             seq: seq_num,
                         });
