@@ -345,11 +345,13 @@ impl DaemonClient {
             session_id: session_id.to_string(),
             chars,
         };
-        match self.send_request(req)? {
-            DaemonResponse::Ok => Ok(()),
-            DaemonResponse::Error(e) => Err(e),
-            other => Err(format!("unexpected response for Ack: {other:?}")),
-        }
+        let mut json = serde_json::to_string(&req)
+            .map_err(|e| format!("failed to serialize ack: {e}"))?;
+        json.push('\n');
+        self.write_tx
+            .send(json)
+            .map_err(|e| format!("failed to queue ack: {e}"))?;
+        Ok(())
     }
 
     /// Kill the session child process.
@@ -537,6 +539,69 @@ mod tests {
         client.kill("client-session-1").expect("kill session");
 
         // 7. Disconnect and Shutdown
+        client.disconnect().expect("disconnect");
+        cancel_token.cancel();
+        let _ = server_thread.join();
+    }
+
+    #[test]
+    fn test_daemon_client_async_ack_high_throughput() {
+        let server = Arc::new(DaemonServer::new());
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-ack-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-ack-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+
+        let server_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect client");
+
+        let sh = test_sh_path();
+        let attach_res = client
+            .create_or_attach("ack-test-session", 80, 24, None, Some(sh))
+            .expect("create_or_attach");
+        assert!(attach_res.is_new);
+
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            client.ack("ack-test-session", 1024).expect("async ack should succeed");
+        }
+        let elapsed = start.elapsed();
+        assert!(elapsed < Duration::from_secs(1), "1000 ACKs took too long: {elapsed:?}");
+
+        let sessions = client.list_sessions().expect("list_sessions after acks");
+        assert!(sessions.contains(&"ack-test-session".to_string()));
+
+        client.kill("ack-test-session").expect("kill");
         client.disconnect().expect("disconnect");
         cancel_token.cancel();
         let _ = server_thread.join();

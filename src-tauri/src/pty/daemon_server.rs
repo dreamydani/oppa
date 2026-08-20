@@ -107,8 +107,8 @@ impl DaemonServer {
                 }
             }
             DaemonRequest::Write { session_id, data } => {
-                let sessions = self.sessions.lock();
-                if let Some(session) = sessions.get(&session_id) {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                if let Some(session) = session {
                     match session.write(data.as_bytes()) {
                         Ok(()) => DaemonResponse::Ok,
                         Err(e) => DaemonResponse::Error(e.to_string()),
@@ -122,8 +122,8 @@ impl DaemonServer {
                 cols,
                 rows,
             } => {
-                let sessions = self.sessions.lock();
-                if let Some(session) = sessions.get(&session_id) {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                if let Some(session) = session {
                     match session.resize(cols, rows) {
                         Ok(()) => DaemonResponse::Ok,
                         Err(e) => DaemonResponse::Error(e),
@@ -133,8 +133,8 @@ impl DaemonServer {
                 }
             }
             DaemonRequest::Ack { session_id, chars } => {
-                let sessions = self.sessions.lock();
-                if let Some(session) = sessions.get(&session_id) {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                if let Some(session) = session {
                     match session.ack(chars) {
                         Ok(()) => DaemonResponse::Ok,
                         Err(e) => DaemonResponse::Error(e),
@@ -235,6 +235,7 @@ where
 
                         let is_disconnect = matches!(req, DaemonRequest::Disconnect);
                         let is_shutdown = matches!(req, DaemonRequest::Shutdown);
+                        let is_ack = matches!(req, DaemonRequest::Ack { .. });
 
                         let session_to_sub = match &req {
                             DaemonRequest::CreateOrAttach { session_id, .. } => Some(session_id.clone()),
@@ -246,8 +247,8 @@ where
                         // If CreateOrAttach succeeded, wire up subscriber task if not already streaming to this client
                         if let Some(session_id) = session_to_sub {
                             if matches!(resp, DaemonResponse::SessionAttached(_)) && !subscribed_sessions.contains_key(&session_id) {
-                                let sessions = server.sessions.lock();
-                                if let Some(session) = sessions.get(&session_id) {
+                                let session = server.sessions.lock().get(&session_id).cloned();
+                                if let Some(session) = session {
                                     let mut rx = session.subscribe();
                                     let out_tx_sub = out_tx.clone();
                                     let sub_task = tokio::spawn(async move {
@@ -274,8 +275,10 @@ where
                             }
                         }
 
-                        if let Ok(json) = serde_json::to_string(&resp) {
-                            let _ = out_tx.send(format!("{json}\n")).await;
+                        if !is_ack {
+                            if let Ok(json) = serde_json::to_string(&resp) {
+                                let _ = out_tx.send(format!("{json}\n")).await;
+                            }
                         }
 
                         if is_disconnect {
@@ -713,6 +716,126 @@ mod tests {
         shutdown_str.push('\n');
         write_half2.write_all(shutdown_str.as_bytes()).await.unwrap();
 
+        cancel_token.cancel();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_server_ack_one_way_no_response_frame() {
+        let server = Arc::new(DaemonServer::new());
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-ack-srv-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-ack-srv-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+
+        tokio::spawn(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        #[cfg(target_os = "windows")]
+        let client_stream = {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = ClientOptions::new().open(&socket_path) {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect named pipe")
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let client_stream = {
+            use tokio::net::UnixStream;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = UnixStream::connect(&socket_path).await {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect unix socket")
+        };
+
+        let (read_half, mut write_half) = tokio::io::split(client_stream);
+        let mut reader = BufReader::new(read_half);
+        let mut line = String::new();
+
+        // 1. Hello
+        let hello = serde_json::to_string(&DaemonRequest::Hello {
+            client_version: "0.1.0".into(),
+            protocol_version: DAEMON_PROTOCOL_VERSION,
+        })
+        .unwrap()
+            + "\n";
+        write_half.write_all(hello.as_bytes()).await.unwrap();
+        reader.read_line(&mut line).await.unwrap();
+
+        // 2. CreateOrAttach
+        let create = serde_json::to_string(&DaemonRequest::CreateOrAttach {
+            session_id: "ack-srv-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+        })
+        .unwrap()
+            + "\n";
+        write_half.write_all(create.as_bytes()).await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+
+        // Send ACK over stream
+        let ack_msg = serde_json::to_string(&DaemonRequest::Ack {
+            session_id: "ack-srv-test".into(),
+            chars: 50,
+        })
+        .unwrap()
+            + "\n";
+        write_half.write_all(ack_msg.as_bytes()).await.unwrap();
+
+        // Send ListSessions request immediately after ACK.
+        // If Ack is one-way (no response frame), the very next response MUST be SessionList, not Ok!
+        let list_req = serde_json::to_string(&DaemonRequest::ListSessions).unwrap() + "\n";
+        write_half.write_all(list_req.as_bytes()).await.unwrap();
+
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: DaemonResponse = serde_json::from_str(line.trim()).unwrap();
+        match resp {
+            DaemonResponse::SessionList(sessions) => {
+                assert!(sessions.contains(&"ack-srv-test".to_string()));
+            }
+            DaemonResponse::Ok => {
+                panic!("received unexpected Ok response from Ack request; Ack should be one-way!")
+            }
+            other => panic!("expected SessionList, got {other:?}"),
+        }
+
+        // Clean up
         cancel_token.cancel();
     }
 }
