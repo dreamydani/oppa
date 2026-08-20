@@ -17,6 +17,8 @@ import {
 } from "../lib/pty/transport";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
+import { focus } from "../lib/pane-manager/layout";
+import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
 import "./TerminalPane.css";
@@ -26,6 +28,7 @@ import "./TerminalPane.css";
 export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -37,6 +40,15 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
   const status = useTerminalStore((s) => s.sessions[id]?.status);
   const session = useTerminalStore((s) => s.sessions[id]);
+  const appearance = useTerminalStore((s) => s.settings.appearance);
+  const appearanceRef = useRef(appearance);
+  appearanceRef.current = appearance;
+
+  const layout = useTerminalStore((s) => s.layout);
+  const focusedPath = useTerminalStore((s) => s.focusedPath);
+  const isFocused = path !== undefined
+    ? path.join(".") === (focusedPath ?? []).join(".")
+    : (layout ? focus(layout, focusedPath ?? []) === id : false);
   const ackSession = useTerminalStore((s) => s.ackSession);
   const resizeSession = useTerminalStore((s) => s.resizeSession);
   const registerSerializer = useTerminalStore((s) => s.registerSerializer);
@@ -65,24 +77,23 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     if (!status || status !== "running") return;
 
     idRef.current = id;
+    const currentAppearance = appearanceRef.current;
     const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: "Menlo, Consolas, monospace",
+      cursorBlink: currentAppearance.cursorBlink,
+      cursorStyle: currentAppearance.cursorStyle,
+      fontSize: currentAppearance.fontSize,
+      fontFamily: currentAppearance.fontFamily,
+      lineHeight: currentAppearance.lineHeight,
       scrollback: 10000,
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
-      theme: {
-        background: "#141414",
-        foreground: "#ededec",
-        cursor: "#58a6ff",
-        selectionBackground: "rgba(88, 166, 255, 0.25)",
-      },
+      theme: getTerminalTheme(currentAppearance.themeName),
       allowProposedApi: true,
     });
     termRef.current = term;
 
     const fit = new FitAddon();
+    fitAddonRef.current = fit;
     const unicode11 = new Unicode11Addon();
     const search = new SearchAddon();
     const webLinks = new WebLinksAddon(handleLinkClick);
@@ -270,6 +281,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       unsubs.forEach((u) => u());
       term.dispose();
       termRef.current = null;
+      fitAddonRef.current = null;
       searchAddonRef.current = null;
       serializeAddonRef.current = null;
     };
@@ -285,6 +297,19 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     clearRestoredScrollback,
     dismissSessionRestoredBanner,
   ]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const theme = getTerminalTheme(appearance.themeName);
+    term.options.theme = theme;
+    term.options.fontFamily = appearance.fontFamily;
+    term.options.fontSize = appearance.fontSize;
+    term.options.lineHeight = appearance.lineHeight;
+    term.options.cursorStyle = appearance.cursorStyle;
+    term.options.cursorBlink = appearance.cursorBlink;
+    fitAddonRef.current?.fit();
+  }, [appearance]);
 
   if (!session) {
     return <div className="terminal-pane" />;
@@ -338,7 +363,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           initialQuery={termRef.current?.getSelection() || ""}
         />
       )}
-      <div ref={containerRef} className="terminal-pane" />
+      <div
+        ref={containerRef}
+        className={`terminal-pane${appearance.dimInactivePanes && !isFocused ? " dimmed" : ""}`}
+      />
     </div>
   );
 }

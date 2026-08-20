@@ -83,3 +83,15 @@
     background-position: 200% 0;
   }
 }
+
+/* Inactive Pane Dimming */
+.terminal-pane.dimmed {
+  opacity: 0.78;
+  transition: opacity 0.15s ease;
+}
+
+.terminal-pane.dimmed:hover,
+.terminal-pane.dimmed:focus-within {
+  opacity: 1;
+}
+

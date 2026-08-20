@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
-import { useTerminalStore } from "../store/terminalStore";
+import { useTerminalStore, DEFAULT_APP_SETTINGS } from "../store/terminalStore";
+import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
 import * as opener from "@tauri-apps/plugin-opener";
@@ -14,6 +15,7 @@ const xtermState = vi.hoisted(() => ({
     unicode: { activeVersion: string };
     modes: { mouseTrackingMode: string; applicationCursorKeysMode: boolean };
     buffer: { active: { type: string } };
+    options: Record<string, any>;
     write: ReturnType<typeof vi.fn>;
     writeln: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
@@ -32,6 +34,7 @@ const xtermState = vi.hoisted(() => ({
 }));
 
 const addonState = vi.hoisted(() => ({
+  fitInstances: [] as { fit: ReturnType<typeof vi.fn> }[],
   unicode11Instances: [] as unknown[],
   searchInstances: [] as unknown[],
   serializeInstances: [] as { serialize: ReturnType<typeof vi.fn> }[],
@@ -47,6 +50,7 @@ vi.mock("@xterm/xterm", () => {
     unicode = { activeVersion: "6" };
     modes = { mouseTrackingMode: "none", applicationCursorKeysMode: false };
     buffer = { active: { type: "normal" } };
+    options: Record<string, any> = {};
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
     write = vi.fn();
@@ -65,8 +69,11 @@ vi.mock("@xterm/xterm", () => {
     dispose = vi.fn();
     customKeyHandler?: (event: KeyboardEvent) => boolean;
     customWheelHandler?: (event: WheelEvent) => boolean;
-    constructor() {
-      xtermState.instances.push(this);
+    constructor(options?: Record<string, any>) {
+      if (options) {
+        this.options = { ...options };
+      }
+      xtermState.instances.push(this as any);
     }
   }
   return { Terminal: MockTerminal };
@@ -75,6 +82,9 @@ vi.mock("@xterm/xterm", () => {
 vi.mock("@xterm/addon-fit", () => {
   class MockFitAddon {
     fit = vi.fn();
+    constructor() {
+      addonState.fitInstances.push(this);
+    }
   }
   return { FitAddon: MockFitAddon };
 });
@@ -181,6 +191,7 @@ describe("TerminalPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     xtermState.instances.length = 0;
+    addonState.fitInstances.length = 0;
     addonState.unicode11Instances.length = 0;
     addonState.searchInstances.length = 0;
     addonState.serializeInstances.length = 0;
@@ -194,9 +205,11 @@ describe("TerminalPane", () => {
         abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
       },
       layout: { type: "leaf", id: "abc" },
+      focusedPath: [],
       serializers: {},
       cachedScrollbacks: {},
       restoredScrollbacks: {},
+      settings: DEFAULT_APP_SETTINGS,
     });
     vi.stubGlobal(
       "ResizeObserver",
@@ -790,5 +803,140 @@ describe("TerminalPane", () => {
 
     expect(useTerminalStore.getState().sessions["abc"].isRestored).toBe(false);
     expect(ptyWriteMock).toHaveBeenCalledWith("abc", "a");
+  });
+
+  it("initializes terminal options with appearance settings from store", async () => {
+    useTerminalStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        appearance: {
+          themeName: "dracula",
+          fontFamily: "'Fira Code', monospace",
+          fontSize: 16,
+          lineHeight: 1.4,
+          cursorStyle: "underline",
+          cursorBlink: false,
+          dimInactivePanes: true,
+        },
+      },
+    });
+
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const t = term();
+    expect(t.options.fontSize).toBe(16);
+    expect(t.options.fontFamily).toBe("'Fira Code', monospace");
+    expect(t.options.lineHeight).toBe(1.4);
+    expect(t.options.cursorStyle).toBe("underline");
+    expect(t.options.cursorBlink).toBe(false);
+    expect(t.options.theme).toEqual(getTerminalTheme("dracula"));
+  });
+
+  it("reactively updates terminal options when store appearance changes without recreating terminal", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(xtermState.instances.length).toBe(1);
+    const fitMock = addonState.fitInstances[0]?.fit;
+
+    act(() => {
+      useTerminalStore.getState().updateAppearanceSettings({
+        themeName: "nord",
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 18,
+        lineHeight: 1.5,
+        cursorStyle: "bar",
+        cursorBlink: false,
+      });
+    });
+
+    // Terminal instance was NOT recreated
+    expect(xtermState.instances.length).toBe(1);
+    expect(term().dispose).not.toHaveBeenCalled();
+
+    const t = term();
+    expect(t.options.fontSize).toBe(18);
+    expect(t.options.fontFamily).toBe("'JetBrains Mono', monospace");
+    expect(t.options.lineHeight).toBe(1.5);
+    expect(t.options.cursorStyle).toBe("bar");
+    expect(t.options.cursorBlink).toBe(false);
+    expect(t.options.theme).toEqual(getTerminalTheme("nord"));
+    expect(fitMock).toHaveBeenCalled();
+  });
+
+  it("applies dimmed class to container when dimInactivePanes is true and pane is unfocused", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+        def: { id: "def", title: "def", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "abc" },
+        b: { type: "leaf", id: "def" },
+      },
+      focusedPath: [1], // "def" is focused, "abc" is unfocused
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        appearance: {
+          ...DEFAULT_APP_SETTINGS.appearance,
+          dimInactivePanes: true,
+        },
+      },
+    });
+
+    const { container } = render(<TerminalPane id="abc" path={[0]} />);
+    await waitForSpawned();
+
+    const pane = container.querySelector(".terminal-pane");
+    expect(pane?.classList.contains("dimmed")).toBe(true);
+  });
+
+  it("removes dimmed class when dimInactivePanes is disabled or pane becomes focused", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+        def: { id: "def", title: "def", status: "running", cols: 80, rows: 24 },
+      },
+      layout: {
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: { type: "leaf", id: "abc" },
+        b: { type: "leaf", id: "def" },
+      },
+      focusedPath: [1], // "abc" at [0] is unfocused
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        appearance: {
+          ...DEFAULT_APP_SETTINGS.appearance,
+          dimInactivePanes: true,
+        },
+      },
+    });
+
+    const { container, rerender } = render(<TerminalPane id="abc" path={[0]} />);
+    await waitForSpawned();
+
+    const pane = container.querySelector(".terminal-pane");
+    expect(pane?.classList.contains("dimmed")).toBe(true);
+
+    // Focus "abc"
+    act(() => {
+      useTerminalStore.setState({ focusedPath: [0] });
+    });
+    rerender(<TerminalPane id="abc" path={[0]} />);
+    expect(pane?.classList.contains("dimmed")).toBe(false);
+
+    // Unfocus "abc" again but disable dimInactivePanes
+    act(() => {
+      useTerminalStore.setState({ focusedPath: [1] });
+      useTerminalStore.getState().updateAppearanceSettings({ dimInactivePanes: false });
+    });
+    rerender(<TerminalPane id="abc" path={[0]} />);
+    expect(pane?.classList.contains("dimmed")).toBe(false);
   });
 });
