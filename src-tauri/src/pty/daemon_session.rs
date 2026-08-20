@@ -9,13 +9,11 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
 
 const HIGH_WATERMARK_BYTES: usize = 256 * 1024;
 const LOW_WATERMARK_BYTES: usize = 32 * 1024;
 const READ_CHUNK_SIZE: usize = 8 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-const BROADCAST_CAPACITY: usize = 2048;
 const SCREEN_SCROLLBACK_LINES: usize = 1000;
 
 pub struct DaemonSession {
@@ -30,8 +28,16 @@ pub struct DaemonSession {
     pub pid: u32,
     pub pending_bytes: Arc<AtomicUsize>,
     pub paused: Arc<AtomicBool>,
-    pub broadcast_tx: broadcast::Sender<DaemonEvent>,
+    pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
     pub seq: Arc<AtomicU64>,
+}
+
+fn emit_event(
+    subscribers: &Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
+    event: DaemonEvent,
+) {
+    let mut subs = subscribers.lock();
+    subs.retain(|tx| tx.send(event.clone()).is_ok());
 }
 
 impl DaemonSession {
@@ -103,7 +109,7 @@ impl DaemonSession {
             .try_clone_reader()
             .map_err(|e| format!("failed to clone pty reader: {e}"))?;
 
-        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
+        let subscribers = Arc::new(Mutex::new(Vec::new()));
         let screen_mirror = Arc::new(Mutex::new(ScreenMirror::new(
             cols,
             rows,
@@ -122,7 +128,7 @@ impl DaemonSession {
             pid,
             pending_bytes: Arc::new(AtomicUsize::new(0)),
             paused: Arc::new(AtomicBool::new(false)),
-            broadcast_tx,
+            subscribers,
             seq: Arc::new(AtomicU64::new(0)),
         });
 
@@ -143,15 +149,15 @@ impl DaemonSession {
         let master = Arc::clone(&session.master);
         let child = Arc::clone(&session.child);
         let screen_mirror = Arc::clone(&session.screen_mirror);
-        let broadcast_tx = session.broadcast_tx.clone();
+        let subscribers = Arc::clone(&session.subscribers);
         let seq = Arc::clone(&session.seq);
 
         let id_watch = id.clone();
         let master_watch = Arc::clone(&master);
         let child_watch = Arc::clone(&child);
-        let broadcast_tx_watch = broadcast_tx.clone();
+        let subscribers_watch = Arc::clone(&session.subscribers);
 
-        // Reader thread: reads PTY output, feeds screen mirror, scans OSC, and broadcasts data events
+        // Reader thread: reads PTY output, feeds screen mirror, scans OSC, and emits data events
         std::thread::spawn(move || {
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
@@ -182,23 +188,29 @@ impl DaemonSession {
                         // OSC scanning for CWD tracking
                         if let Some(new_cwd) = osc_scanner.scan(chunk) {
                             *session_cwd.lock() = Some(new_cwd.clone());
-                            let _ = broadcast_tx.send(DaemonEvent::Cwd {
-                                session_id: id.clone(),
-                                cwd: new_cwd,
-                            });
+                            emit_event(
+                                &subscribers,
+                                DaemonEvent::Cwd {
+                                    session_id: id.clone(),
+                                    cwd: new_cwd,
+                                },
+                            );
                         }
 
                         // Feed VT100 virtual screen buffer
                         screen_mirror.lock().process(chunk);
 
-                        // Broadcast Data event with monotonic sequence number
+                        // Emit Data event with monotonic sequence number
                         let seq_num = seq.fetch_add(1, Ordering::SeqCst);
-                        let _ = broadcast_tx.send(DaemonEvent::Data {
-                            session_id: id.clone(),
-                            data: utf8_decoder.decode(chunk),
-                            bytes: chunk.len(),
-                            seq: seq_num,
-                        });
+                        emit_event(
+                            &subscribers,
+                            DaemonEvent::Data {
+                                session_id: id.clone(),
+                                data: utf8_decoder.decode(chunk),
+                                bytes: chunk.len(),
+                                seq: seq_num,
+                            },
+                        );
                     }
                     Err(_) => break,
                 }
@@ -216,10 +228,13 @@ impl DaemonSession {
                     .map(|status| status.exit_code() as i32);
                 if let Some(code) = exit_code {
                     master_watch.lock().take();
-                    let _ = broadcast_tx_watch.send(DaemonEvent::Exit {
-                        session_id: id_watch,
-                        code: Some(code),
-                    });
+                    emit_event(
+                        &subscribers_watch,
+                        DaemonEvent::Exit {
+                            session_id: id_watch,
+                            code: Some(code),
+                        },
+                    );
                     break;
                 }
                 std::thread::sleep(POLL_INTERVAL);
@@ -275,8 +290,10 @@ impl DaemonSession {
     }
 
     /// Subscribe to real-time events for this session.
-    pub fn subscribe(&self) -> broadcast::Receiver<DaemonEvent> {
-        self.broadcast_tx.subscribe()
+    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<DaemonEvent> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.subscribers.lock().push(tx);
+        rx
     }
 
     pub fn pid(&self) -> u32 {
@@ -345,13 +362,13 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Ok(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
                     collected.push_str(&data);
                     if collected.contains("daemon-test-ok") {
                         break;
                     }
                 }
-                Ok(Ok(DaemonEvent::Exit { .. })) => break,
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
                 _ => continue,
             }
         }
@@ -381,7 +398,7 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Ok(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
                     if data.contains("snapshot_content_123") {
                         break;
                     }
@@ -439,14 +456,14 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Ok(DaemonEvent::Data { bytes, data, .. })) => {
+                Ok(Some(DaemonEvent::Data { bytes, data, .. })) => {
                     assert_eq!(bytes, data.as_bytes().len());
                     total_bytes_received += bytes;
                     if data.contains("🚀") || data.contains("日本語") || data.contains("test") {
                         break;
                     }
                 }
-                Ok(Ok(DaemonEvent::Exit { .. })) => break,
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
                 _ => continue,
             }
         }
@@ -476,13 +493,13 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Ok(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
                     collected.push_str(&data);
                     if collected.contains("cwd=test_ws_cwd") {
                         break;
                     }
                 }
-                Ok(Ok(DaemonEvent::Exit { .. })) => break,
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
                 _ => continue,
             }
         }

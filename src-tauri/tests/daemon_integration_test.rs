@@ -277,3 +277,77 @@ fn test_e2e_daemon_cwd_env_injection() {
     cancel_token.cancel();
     let _ = server_thread.join();
 }
+
+#[test]
+fn test_e2e_daemon_high_throughput_zero_drop_stream() {
+    let socket_path = generate_test_socket_path("zero_drop");
+    let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
+
+    let client = Arc::new(DaemonClient::connect(&socket_path).expect("connect client failed"));
+    let session_id = "e2e-zero-drop-session";
+    let (data_tx, data_rx) = channel::<String>();
+
+    let client_for_cb = Arc::clone(&client);
+    client.register_callbacks(
+        session_id,
+        Some(Box::new(move |id, bytes| {
+            let _ = data_tx.send(String::from_utf8_lossy(bytes).into_owned());
+            let _ = client_for_cb.ack(id, bytes.len());
+        })),
+        None,
+        None,
+    );
+
+    let attach_res = client
+        .create_or_attach(session_id, 80, 24, None, None)
+        .expect("create_or_attach failed");
+    assert!(attach_res.is_new);
+
+    #[cfg(target_os = "windows")]
+    client
+        .write(
+            session_id,
+            "1..10000 | ForEach-Object { [Console]::WriteLine(\"SEQ_$_\") }\r\n",
+        )
+        .expect("write failed");
+
+    #[cfg(not(target_os = "windows"))]
+    client
+        .write(
+            session_id,
+            "awk 'BEGIN { for (i=1; i<=10000; i++) print \"SEQ_\" i }'\n",
+        )
+        .expect("write failed");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut collected = String::new();
+    while std::time::Instant::now() < deadline {
+        if let Ok(chunk) = data_rx.recv_timeout(Duration::from_millis(200)) {
+            collected.push_str(&chunk);
+            if collected.contains("SEQ_10000") {
+                break;
+            }
+        }
+    }
+
+    assert!(
+        collected.contains("SEQ_10000"),
+        "expected to receive SEQ_10000 within deadline, received {} bytes",
+        collected.len()
+    );
+
+    // Verify key sequence checkpoints to ensure zero drop
+    for i in [1, 2, 50, 100, 500, 1000, 2500, 5000, 7500, 9999, 10000] {
+        let expected = format!("SEQ_{i}");
+        assert!(
+            collected.contains(&expected),
+            "expected output to contain {expected}"
+        );
+    }
+
+    client.kill(session_id).expect("kill failed");
+    client.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+

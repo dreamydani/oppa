@@ -252,19 +252,9 @@ where
                                     let mut rx = session.subscribe();
                                     let out_tx_sub = out_tx.clone();
                                     let sub_task = tokio::spawn(async move {
-                                        loop {
-                                            match rx.recv().await {
-                                                Ok(event) => {
-                                                    if let Ok(json) = serde_json::to_string(&event) {
-                                                        if out_tx_sub.send(format!("{json}\n")).await.is_err() {
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                                    continue;
-                                                }
-                                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                        while let Some(event) = rx.recv().await {
+                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                if out_tx_sub.send(format!("{json}\n")).await.is_err() {
                                                     break;
                                                 }
                                             }
