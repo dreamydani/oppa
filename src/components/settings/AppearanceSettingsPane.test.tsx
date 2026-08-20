@@ -119,31 +119,40 @@ describe("AppearanceSettingsPane", () => {
   });
 
   describe("Sidebar & Chrome Bento Card", () => {
-    it("updates sidebarOnLaunch via segmented control", () => {
+    it("updates sidebarOnLaunch via 3-way segmented control", () => {
       useTerminalStore.setState({
         settings: {
           ...useTerminalStore.getState().settings,
           appearance: {
             ...useTerminalStore.getState().settings.appearance,
-            sidebarOnLaunch: "open",
+            sidebarOnLaunch: "remember_last",
           },
         },
       });
       render(<AppearanceSettingsPane />);
 
+      const rememberBtn = screen.getByRole("button", { name: /^remember last$/i });
       const openBtn = screen.getByRole("button", { name: /^open$/i });
       const collapsedBtn = screen.getByRole("button", { name: /^collapsed$/i });
 
-      expect(openBtn).toHaveClass("active");
+      expect(rememberBtn).toHaveClass("active");
+      expect(openBtn).not.toHaveClass("active");
       expect(collapsedBtn).not.toHaveClass("active");
-
-      fireEvent.click(collapsedBtn);
-      expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("collapsed");
-      expect(collapsedBtn).toHaveClass("active");
 
       fireEvent.click(openBtn);
       expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("open");
       expect(openBtn).toHaveClass("active");
+      expect(rememberBtn).not.toHaveClass("active");
+
+      fireEvent.click(collapsedBtn);
+      expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("collapsed");
+      expect(collapsedBtn).toHaveClass("active");
+      expect(openBtn).not.toHaveClass("active");
+
+      fireEvent.click(rememberBtn);
+      expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("remember_last");
+      expect(rememberBtn).toHaveClass("active");
+      expect(collapsedBtn).not.toHaveClass("active");
     });
 
     it("toggles showStatusBar switch", () => {

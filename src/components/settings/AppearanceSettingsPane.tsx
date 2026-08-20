@@ -293,6 +293,13 @@ export function AppearanceSettingsPane(): React.ReactElement {
                 >
                   <button
                     type="button"
+                    className={`settings-segmented-btn ${appearance.sidebarOnLaunch === "remember_last" ? "active" : ""}`}
+                    onClick={() => updateAppearanceSettings({ sidebarOnLaunch: "remember_last" })}
+                  >
+                    Remember Last
+                  </button>
+                  <button
+                    type="button"
                     className={`settings-segmented-btn ${appearance.sidebarOnLaunch === "open" ? "active" : ""}`}
                     onClick={() => updateAppearanceSettings({ sidebarOnLaunch: "open" })}
                   >

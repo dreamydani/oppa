@@ -113,6 +113,8 @@ function App() {
       const currentSettings = useTerminalStore.getState().settings;
       if (currentSettings.appearance.sidebarOnLaunch === "collapsed") {
         useTerminalStore.setState({ leftSidebarOpen: false });
+      } else if (currentSettings.appearance.sidebarOnLaunch === "open") {
+        useTerminalStore.setState({ leftSidebarOpen: true });
       }
       if (currentSettings.general.startupBehavior === "workspace_launcher") {
         useTerminalStore.getState().openWorkspaceLauncher();

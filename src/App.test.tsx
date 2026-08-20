@@ -995,6 +995,44 @@ describe("App", () => {
       expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
     });
   });
+
+  it("opens left sidebar on initial load when sidebarOnLaunch is 'open'", async () => {
+    useTerminalStore.setState({
+      leftSidebarOpen: false,
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          sidebarOnLaunch: "open",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    });
+  });
+
+  it("preserves left sidebar state on initial load when sidebarOnLaunch is 'remember_last'", async () => {
+    useTerminalStore.setState({
+      leftSidebarOpen: false,
+      settings: {
+        ...useTerminalStore.getState().settings,
+        appearance: {
+          ...useTerminalStore.getState().settings.appearance,
+          sidebarOnLaunch: "remember_last",
+        },
+      },
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+    });
+  });
 });
 
 
