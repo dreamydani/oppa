@@ -40,6 +40,12 @@ impl Default for GeneralSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AppearanceSettings {
+    pub app_theme: String,
+    pub app_font_family: String,
+    pub ui_zoom: f32,
+    pub sidebar_on_launch: String,
+    pub show_status_bar: bool,
+    pub show_titlebar_logo: bool,
     pub theme_name: String,
     pub font_family: String,
     pub font_size: u16,
@@ -52,6 +58,12 @@ pub struct AppearanceSettings {
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
+            app_theme: "dark".into(),
+            app_font_family: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif".into(),
+            ui_zoom: 1.0,
+            sidebar_on_launch: "open".into(),
+            show_status_bar: true,
+            show_titlebar_logo: true,
             theme_name: "oppa_dark".into(),
             font_family: "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace".into(),
             font_size: 14,
@@ -143,6 +155,12 @@ mod tests {
     #[test]
     fn appearance_settings_default_and_roundtrip() {
         let settings = AppSettings::default();
+        assert_eq!(settings.appearance.app_theme, "dark");
+        assert_eq!(settings.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+        assert_eq!(settings.appearance.ui_zoom, 1.0);
+        assert_eq!(settings.appearance.sidebar_on_launch, "open");
+        assert!(settings.appearance.show_status_bar);
+        assert!(settings.appearance.show_titlebar_logo);
         assert_eq!(settings.appearance.theme_name, "oppa_dark");
         assert_eq!(settings.appearance.font_family, "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace");
         assert_eq!(settings.appearance.font_size, 14);
@@ -161,5 +179,26 @@ mod tests {
         let json_without_appearance = r#"{"general":{"default_cwd_mode":"home","custom_default_cwd":"","startup_behavior":"restore_previous","tab_switch_mode":"sequential","confirm_close_tab_with_multiple_panes":true,"confirm_quit_with_running_processes":true,"editor_word_wrap":true,"editor_auto_save_delay":1000,"browser_search_engine":"duckduckgo","browser_home_page":"https://duckduckgo.com"}}"#;
         let deserialized: AppSettings = serde_json::from_str(json_without_appearance).unwrap();
         assert_eq!(deserialized.appearance, AppearanceSettings::default());
+    }
+
+    #[test]
+    fn app_ui_appearance_settings_defaults_and_backward_compatibility() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.appearance.app_theme, "dark");
+        assert_eq!(settings.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+        assert_eq!(settings.appearance.ui_zoom, 1.0);
+        assert_eq!(settings.appearance.sidebar_on_launch, "open");
+        assert!(settings.appearance.show_status_bar);
+        assert!(settings.appearance.show_titlebar_logo);
+
+        let legacy_json = r#"{"general":{"default_cwd_mode":"home"},"appearance":{"theme_name":"dracula","font_size":16}}"#;
+        let deserialized: AppSettings = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(deserialized.appearance.theme_name, "dracula");
+        assert_eq!(deserialized.appearance.app_theme, "dark");
+        assert_eq!(deserialized.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+        assert_eq!(deserialized.appearance.ui_zoom, 1.0);
+        assert_eq!(deserialized.appearance.sidebar_on_launch, "open");
+        assert!(deserialized.appearance.show_status_bar);
+        assert!(deserialized.appearance.show_titlebar_logo);
     }
 }
