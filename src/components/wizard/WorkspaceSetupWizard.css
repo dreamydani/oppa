@@ -1,41 +1,58 @@
-/* Inline Workspace Setup Wizard Styles - Minimalist Claymorphism (Monochrome & Slate) */
+/* ==========================================================================
+   Workspace Setup Wizard - Flat Minimalist & Floating Island Surfaces
+   ========================================================================== */
 
-/* Minimalist + Claymorphism Design Tokens (No Orange) */
 :root,
 .wizard-workbench-page {
-  --wizard-bg-canvas: #09090b;
-  --wizard-bg-surface: #121216;
-  --wizard-bg-surface-elevated: #18181f;
-  --wizard-bg-surface-hover: #20202a;
-  --wizard-bg-sunken: #0c0c0f;
+  --wizard-bg-canvas: var(--bg-terminal, #000000);
+  --wizard-bg-surface: var(--bg-sidebar, #121214);
+  --wizard-bg-surface-elevated: var(--bg-card, #18181b);
+  --wizard-bg-surface-hover: rgba(255, 255, 255, 0.06);
+  --wizard-bg-sunken: rgba(255, 255, 255, 0.025);
 
-  --wizard-border: rgba(255, 255, 255, 0.08);
+  --wizard-border: var(--border-divider, rgba(255, 255, 255, 0.08));
   --wizard-border-subtle: rgba(255, 255, 255, 0.04);
-  --wizard-border-highlight: rgba(255, 255, 255, 0.18);
-  --wizard-specular-top: rgba(255, 255, 255, 0.12);
+  --wizard-border-highlight: rgba(255, 255, 255, 0.16);
 
-  /* Monochromatic Minimalist Accents */
   --wizard-accent-primary: #ffffff;
-  --wizard-accent-hover: #f4f4f5;
-  --wizard-accent-active: #e4e4e7;
-  --wizard-accent-glow: rgba(255, 255, 255, 0.12);
-  --wizard-accent-surface: rgba(255, 255, 255, 0.06);
-  --wizard-accent-border: rgba(255, 255, 255, 0.22);
+  --wizard-accent-surface: rgba(255, 255, 255, 0.08);
+  --wizard-accent-border: rgba(255, 255, 255, 0.25);
 
-  /* Typography */
-  --wizard-text-primary: #fafafa;
-  --wizard-text-secondary: #a1a1aa;
-  --wizard-text-muted: #71717a;
+  --wizard-text-primary: var(--text-primary, #ededec);
+  --wizard-text-secondary: var(--text-secondary, #a1a1aa);
+  --wizard-text-muted: var(--text-muted, #71717a);
 
-  /* Clay Shadows */
-  --wizard-shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.6), inset 0 1px 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 2px 0 rgba(0, 0, 0, 0.4);
-  --wizard-shadow-card-elevated: 0 14px 36px -6px rgba(0, 0, 0, 0.7), inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 2px 0 rgba(0, 0, 0, 0.4);
-  --wizard-shadow-tile-active: 0 8px 24px -2px rgba(255, 255, 255, 0.08), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25), inset 0 -1px 2px 0 rgba(0, 0, 0, 0.3);
-  --wizard-shadow-sunken: inset 0 2px 5px 0 rgba(0, 0, 0, 0.5), 0 1px 0 0 rgba(255, 255, 255, 0.03);
-  --wizard-shadow-btn-primary: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.6), inset 0 -2px 4px rgba(0, 0, 0, 0.25);
+  --wizard-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.25);
+  --wizard-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
-/* Full-Page Workbench Container */
+[data-theme="light"],
+[data-theme="light"] .wizard-workbench-page {
+  --wizard-bg-canvas: #f8fafc;
+  --wizard-bg-surface: #ffffff;
+  --wizard-bg-surface-elevated: #f1f5f9;
+  --wizard-bg-surface-hover: rgba(0, 0, 0, 0.04);
+  --wizard-bg-sunken: #f8fafc;
+
+  --wizard-border: rgba(0, 0, 0, 0.08);
+  --wizard-border-subtle: rgba(0, 0, 0, 0.04);
+  --wizard-border-highlight: rgba(0, 0, 0, 0.16);
+
+  --wizard-accent-primary: #09090b;
+  --wizard-accent-surface: rgba(0, 0, 0, 0.05);
+  --wizard-accent-border: rgba(0, 0, 0, 0.22);
+
+  --wizard-text-primary: #09090b;
+  --wizard-text-secondary: #475569;
+  --wizard-text-muted: #64748b;
+
+  --wizard-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --wizard-shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.09);
+}
+
+/* ==========================================================================
+   Full-Page Workbench Container
+   ========================================================================== */
 .wizard-workbench-page {
   width: 100%;
   height: 100%;
@@ -43,22 +60,23 @@
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 40px 24px 60px 24px;
+  padding: 36px 20px 50px 20px;
   background: var(--wizard-bg-canvas);
   color: var(--wizard-text-primary);
   box-sizing: border-box;
 }
 
-/* Centered Breathing Content Container */
 .wizard-content-container {
   width: 100%;
-  max-width: 760px;
+  max-width: 740px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 20px;
 }
 
-/* Top Page Header */
+/* ==========================================================================
+   Top Header
+   ========================================================================== */
 .wizard-page-header {
   display: flex;
   align-items: center;
@@ -70,7 +88,7 @@
 .wizard-dialog-title-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .wizard-logo-tag,
@@ -78,105 +96,89 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--wizard-bg-surface-elevated);
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-primary);
-  border: 1px solid var(--wizard-border-highlight);
-  box-shadow: var(--wizard-shadow-card);
+  border: 1px solid var(--wizard-border);
 }
 
 .wizard-dialog-heading {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--wizard-text-primary);
   letter-spacing: -0.01em;
 }
 
 .wizard-close-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--wizard-bg-surface-elevated);
+  background: transparent;
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-muted);
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-card);
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 
 .wizard-close-btn:hover {
   background: var(--wizard-bg-surface-hover);
   border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
-  transform: translateY(-1px);
 }
 
-.wizard-close-btn:active {
-  transform: scale(0.95);
-  box-shadow: var(--wizard-shadow-sunken);
-}
-
-/* Progress Stepper Bar */
+/* ==========================================================================
+   Progress Stepper (Segmented Pill)
+   ========================================================================== */
 .wizard-progress-nav {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 6px;
+  padding: 3px 6px;
   background: var(--wizard-bg-surface);
   border: 1px solid var(--wizard-border);
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: var(--wizard-shadow-card);
+  margin: 0 auto;
 }
 
 .wizard-step-pill,
 .wizard-progress-step {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  border-radius: 9999px;
-  background: var(--wizard-bg-sunken);
-  border: 1px solid var(--wizard-border);
+  gap: 7px;
+  padding: 5px 14px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--wizard-text-muted);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
   user-select: none;
 }
 
 .wizard-step-pill:hover,
 .wizard-progress-step:hover {
-  border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
-  transform: translateY(-1px);
-}
-
-.wizard-step-pill:active,
-.wizard-progress-step:active {
-  transform: scale(0.97);
+  background: var(--wizard-bg-surface-hover);
 }
 
 .wizard-step-pill.active,
 .wizard-progress-step.active {
-  background: var(--wizard-bg-surface-elevated);
-  border-color: var(--wizard-accent-border);
+  background: var(--wizard-accent-surface);
+  border-color: var(--wizard-border-highlight);
   color: var(--wizard-accent-primary);
   font-weight: 600;
-  box-shadow: var(--wizard-shadow-tile-active);
-  transform: translateY(-1px);
 }
 
 .wizard-step-pill.completed,
 .wizard-progress-step.completed {
-  border-color: var(--wizard-border-subtle);
-  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-secondary);
 }
 
@@ -188,17 +190,15 @@
   height: 18px;
   border-radius: 50%;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   background: var(--wizard-border);
   color: inherit;
-  transition: all 0.18s ease;
 }
 
 .wizard-step-pill.active .wizard-step-num,
 .wizard-progress-step.active .wizard-step-num {
   background: var(--wizard-accent-primary);
   color: var(--wizard-bg-canvas);
-  box-shadow: 0 0 8px var(--wizard-accent-glow);
 }
 
 .wizard-step-pill.completed .wizard-step-num,
@@ -213,10 +213,9 @@
 
 .wizard-progress-divider,
 .wizard-step-divider {
-  width: 32px;
+  width: 20px;
   height: 1px;
   background: var(--wizard-border);
-  transition: background 0.18s ease;
 }
 
 .wizard-progress-divider.active,
@@ -224,7 +223,9 @@
   background: var(--wizard-accent-border);
 }
 
-/* Step Container & Headers */
+/* ==========================================================================
+   Step Container & Headings
+   ========================================================================== */
 .wizard-step-body {
   width: 100%;
 }
@@ -242,7 +243,7 @@
 
 .wizard-step-title {
   margin: 0 0 4px 0;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--wizard-text-primary);
   letter-spacing: -0.02em;
@@ -250,12 +251,14 @@
 
 .wizard-step-subtitle {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--wizard-text-muted);
   line-height: 1.4;
 }
 
-/* Form Groups & Card Sections */
+/* ==========================================================================
+   Section Cards & Form Groups
+   ========================================================================== */
 .wizard-section,
 .wizard-form-group {
   display: flex;
@@ -297,25 +300,26 @@
   font-size: 11px;
   padding: 1px 7px;
   border-radius: 9999px;
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-muted);
   border: 1px solid var(--wizard-border-subtle);
-  font-weight: 600;
-}
-
-/* Layout Preview Pill */
-.wizard-layout-pill {
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  padding: 2px 10px;
-  border-radius: 9999px;
-  background: var(--wizard-bg-surface-elevated);
-  color: var(--wizard-text-primary);
-  border: 1px solid var(--wizard-border-highlight);
   font-weight: 500;
 }
 
-/* Input Styles - Sunken Wells */
+.wizard-layout-pill {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--wizard-bg-surface-hover);
+  color: var(--wizard-text-primary);
+  border: 1px solid var(--wizard-border);
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Input Fields
+   ========================================================================== */
 .wizard-input-wrapper {
   position: relative;
   display: flex;
@@ -324,14 +328,12 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 8px;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.12s ease;
   box-sizing: border-box;
 }
 
 .wizard-input-wrapper:focus-within {
   border-color: var(--wizard-accent-border);
-  box-shadow: 0 0 0 2px var(--wizard-accent-glow), var(--wizard-shadow-sunken);
 }
 
 .wizard-input-wrapper.with-icon .wizard-input-icon {
@@ -369,7 +371,9 @@
   font-size: 12px;
 }
 
-/* Custom Clay Dropdown (Shell Selection) */
+/* ==========================================================================
+   Shell Dropdown Menu
+   ========================================================================== */
 .wizard-custom-dropdown {
   position: relative;
   width: 100%;
@@ -377,8 +381,8 @@
 
 .wizard-dropdown-trigger {
   width: 100%;
-  height: 40px;
-  padding: 0 14px;
+  height: 38px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -388,8 +392,7 @@
   color: var(--wizard-text-primary);
   font-size: 13px;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
   user-select: none;
   box-sizing: border-box;
 }
@@ -401,7 +404,6 @@
 
 .wizard-custom-dropdown.open .wizard-dropdown-trigger {
   border-color: var(--wizard-accent-border);
-  box-shadow: 0 0 0 2px var(--wizard-accent-glow), var(--wizard-shadow-sunken);
 }
 
 .wizard-dropdown-trigger-label {
@@ -411,7 +413,7 @@
 
 .wizard-dropdown-chevron {
   color: var(--wizard-text-muted);
-  transition: transform 0.2s ease, color 0.15s ease;
+  transition: transform 0.15s ease;
 }
 
 .wizard-custom-dropdown.open .wizard-dropdown-chevron {
@@ -421,46 +423,34 @@
 
 .wizard-dropdown-menu {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 60;
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-surface);
   border: 1px solid var(--wizard-border-highlight);
-  border-radius: 10px;
-  padding: 6px;
-  box-shadow: var(--wizard-shadow-card-elevated);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: var(--wizard-shadow-elevated);
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: wizardDropdownFade 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  max-height: 240px;
+  max-height: 220px;
   overflow-y: auto;
-}
-
-@keyframes wizardDropdownFade {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .wizard-dropdown-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-radius: 6px;
   background: transparent;
   border: none;
   color: var(--wizard-text-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all 0.1s ease;
   text-align: left;
   width: 100%;
 }
@@ -483,7 +473,7 @@
 }
 
 .wizard-dropdown-item-label {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   color: inherit;
 }
@@ -497,7 +487,9 @@
   color: var(--wizard-accent-primary);
 }
 
-/* Quick Jump cd Row */
+/* ==========================================================================
+   Quick Jump cd Row
+   ========================================================================== */
 .wizard-cd-row {
   display: flex;
   align-items: center;
@@ -506,14 +498,11 @@
   border: 1px solid var(--wizard-border);
   border-radius: 8px;
   padding: 4px 10px;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
   box-sizing: border-box;
 }
 
 .wizard-cd-row:focus-within {
   border-color: var(--wizard-accent-border);
-  box-shadow: 0 0 0 2px var(--wizard-accent-glow), var(--wizard-shadow-sunken);
 }
 
 .wizard-cd-prefix {
@@ -541,43 +530,36 @@
 .wizard-cd-kbd {
   font-size: 10px;
   font-family: var(--font-mono, monospace);
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-muted);
   border: 1px solid var(--wizard-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.3);
   user-select: none;
 }
 
 .wizard-cd-submit-btn {
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-surface-hover);
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-primary);
-  border-radius: 6px;
-  width: 26px;
-  height: 26px;
+  border-radius: 5px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-card);
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 
 .wizard-cd-submit-btn:hover {
-  background: var(--wizard-bg-surface-hover);
-  color: var(--wizard-text-primary);
+  background: var(--wizard-accent-surface);
   border-color: var(--wizard-border-highlight);
-  transform: translateY(-1px);
 }
 
-.wizard-cd-submit-btn:active {
-  transform: translateY(1px) scale(0.95);
-  box-shadow: var(--wizard-shadow-sunken);
-}
-
-/* Mechanical Keycap Grid Selector Tiles */
+/* ==========================================================================
+   Step 2: Grid Layout Selector Tiles
+   ========================================================================== */
 .wizard-grid-tiles-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -594,55 +576,41 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  min-height: 64px;
+  min-height: 60px;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-sunken), inset 0 1px 1px rgba(255, 255, 255, 0.08);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
   user-select: none;
 }
 
 .wizard-grid-tile:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--wizard-shadow-card), inset 0 1px 1px rgba(255, 255, 255, 0.15);
-}
-
-.wizard-grid-tile:active {
-  transform: translateY(1px) scale(0.98);
-  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .wizard-grid-tile.active {
   border-color: var(--wizard-accent-border);
   background: var(--wizard-accent-surface);
-  box-shadow: var(--wizard-shadow-tile-active), inset 0 1px 1px rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
 }
 
-/* Mini Tile Preview Boxes */
 .tile-preview-boxes {
   display: grid;
   gap: 2px;
-  width: 28px;
-  height: 24px;
+  width: 26px;
+  height: 22px;
   background: var(--wizard-bg-canvas);
   padding: 2px;
   border-radius: 3px;
   box-sizing: border-box;
   border: 1px solid var(--wizard-border-subtle);
-  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .tile-box {
   background: var(--wizard-border-highlight);
   border-radius: 1px;
-  transition: background 0.15s ease;
 }
 
 .wizard-grid-tile.active .tile-box {
   background: var(--wizard-accent-primary);
-  box-shadow: 0 0 3px var(--wizard-accent-glow);
 }
 
 .tile-grid-1 { grid-template-columns: 1fr; }
@@ -660,22 +628,23 @@
 }
 
 .tile-count {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--wizard-text-primary);
 }
 
 .tile-indicator-dot {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--wizard-accent-primary);
-  box-shadow: 0 0 4px var(--wizard-accent-glow);
 }
 
-/* Recents Bento Section */
+/* ==========================================================================
+   Recents Section (Warp / Left Sidebar Style)
+   ========================================================================== */
 .wizard-recents-empty {
-  padding: 16px;
+  padding: 14px;
   background: var(--wizard-bg-sunken);
   border: 1px dashed var(--wizard-border);
   border-radius: 8px;
@@ -692,7 +661,7 @@
   box-sizing: border-box;
   max-height: 180px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
 .wizard-recent-card {
@@ -702,31 +671,30 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 
 .wizard-recent-card:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--wizard-shadow-card);
-}
-
-.wizard-recent-card:active {
-  transform: translateY(1px) scale(0.99);
 }
 
 .recent-card-icon-col {
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--wizard-bg-surface-hover);
+  border: 1px solid var(--wizard-border);
   color: var(--wizard-text-muted);
   flex-shrink: 0;
 }
@@ -737,7 +705,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .recent-card-name {
@@ -761,8 +729,8 @@
 .recent-card-terminals-badge {
   font-size: 10px;
   font-weight: 500;
-  padding: 2px 7px;
-  background: var(--wizard-bg-surface-elevated);
+  padding: 1px 6px;
+  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-secondary);
   border: 1px solid var(--wizard-border-subtle);
   border-radius: 9999px;
@@ -770,90 +738,76 @@
   flex-shrink: 0;
 }
 
-/* Presets Chips */
+/* ==========================================================================
+   Presets Chips
+   ========================================================================== */
 .wizard-presets-chips-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .wizard-preset-chip {
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-primary);
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: 9999px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: var(--wizard-shadow-card);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 
 .wizard-preset-chip:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
-  transform: translateY(-1px);
-  color: var(--wizard-text-primary);
-}
-
-.wizard-preset-chip:active {
-  transform: translateY(1px) scale(0.97);
 }
 
 .wizard-new-preset-chip {
   border-style: dashed;
   border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-secondary);
-  background: var(--wizard-bg-surface-elevated);
+  background: transparent;
 }
 
 .wizard-new-preset-chip:hover {
   border-color: var(--wizard-text-primary);
   color: var(--wizard-text-primary);
-  background: var(--wizard-bg-surface-hover);
 }
 
-/* AI Personas Grid & Cards */
+/* ==========================================================================
+   Step 3: AI Personas Grid & Cards
+   ========================================================================== */
 .wizard-personas-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .wizard-persona-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 8px;
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   cursor: pointer;
   text-align: left;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
   user-select: none;
 }
 
 .wizard-persona-card:hover {
   border-color: var(--wizard-border-highlight);
   background: var(--wizard-bg-surface-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--wizard-shadow-card);
-}
-
-.wizard-persona-card:active {
-  transform: translateY(1px) scale(0.98);
-  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .wizard-persona-card.active {
   border-color: var(--wizard-accent-border);
   background: var(--wizard-accent-surface);
-  box-shadow: var(--wizard-shadow-tile-active);
-  transform: translateY(-1px);
 }
 
 .wizard-persona-card-header {
@@ -867,33 +821,29 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--wizard-bg-surface-elevated);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--wizard-bg-surface-hover);
   border: 1px solid var(--wizard-border);
-  box-shadow: var(--wizard-shadow-card);
-  transition: all 0.18s ease;
 }
 
 .wizard-persona-card.active .wizard-persona-icon-box {
   border-color: var(--wizard-accent-border);
-  box-shadow: 0 0 10px var(--wizard-accent-glow), var(--wizard-shadow-card);
 }
 
 .wizard-persona-badge {
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
+  font-weight: 600;
+  padding: 1px 6px;
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--wizard-text-secondary);
-  border: 1px solid var(--wizard-border-highlight);
+  border: 1px solid var(--wizard-border-subtle);
 }
 
 .wizard-persona-name {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--wizard-text-primary);
   letter-spacing: -0.01em;
@@ -902,23 +852,25 @@
 .wizard-persona-desc {
   font-size: 11px;
   color: var(--wizard-text-muted);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
-/* Startup Commands */
+/* ==========================================================================
+   Startup Commands
+   ========================================================================== */
 .wizard-commands-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   max-height: 240px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
 .wizard-command-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .wizard-command-label {
@@ -930,14 +882,13 @@
 .wizard-command-badge {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  font-weight: 700;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--wizard-bg-surface-elevated);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--wizard-bg-surface-hover);
   color: var(--wizard-text-secondary);
   border: 1px solid var(--wizard-border);
-  box-shadow: var(--wizard-shadow-card);
-  min-width: 36px;
+  min-width: 32px;
   text-align: center;
   user-select: none;
 }
@@ -947,15 +898,17 @@
   font-size: 12px;
 }
 
-/* Save Preset Section - Clay Switch Card */
+/* ==========================================================================
+   Save Preset Switch Card
+   ========================================================================== */
 .wizard-preset-save-card {
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 
 .wizard-preset-toggle-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
 }
@@ -964,14 +917,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--wizard-bg-surface-elevated);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--wizard-bg-surface-hover);
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-muted);
   flex-shrink: 0;
-  box-shadow: var(--wizard-shadow-card);
 }
 
 .wizard-preset-save-card.active .wizard-preset-icon-box {
@@ -983,11 +935,11 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .wizard-preset-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--wizard-text-primary);
 }
@@ -998,12 +950,11 @@
   line-height: 1.3;
 }
 
-/* Clay Switch Component */
 .wizard-switch-label {
   position: relative;
   display: inline-block;
-  width: 42px;
-  height: 24px;
+  width: 38px;
+  height: 20px;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1023,33 +974,29 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 9999px;
-  box-shadow: var(--wizard-shadow-sunken);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease;
 }
 
 .wizard-switch-slider::before {
   position: absolute;
   content: "";
-  height: 18px;
-  width: 18px;
+  height: 14px;
+  width: 14px;
   left: 2px;
   bottom: 2px;
   background: var(--wizard-text-muted);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease;
 }
 
 .wizard-switch-input:checked + .wizard-switch-slider {
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-accent-surface);
   border-color: var(--wizard-accent-border);
-  box-shadow: var(--wizard-shadow-tile-active);
 }
 
 .wizard-switch-input:checked + .wizard-switch-slider::before {
   transform: translateX(18px);
   background: var(--wizard-accent-primary);
-  box-shadow: 0 0 6px var(--wizard-accent-glow);
 }
 
 .wizard-preset-name-wrapper {
@@ -1058,27 +1005,16 @@
   gap: 6px;
   padding-top: 10px;
   border-top: 1px solid var(--wizard-border-subtle);
-  animation: wizardSlideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes wizardSlideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Bottom Action Footer */
+/* ==========================================================================
+   Bottom Action Footer
+   ========================================================================== */
 .wizard-action-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 12px;
-  margin-top: 4px;
+  padding-top: 10px;
 }
 
 .wizard-footer-left,
@@ -1092,29 +1028,26 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 18px;
-  border-radius: 10px;
-  font-size: 13px;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
   user-select: none;
 }
 
 .wizard-btn-back {
-  background: var(--wizard-bg-surface-elevated);
+  background: transparent;
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-secondary);
-  box-shadow: var(--wizard-shadow-card);
 }
 
 .wizard-btn-back:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-  box-shadow: none;
-  background: transparent;
   border-color: var(--wizard-border-subtle);
 }
 
@@ -1122,74 +1055,32 @@
   background: var(--wizard-bg-surface-hover);
   border-color: var(--wizard-border-highlight);
   color: var(--wizard-text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--wizard-shadow-card-elevated);
-}
-
-.wizard-btn-back:not(:disabled):active {
-  transform: translateY(1px) scale(0.98);
-  box-shadow: var(--wizard-shadow-sunken);
 }
 
 .wizard-btn-quick {
-  background: var(--wizard-bg-surface-elevated);
+  background: var(--wizard-bg-surface-hover);
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-primary);
-  border-radius: 9999px;
-  font-weight: 600;
-  box-shadow: var(--wizard-shadow-card);
+  border-radius: 8px;
+  font-weight: 500;
 }
 
 .wizard-btn-quick:hover {
-  background: var(--wizard-bg-surface-hover);
+  background: var(--wizard-accent-surface);
   border-color: var(--wizard-border-highlight);
-  transform: translateY(-1px);
-  box-shadow: var(--wizard-shadow-card-elevated);
 }
 
-.wizard-btn-quick:active {
-  transform: translateY(1px) scale(0.98);
-  box-shadow: var(--wizard-shadow-sunken);
-}
-
-.wizard-btn-next {
-  background: #fafafa;
-  border: 1px solid #fafafa;
-  color: #09090b;
-  font-weight: 600;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.8), inset 0 -2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.wizard-btn-next:hover {
-  background: #ffffff;
-  border-color: #ffffff;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), inset 0 -2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.wizard-btn-next:active {
-  transform: translateY(1px) scale(0.985);
-  box-shadow: var(--wizard-shadow-sunken);
-}
-
+.wizard-btn-next,
 .wizard-btn-launch {
-  background: #fafafa;
-  border: 1px solid #fafafa;
-  color: #09090b;
-  font-weight: 700;
-  box-shadow: var(--wizard-shadow-btn-primary);
+  background: var(--wizard-text-primary);
+  border: 1px solid var(--wizard-text-primary);
+  color: var(--wizard-bg-canvas);
+  font-weight: 600;
 }
 
+.wizard-btn-next:hover,
 .wizard-btn-launch:hover {
-  background: #ffffff;
-  border-color: #ffffff;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), inset 0 -2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.wizard-btn-launch:active {
-  transform: translateY(1px) scale(0.985);
-  box-shadow: var(--wizard-shadow-sunken);
+  opacity: 0.92;
 }
 
 .sr-only {
