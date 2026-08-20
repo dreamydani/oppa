@@ -48,6 +48,11 @@ import type {
   SettingsTabId,
 } from "../lib/settings/types";
 import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
+import {
+  getSavedWindowState,
+  applyWindowState,
+} from "../lib/window/transport";
+import type { WindowState } from "../lib/window/transport";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
@@ -1118,12 +1123,46 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     get().swapPanes(sourceId, targetId);
   },
 
-  // Persist the current multi-tab layout, session state, and active scrollbacks.
+  // Persist the current multi-tab layout, session state, UI view state, and active scrollbacks.
   saveLayout: async () => {
     if (!get().ready) return;
-    const { activeTabId, sessions, serializers, cachedScrollbacks } = get();
+    const {
+      activeTabId,
+      sessions,
+      serializers,
+      cachedScrollbacks,
+      leftSidebarOpen,
+      leftSidebarWidth,
+      rightSidebarOpen,
+      rightSidebarWidth,
+      rightSidebarTab,
+      activeAppMode,
+      maximizedSessionId,
+      editorTabs,
+      activeEditorPath,
+      editorViewMode,
+      browserUrl,
+      devicePreset,
+    } = get();
     const currentTabs = getSyncedTabs(get());
+    const windowState = await getSavedWindowState();
     const snapshot = {
+      version: 2,
+      ...(windowState ? { window: windowState } : {}),
+      ui: {
+        leftSidebarOpen,
+        leftSidebarWidth,
+        rightSidebarOpen,
+        rightSidebarWidth,
+        rightSidebarTab,
+        activeAppMode,
+        maximizedSessionId,
+        editorTabs,
+        activeEditorPath,
+        editorViewMode,
+        browserUrl,
+        devicePreset,
+      },
       tabs: currentTabs.map((t) => ({
         id: t.id,
         ...(t.title !== undefined ? { title: t.title } : {}),
@@ -1158,11 +1197,54 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const saved = await transportLoadLayout();
       if (!saved) return;
       const parsed = JSON.parse(saved) as {
+        version?: number;
+        window?: WindowState;
+        ui?: {
+          leftSidebarOpen?: boolean;
+          leftSidebarWidth?: number;
+          rightSidebarOpen?: boolean;
+          rightSidebarWidth?: number;
+          rightSidebarTab?: "explorer" | "git";
+          activeAppMode?: AppMode;
+          maximizedSessionId?: string | null;
+          editorTabs?: EditorTab[];
+          activeEditorPath?: string | null;
+          editorViewMode?: EditorViewMode;
+          browserUrl?: string;
+          devicePreset?: DevicePreset;
+        };
         tabs?: TabState[];
         activeTabId?: string;
         layout?: Layout;
         sessions?: SessionInfo[];
       };
+
+      if (parsed.ui) {
+        set((state) => ({
+          leftSidebarOpen: parsed.ui!.leftSidebarOpen ?? state.leftSidebarOpen,
+          leftSidebarWidth: parsed.ui!.leftSidebarWidth ?? state.leftSidebarWidth,
+          rightSidebarOpen: parsed.ui!.rightSidebarOpen ?? state.rightSidebarOpen,
+          rightSidebarWidth: parsed.ui!.rightSidebarWidth ?? state.rightSidebarWidth,
+          rightSidebarTab: parsed.ui!.rightSidebarTab ?? state.rightSidebarTab,
+          activeAppMode: parsed.ui!.activeAppMode ?? state.activeAppMode,
+          maximizedSessionId:
+            parsed.ui!.maximizedSessionId !== undefined
+              ? parsed.ui!.maximizedSessionId
+              : state.maximizedSessionId,
+          editorTabs: parsed.ui!.editorTabs ?? state.editorTabs,
+          activeEditorPath:
+            parsed.ui!.activeEditorPath !== undefined
+              ? parsed.ui!.activeEditorPath
+              : state.activeEditorPath,
+          editorViewMode: parsed.ui!.editorViewMode ?? state.editorViewMode,
+          browserUrl: parsed.ui!.browserUrl ?? state.browserUrl,
+          devicePreset: parsed.ui!.devicePreset ?? state.devicePreset,
+        }));
+      }
+
+      if (parsed.window) {
+        void applyWindowState(parsed.window);
+      }
       const byId = new Map((parsed.sessions ?? []).map((s) => [s.id, s]));
       const remap: Record<string, string> = {};
 

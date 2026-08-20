@@ -4,6 +4,7 @@ import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
 import * as settingsTransport from "../lib/settings/transport";
+import * as windowTransport from "../lib/window/transport";
 import { DEFAULT_APP_SETTINGS, DEFAULT_APPEARANCE_SETTINGS } from "../lib/settings/types";
 
 vi.mock("../lib/pty/transport", () => ({
@@ -39,6 +40,11 @@ vi.mock("../lib/settings/transport", () => ({
   loadSettings: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("../lib/window/transport", () => ({
+  getSavedWindowState: vi.fn().mockResolvedValue(null),
+  applyWindowState: vi.fn().mockResolvedValue(undefined),
+}));
+
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 const ptyKillMock = vi.mocked(transport.ptyKill);
 const ptyWriteMock = vi.mocked(transport.ptyWrite);
@@ -56,6 +62,8 @@ const readFileMock = vi.mocked(fsTransport.readFile);
 const writeFileMock = vi.mocked(fsTransport.writeFile);
 const saveSettingsMock = vi.mocked(settingsTransport.saveSettings);
 const loadSettingsMock = vi.mocked(settingsTransport.loadSettings);
+const getSavedWindowStateMock = vi.mocked(windowTransport.getSavedWindowState);
+const applyWindowStateMock = vi.mocked(windowTransport.applyWindowState);
 
 function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
@@ -671,26 +679,30 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
-    it("selectTab persists the new active tab", () => {
+    it("selectTab persists the new active tab", async () => {
       useTerminalStore.setState({
         tabs: [
           { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
           { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
         ],
         activeTabId: "t1",
+        ready: true,
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().selectTab("t2");
+      await Promise.resolve();
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
-    it("renameTab persists the tab title change", () => {
+    it("renameTab persists the tab title change", async () => {
       useTerminalStore.setState({
-        tabs: [{ id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
+        tabs: [{ id: "t1", title: "Old", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
         activeTabId: "t1",
+        ready: true,
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().renameTab("t1", "New Title");
+      await Promise.resolve();
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
@@ -726,9 +738,10 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).not.toHaveBeenCalled();
     });
 
-    it("updateSessionCwd debounces layout persistence by 2000ms", () => {
+    it("updateSessionCwd debounces layout persistence by 2000ms", async () => {
       vi.useFakeTimers();
       useTerminalStore.setState({
+        ready: true,
         sessions: {
           s1: { id: "s1", title: "s1", status: "running", cwd: "/old/dir", cols: 80, rows: 24 },
         },
@@ -739,30 +752,33 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
       // Advancing 1000ms should still not call saveLayout
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
       // Advancing remaining 1000ms triggers saveLayout
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
 
-    it("updateSessionCwd collapses rapid successive updates into a single debounced save", () => {
+    it("updateSessionCwd collapses rapid successive updates into a single debounced save", async () => {
       vi.useFakeTimers();
       useTerminalStore.setState({
+        ready: true,
         sessions: {
           s1: { id: "s1", title: "s1", status: "running", cwd: "/old/dir", cols: 80, rows: 24 },
         },
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().updateSessionCwd("s1", "/dir1");
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       useTerminalStore.getState().updateSessionCwd("s1", "/dir2");
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
 
     it("updateSessionCwd does not persist if cwd is unchanged or session is missing", () => {
@@ -888,26 +904,30 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalledTimes(1);
       const json = saveLayoutMock.mock.calls[0][0];
       const parsed = JSON.parse(json);
-      expect(parsed).toEqual({
-        tabs: [
-          {
-            id: "tab-1",
-            layout: {
-              type: "split",
-              dir: "h",
-              ratio: 0.4,
-              a: { type: "leaf", id: "a" },
-              b: { type: "leaf", id: "b" },
+      expect(parsed).toEqual(
+        expect.objectContaining({
+          version: 2,
+          ui: expect.any(Object),
+          tabs: [
+            {
+              id: "tab-1",
+              layout: {
+                type: "split",
+                dir: "h",
+                ratio: 0.4,
+                a: { type: "leaf", id: "a" },
+                b: { type: "leaf", id: "b" },
+              },
+              focusedPath: [],
             },
-            focusedPath: [],
-          },
-        ],
-        activeTabId: "tab-1",
-        sessions: [
-          { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
-          { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
-        ],
-      });
+          ],
+          activeTabId: "tab-1",
+          sessions: [
+            { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
+            { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
+          ],
+        }),
+      );
     });
 
     it("captures active serializer buffers and cleans up stale scrollbacks", async () => {
@@ -957,6 +977,167 @@ describe("terminalStore", () => {
       await useTerminalStore.getState().saveLayout();
       expect(saveScrollbackMock).toHaveBeenCalledWith("active", "active-buffer");
       expect(saveScrollbackMock).toHaveBeenCalledWith("bg", "bg-cached-buffer");
+    });
+
+    it("persists and restores UI sidebar, app mode, and maximized pane state", async () => {
+      useTerminalStore.setState({
+        ready: true,
+        leftSidebarOpen: true,
+        leftSidebarWidth: 310,
+        rightSidebarOpen: true,
+        rightSidebarWidth: 350,
+        rightSidebarTab: "git",
+        activeAppMode: "editor",
+        maximizedSessionId: "sess-1",
+        editorTabs: [
+          {
+            path: "/path/file.ts",
+            name: "file.ts",
+            content: "console.log('hi')",
+            originalContent: "console.log('hi')",
+            isDirty: false,
+            language: "typescript",
+            isMarkdown: false,
+          },
+        ],
+        activeEditorPath: "/path/file.ts",
+        editorViewMode: "markdown-preview",
+        browserUrl: "http://localhost:3000",
+        devicePreset: "iphone",
+      });
+
+      await useTerminalStore.getState().saveLayout();
+      expect(saveLayoutMock).toHaveBeenCalled();
+      const savedJson = JSON.parse(saveLayoutMock.mock.calls[0][0]);
+      expect(savedJson.version).toBe(2);
+      expect(savedJson.ui).toEqual(
+        expect.objectContaining({
+          leftSidebarOpen: true,
+          leftSidebarWidth: 310,
+          rightSidebarOpen: true,
+          rightSidebarWidth: 350,
+          rightSidebarTab: "git",
+          activeAppMode: "editor",
+          maximizedSessionId: "sess-1",
+          editorTabs: [
+            {
+              path: "/path/file.ts",
+              name: "file.ts",
+              content: "console.log('hi')",
+              originalContent: "console.log('hi')",
+              isDirty: false,
+              language: "typescript",
+              isMarkdown: false,
+            },
+          ],
+          activeEditorPath: "/path/file.ts",
+          editorViewMode: "markdown-preview",
+          browserUrl: "http://localhost:3000",
+          devicePreset: "iphone",
+        }),
+      );
+    });
+
+    it("persists window state from getSavedWindowState and applies on loadLayout", async () => {
+      getSavedWindowStateMock.mockResolvedValueOnce({
+        width: 1440,
+        height: 900,
+        x: 120,
+        y: 80,
+        isMaximized: true,
+      });
+
+      useTerminalStore.setState({ ready: true });
+      await useTerminalStore.getState().saveLayout();
+      expect(saveLayoutMock).toHaveBeenCalled();
+      const savedJson = JSON.parse(saveLayoutMock.mock.calls[0][0]);
+      expect(savedJson.window).toEqual({
+        width: 1440,
+        height: 900,
+        x: 120,
+        y: 80,
+        isMaximized: true,
+      });
+
+      loadLayoutMock.mockResolvedValueOnce(
+        JSON.stringify({
+          version: 2,
+          window: {
+            width: 1440,
+            height: 900,
+            x: 120,
+            y: 80,
+            isMaximized: true,
+          },
+          ui: {
+            leftSidebarOpen: false,
+            leftSidebarWidth: 320,
+            rightSidebarOpen: true,
+            rightSidebarWidth: 360,
+            rightSidebarTab: "git",
+            activeAppMode: "browser",
+            maximizedSessionId: "sess-2",
+            editorTabs: [],
+            activeEditorPath: null,
+            editorViewMode: "edit",
+            browserUrl: "http://localhost:5173",
+            devicePreset: "ipad",
+          },
+          tabs: [
+            {
+              id: "tab-1",
+              layout: { type: "leaf", id: "sess-2" },
+              focusedPath: [],
+            },
+          ],
+          activeTabId: "tab-1",
+          sessions: [
+            { id: "sess-2", title: "s2", status: "running", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("sess-2"));
+
+      await useTerminalStore.getState().loadLayout();
+      expect(applyWindowStateMock).toHaveBeenCalledWith({
+        width: 1440,
+        height: 900,
+        x: 120,
+        y: 80,
+        isMaximized: true,
+      });
+
+      const state = useTerminalStore.getState();
+      expect(state.leftSidebarOpen).toBe(false);
+      expect(state.leftSidebarWidth).toBe(320);
+      expect(state.rightSidebarOpen).toBe(true);
+      expect(state.rightSidebarWidth).toBe(360);
+      expect(state.rightSidebarTab).toBe("git");
+      expect(state.activeAppMode).toBe("browser");
+      expect(state.maximizedSessionId).toBe("sess-2");
+      expect(state.browserUrl).toBe("http://localhost:5173");
+      expect(state.devicePreset).toBe("ipad");
+    });
+
+    it("preserves store defaults when loading legacy layout.json without ui or window structures", async () => {
+      loadLayoutMock.mockResolvedValueOnce(
+        JSON.stringify({
+          layout: { type: "leaf", id: "legacy-s1" },
+          sessions: [
+            { id: "legacy-s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("legacy-s1"));
+
+      await useTerminalStore.getState().loadLayout();
+      expect(applyWindowStateMock).not.toHaveBeenCalled();
+      const state = useTerminalStore.getState();
+      expect(state.leftSidebarOpen).toBe(true);
+      expect(state.leftSidebarWidth).toBe(240);
+      expect(state.rightSidebarOpen).toBe(false);
+      expect(state.activeAppMode).toBe("terminal");
+      expect(state.maximizedSessionId).toBe(null);
     });
 
     it("propagates transport failures instead of swallowing them", async () => {
@@ -1644,7 +1825,7 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().sessions["missing"]).toBeUndefined();
     });
 
-    it("renameSession debounces layout persistence by 2000ms", () => {
+    it("renameSession debounces layout persistence by 2000ms", async () => {
       vi.useFakeTimers();
       useTerminalStore.setState({
         ready: true,
@@ -1657,14 +1838,15 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().sessions["s1"].title).toBe("Server");
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
 
-    it("renameSession collapses rapid successive renames into a single debounced save", () => {
+    it("renameSession collapses rapid successive renames into a single debounced save", async () => {
       vi.useFakeTimers();
       useTerminalStore.setState({
         ready: true,
@@ -1674,13 +1856,14 @@ describe("terminalStore", () => {
       });
       saveLayoutMock.mockClear();
       useTerminalStore.getState().renameSession("s1", "Server 1");
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       useTerminalStore.getState().renameSession("s1", "Server 2");
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
 
     it("toggleMaximizePane sets maximizedSessionId when provided an id", () => {
@@ -1901,7 +2084,7 @@ describe("terminalStore", () => {
       expect(activeTab?.title).toBe("my-app");
     });
 
-    it("createWizardTab appends a new tab with isWizard=true and activates it", () => {
+    it("createWizardTab appends a new tab with isWizard=true and activates it", async () => {
       useTerminalStore.setState({
         tabs: [{ id: "tab-1", title: "Shell", layout: { type: "leaf", id: "s-1" }, focusedPath: [] }],
         activeTabId: "tab-1",
@@ -1909,6 +2092,7 @@ describe("terminalStore", () => {
       });
 
       const wizardTabId = useTerminalStore.getState().createWizardTab();
+      await Promise.resolve();
       const state = useTerminalStore.getState();
 
       expect(state.activeTabId).toBe(wizardTabId);
@@ -2384,7 +2568,7 @@ describe("terminalStore", () => {
       useTerminalStore.setState({ ready: true });
     });
 
-    it("swaps two leaf positions in single-tab layout and updates focusedPath to follow focused session", () => {
+    it("swaps two leaf positions in single-tab layout and updates focusedPath to follow focused session", async () => {
       useTerminalStore.setState({
         layout: {
           type: "split",
@@ -2402,6 +2586,7 @@ describe("terminalStore", () => {
       saveLayoutMock.mockClear();
 
       useTerminalStore.getState().swapPanes("p1", "p2");
+      await Promise.resolve();
 
       const state = useTerminalStore.getState();
       expect(state.layout).toEqual({
@@ -2416,7 +2601,7 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
-    it("swaps leaves in the active tab of multi-tab state", () => {
+    it("swaps leaves in the active tab of multi-tab state", async () => {
       useTerminalStore.setState({
         tabs: [
           {
@@ -2446,6 +2631,7 @@ describe("terminalStore", () => {
       saveLayoutMock.mockClear();
 
       useTerminalStore.getState().swapPanes("p1", "p2");
+      await Promise.resolve();
 
       const state = useTerminalStore.getState();
       const tab1 = state.tabs.find((t) => t.id === "t1");
@@ -2491,7 +2677,7 @@ describe("terminalStore", () => {
       useTerminalStore.setState({ ready: true });
     });
 
-    it("moves source pane relative to target pane and updates focusedPath to sourceId", () => {
+    it("moves source pane relative to target pane and updates focusedPath to sourceId", async () => {
       useTerminalStore.setState({
         layout: {
           type: "split",
@@ -2509,6 +2695,7 @@ describe("terminalStore", () => {
       saveLayoutMock.mockClear();
 
       useTerminalStore.getState().movePane("p1", "p2", "bottom");
+      await Promise.resolve();
 
       const state = useTerminalStore.getState();
       expect(state.layout).toEqual({
@@ -2523,7 +2710,7 @@ describe("terminalStore", () => {
       expect(saveLayoutMock).toHaveBeenCalled();
     });
 
-    it("updates multi-tab active tab layout and focusedPath on movePane", () => {
+    it("updates multi-tab active tab layout and focusedPath on movePane", async () => {
       useTerminalStore.setState({
         tabs: [
           {
@@ -2549,6 +2736,7 @@ describe("terminalStore", () => {
       saveLayoutMock.mockClear();
 
       useTerminalStore.getState().movePane("p3", "p1", "top");
+      await Promise.resolve();
 
       const state = useTerminalStore.getState();
       const tab = state.tabs[0];
