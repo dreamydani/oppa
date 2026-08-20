@@ -44,9 +44,23 @@ import {
 import type {
   AppSettings,
   GeneralSettings,
+  AppearanceSettings,
+  TerminalThemeId,
+  TerminalCursorStyle,
+  DefaultCwdMode,
+  StartupBehavior,
+  TabSwitchMode,
+  BrowserSearchEngine,
   SettingsTabId,
 } from "../lib/settings/types";
-import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
+import {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_APPEARANCE_SETTINGS,
+} from "../lib/settings/types";
+import {
+  getTerminalTheme,
+  getAllTerminalThemes,
+} from "../lib/theme/terminalThemes";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
@@ -55,13 +69,23 @@ export type { RecentWorkspace, WorkspacePreset } from "../lib/workspace/transpor
 export type {
   AppSettings,
   GeneralSettings,
+  AppearanceSettings,
+  TerminalThemeId,
+  TerminalCursorStyle,
   DefaultCwdMode,
   StartupBehavior,
   TabSwitchMode,
   BrowserSearchEngine,
   SettingsTabId,
 } from "../lib/settings/types";
-export { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
+export {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_APPEARANCE_SETTINGS,
+} from "../lib/settings/types";
+export {
+  getTerminalTheme,
+  getAllTerminalThemes,
+} from "../lib/theme/terminalThemes";
 
 export interface WorkspaceConfig {
   name?: string;
@@ -380,7 +404,12 @@ export interface TerminalState {
   tabFocusHistory: string[];
   openSettings: (tab?: SettingsTabId) => void;
   closeSettings: () => void;
-  updateSettings: (partial: Partial<AppSettings> | { general?: Partial<GeneralSettings> }) => void;
+  updateSettings: (
+    partial:
+      | Partial<AppSettings>
+      | { general?: Partial<GeneralSettings>; appearance?: Partial<AppearanceSettings> },
+  ) => void;
+  updateAppearanceSettings: (partial: Partial<AppearanceSettings>) => void;
   resolveDefaultCwd: () => string | undefined;
   loadSettingsData: () => Promise<void>;
 }
@@ -1789,6 +1818,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       general: {
         ...current.general,
         ...(partial.general || {}),
+      },
+      appearance: {
+        ...current.appearance,
+        ...(partial.appearance || {}),
+      },
+    };
+    set({ settings: updated });
+    if (settingsSaveTimer) {
+      clearTimeout(settingsSaveTimer);
+    }
+    settingsSaveTimer = setTimeout(() => {
+      void transportSaveSettings(get().settings).catch(() => {});
+    }, 100);
+  },
+
+  updateAppearanceSettings: (partial) => {
+    const current = get().settings;
+    const updated: AppSettings = {
+      ...current,
+      appearance: {
+        ...current.appearance,
+        ...partial,
       },
     };
     set({ settings: updated });

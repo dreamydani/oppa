@@ -4,7 +4,7 @@ import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
 import * as settingsTransport from "../lib/settings/transport";
-import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
+import { DEFAULT_APP_SETTINGS, DEFAULT_APPEARANCE_SETTINGS } from "../lib/settings/types";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -2965,6 +2965,91 @@ describe("terminalStore", () => {
         useTerminalStore.getState().updateEditorContent("/workspace/index.ts", "modified content");
         vi.advanceTimersByTime(2000);
         expect(writeFileMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("initializes appearance settings with DEFAULT_APPEARANCE_SETTINGS", () => {
+      const { settings } = useTerminalStore.getState();
+      expect(settings.appearance).toEqual(DEFAULT_APPEARANCE_SETTINGS);
+      expect(settings.appearance.themeName).toBe("oppa_dark");
+      expect(settings.appearance.fontSize).toBe(14);
+      expect(settings.appearance.lineHeight).toBe(1.2);
+      expect(settings.appearance.cursorStyle).toBe("block");
+      expect(settings.appearance.cursorBlink).toBe(true);
+      expect(settings.appearance.dimInactivePanes).toBe(true);
+    });
+
+    it("updateAppearanceSettings updates individual and multiple appearance keys", () => {
+      // Single key update
+      useTerminalStore.getState().updateAppearanceSettings({ fontSize: 18 });
+      expect(useTerminalStore.getState().settings.appearance.fontSize).toBe(18);
+      expect(useTerminalStore.getState().settings.appearance.themeName).toBe("oppa_dark");
+
+      // Multiple keys update
+      useTerminalStore.getState().updateAppearanceSettings({
+        themeName: "tokyo_night",
+        lineHeight: 1.5,
+        cursorStyle: "bar",
+        cursorBlink: false,
+        dimInactivePanes: false,
+      });
+
+      const appearance = useTerminalStore.getState().settings.appearance;
+      expect(appearance.themeName).toBe("tokyo_night");
+      expect(appearance.fontSize).toBe(18);
+      expect(appearance.lineHeight).toBe(1.5);
+      expect(appearance.cursorStyle).toBe("bar");
+      expect(appearance.cursorBlink).toBe(false);
+      expect(appearance.dimInactivePanes).toBe(false);
+      // General settings unchanged
+      expect(useTerminalStore.getState().settings.general.defaultCwdMode).toBe("home");
+    });
+
+    it("updateAppearanceSettings triggers debounced persistence", async () => {
+      vi.useFakeTimers();
+      try {
+        useTerminalStore.getState().updateAppearanceSettings({
+          themeName: "dracula",
+          fontSize: 16,
+        });
+
+        expect(saveSettingsMock).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(200);
+        expect(saveSettingsMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            appearance: expect.objectContaining({
+              themeName: "dracula",
+              fontSize: 16,
+            }),
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("updateSettings merges appearance slice and triggers debounced persistence", async () => {
+      vi.useFakeTimers();
+      try {
+        useTerminalStore.getState().updateSettings({
+          appearance: {
+            themeName: "nord",
+          },
+        });
+
+        expect(useTerminalStore.getState().settings.appearance.themeName).toBe("nord");
+        expect(useTerminalStore.getState().settings.appearance.fontSize).toBe(14);
+        expect(saveSettingsMock).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(200);
+        expect(saveSettingsMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            appearance: expect.objectContaining({
+              themeName: "nord",
+            }),
+          }),
+        );
       } finally {
         vi.useRealTimers();
       }
