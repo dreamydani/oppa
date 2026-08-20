@@ -45,22 +45,9 @@ import type {
   AppSettings,
   GeneralSettings,
   AppearanceSettings,
-  TerminalThemeId,
-  TerminalCursorStyle,
-  DefaultCwdMode,
-  StartupBehavior,
-  TabSwitchMode,
-  BrowserSearchEngine,
   SettingsTabId,
 } from "../lib/settings/types";
-import {
-  DEFAULT_APP_SETTINGS,
-  DEFAULT_APPEARANCE_SETTINGS,
-} from "../lib/settings/types";
-import {
-  getTerminalTheme,
-  getAllTerminalThemes,
-} from "../lib/theme/terminalThemes";
+import { DEFAULT_APP_SETTINGS } from "../lib/settings/types";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
