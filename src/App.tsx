@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { PlusIcon, TerminalIcon } from "./components/icons/MinimalIcons";
+import { PlusIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar";

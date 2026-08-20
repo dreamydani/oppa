@@ -228,7 +228,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     onPtyData((p) => {
       if (disposed) return;
       if (p.id === idRef.current) {
-        parsedRef.current += p.data.length;
+        parsedRef.current += typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
         term.write(p.data);
       }
     }).then((unlisten) => {

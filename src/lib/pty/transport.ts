@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 export interface PtyDataPayload {
   id: string;
   data: string;
+  bytes: number;
   seq: number;
 }
 export interface PtyExitPayload {

@@ -134,10 +134,10 @@ describe("pty transport", () => {
     const result = await onPtyData(cb);
     expect(listenMock).toHaveBeenCalledWith("pty:data", expect.any(Function));
     const handler = listenMock.mock.calls[0][1] as (e: {
-      payload: { id: string; data: string; seq: number };
+      payload: { id: string; data: string; bytes: number; seq: number };
     }) => void;
-    handler({ payload: { id: "abc", data: "hi", seq: 3 } });
-    expect(cb).toHaveBeenCalledWith({ id: "abc", data: "hi", seq: 3 });
+    handler({ payload: { id: "abc", data: "hi", bytes: 2, seq: 3 } });
+    expect(cb).toHaveBeenCalledWith({ id: "abc", data: "hi", bytes: 2, seq: 3 });
     expect(result).toBe(unlisten);
   });
 

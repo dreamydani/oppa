@@ -64,6 +64,7 @@ pub enum DaemonEvent {
     Data {
         session_id: String,
         data: String,
+        bytes: usize,
         seq: u64,
     },
     Exit {
@@ -201,6 +202,7 @@ mod tests {
             DaemonEvent::Data {
                 session_id: "s1".into(),
                 data: "output line\r\n".into(),
+                bytes: 13,
                 seq: 42,
             },
             DaemonEvent::Exit {

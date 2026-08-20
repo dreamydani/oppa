@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 pub struct PtyDataPayload {
     pub id: String,
     pub data: String,
+    pub bytes: usize,
     pub seq: u64,
 }
 
@@ -74,6 +75,7 @@ pub fn pty_spawn(
             let payload = PtyDataPayload {
                 id: id.to_string(),
                 data: String::from_utf8_lossy(bytes).into_owned(),
+                bytes: bytes.len(),
                 seq: seq.fetch_add(1, Ordering::SeqCst),
             };
             let _ = on_data_app.emit("pty:data", payload);
@@ -240,6 +242,21 @@ mod tests {
         );
         cancel_token.cancel();
         let _ = server_thread.join();
+    }
+
+    #[test]
+    fn pty_data_payload_serializes() {
+        let payload = PtyDataPayload {
+            id: "session-123".into(),
+            data: "hello world".into(),
+            bytes: 11,
+            seq: 1,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"id\":\"session-123\""));
+        assert!(json.contains("\"data\":\"hello world\""));
+        assert!(json.contains("\"bytes\":11"));
+        assert!(json.contains("\"seq\":1"));
     }
 
     #[test]

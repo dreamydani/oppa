@@ -194,6 +194,7 @@ impl DaemonSession {
                         let _ = broadcast_tx.send(DaemonEvent::Data {
                             session_id: id.clone(),
                             data: String::from_utf8_lossy(chunk).into_owned(),
+                            bytes: chunk.len(),
                             seq: seq_num,
                         });
                     }
@@ -413,6 +414,43 @@ mod tests {
         assert_eq!(session.rows(), 30);
 
         session.ack(512).expect("ack session");
+        assert_eq!(session.pending_bytes.load(Ordering::SeqCst), 0);
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_multibyte_byte_counts_and_ack() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "s-multibyte".into(),
+            &sh,
+            &["-c".into(), "echo '🚀 日本語 test'".into()],
+            None,
+            80,
+            24,
+        )
+        .expect("spawn multibyte shell");
+
+        let mut rx = session.subscribe();
+        let mut total_bytes_received = 0usize;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Ok(DaemonEvent::Data { bytes, data, .. })) => {
+                    assert_eq!(bytes, data.as_bytes().len());
+                    total_bytes_received += bytes;
+                    if data.contains("🚀") || data.contains("日本語") || data.contains("test") {
+                        break;
+                    }
+                }
+                Ok(Ok(DaemonEvent::Exit { .. })) => break,
+                _ => continue,
+            }
+        }
+
+        assert!(total_bytes_received > 0);
+        session.ack(total_bytes_received).expect("ack multibyte bytes");
         assert_eq!(session.pending_bytes.load(Ordering::SeqCst), 0);
         let _ = session.kill();
     }

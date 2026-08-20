@@ -421,6 +421,28 @@ describe("TerminalPane", () => {
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 8);
   });
 
+  it("acks exact byte length for multi-byte characters when bytes is provided or via TextEncoder fallback", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      bytes?: number;
+      seq: number;
+    }) => void;
+    // 🚀 is 2 UTF-16 code units (data.length = 2), but 4 UTF-8 bytes (bytes = 4)
+    dataHandler({ id: "abc", data: "🚀", bytes: 4, seq: 1 });
+    // "日本語" is 3 UTF-16 code units (data.length = 3), but 9 UTF-8 bytes (no bytes field, fallback)
+    dataHandler({ id: "abc", data: "日本語", seq: 2 });
+
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+    expect(ptyAckMock).toHaveBeenCalledTimes(1);
+    // 4 + 9 = 13 bytes (instead of 2 + 3 = 5 UTF-16 length)
+    expect(ptyAckMock).toHaveBeenCalledWith("abc", 13);
+  });
+
   it("keeps rendering the session after the id prop changes", async () => {
     const { rerender } = render(<TerminalPane id="abc" />);
     await waitForSpawned();

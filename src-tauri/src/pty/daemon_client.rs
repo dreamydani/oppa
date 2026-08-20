@@ -133,7 +133,7 @@ impl DaemonClient {
                                 DaemonEvent::Data {
                                     session_id,
                                     data,
-                                    seq: _,
+                                    ..
                                 } => {
                                     let bytes = data.as_bytes();
                                     if let Some(cb) = callbacks_clone.lock().get(&session_id) {
