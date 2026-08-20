@@ -163,6 +163,7 @@ describe("BrowserOmnibox component", () => {
   it("submits search query using configured search engine in settings", () => {
     useTerminalStore.setState({
       settings: {
+        ...useTerminalStore.getState().settings,
         general: {
           ...useTerminalStore.getState().settings.general,
           browserSearchEngine: "google",

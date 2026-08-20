@@ -52,6 +52,26 @@ describe("settings transport", () => {
           defaultCwdMode: "custom",
           customDefaultCwd: "/custom/path",
         },
+        appearance: DEFAULT_APP_SETTINGS.appearance,
+      });
+    });
+
+    it("merges partial appearance settings with defaults", async () => {
+      const partial = {
+        appearance: {
+          themeName: "tokyo_night",
+          fontSize: 16,
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(partial));
+      const result = await loadSettings();
+      expect(result).toEqual({
+        general: DEFAULT_APP_SETTINGS.general,
+        appearance: {
+          ...DEFAULT_APP_SETTINGS.appearance,
+          themeName: "tokyo_night",
+          fontSize: 16,
+        },
       });
     });
 

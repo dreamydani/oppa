@@ -4,6 +4,31 @@ export type TabSwitchMode = "sequential" | "mru";
 export type BrowserSearchEngine = "duckduckgo" | "google" | "bing";
 export type SettingsTabId = "general" | "appearance" | "terminal" | "shortcuts";
 
+export type TerminalThemeId =
+  | "oppa_dark"
+  | "dracula"
+  | "tokyo_night"
+  | "one_dark"
+  | "nord"
+  | "catppuccin_mocha"
+  | "monokai_pro"
+  | "solarized_dark"
+  | "ghostty_dark"
+  | "github_dark"
+  | "minimal_light";
+
+export type TerminalCursorStyle = "block" | "bar" | "underline";
+
+export interface AppearanceSettings {
+  themeName: TerminalThemeId;
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  cursorStyle: TerminalCursorStyle;
+  cursorBlink: boolean;
+  dimInactivePanes: boolean;
+}
+
 export interface GeneralSettings {
   defaultCwdMode: DefaultCwdMode;
   customDefaultCwd: string;
@@ -19,7 +44,18 @@ export interface GeneralSettings {
 
 export interface AppSettings {
   general: GeneralSettings;
+  appearance: AppearanceSettings;
 }
+
+export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
+  themeName: "oppa_dark",
+  fontFamily: "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace",
+  fontSize: 14,
+  lineHeight: 1.2,
+  cursorStyle: "block",
+  cursorBlink: true,
+  dimInactivePanes: true,
+};
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   general: {
@@ -34,4 +70,5 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     browserSearchEngine: "duckduckgo",
     browserHomePage: "https://duckduckgo.com",
   },
+  appearance: DEFAULT_APPEARANCE_SETTINGS,
 };

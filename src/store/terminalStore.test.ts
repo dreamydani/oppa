@@ -2843,6 +2843,7 @@ describe("terminalStore", () => {
 
     it("loadSettingsData loads and updates settings from transport", async () => {
       const customLoaded = {
+        ...DEFAULT_APP_SETTINGS,
         general: {
           ...DEFAULT_APP_SETTINGS.general,
           defaultCwdMode: "last_active" as const,
@@ -2859,6 +2860,7 @@ describe("terminalStore", () => {
 
     it("loadLayout invokes loadSettingsData during bootstrap", async () => {
       const customLoaded = {
+        ...DEFAULT_APP_SETTINGS,
         general: {
           ...DEFAULT_APP_SETTINGS.general,
           browserSearchEngine: "google" as const,
@@ -2914,6 +2916,7 @@ describe("terminalStore", () => {
           ],
           activeEditorPath: "/workspace/index.ts",
           settings: {
+            ...DEFAULT_APP_SETTINGS,
             general: {
               ...DEFAULT_APP_SETTINGS.general,
               editorAutoSaveDelay: 500,
@@ -2951,6 +2954,7 @@ describe("terminalStore", () => {
           ],
           activeEditorPath: "/workspace/index.ts",
           settings: {
+            ...DEFAULT_APP_SETTINGS,
             general: {
               ...DEFAULT_APP_SETTINGS.general,
               editorAutoSaveDelay: 0,

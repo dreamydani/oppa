@@ -21,6 +21,10 @@ export async function loadSettings(): Promise<AppSettings | null> {
         ...DEFAULT_APP_SETTINGS.general,
         ...(parsed.general || {}),
       },
+      appearance: {
+        ...DEFAULT_APP_SETTINGS.appearance,
+        ...(parsed.appearance || {}),
+      },
     };
   } catch {
     return null;
