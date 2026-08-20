@@ -21,6 +21,41 @@
   gap: 28px;
 }
 
+/* Section Header (App & Workbench / Terminal Appearance) */
+.settings-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.settings-section-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #fafafa;
+  line-height: 1.25;
+}
+
+.settings-section-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground, #8e8e93);
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+/* Section Divider */
+.settings-section-divider {
+  border: none;
+  border-top: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  margin: 24px 0 12px 0;
+  width: 100%;
+}
+
 /* Preview Wrapper inside Bento Card */
 .settings-preview-wrapper {
   padding: 16px 18px;

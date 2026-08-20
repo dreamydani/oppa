@@ -14,19 +14,154 @@ describe("AppearanceSettingsPane", () => {
     });
   });
 
-  it("renders header, live preview box, and all 3 bento sections", () => {
+  it("renders header, App & Workbench section, section divider, and Terminal section", () => {
     render(<AppearanceSettingsPane />);
 
     expect(screen.getByRole("region", { name: /appearance settings/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /^appearance$/i, level: 2 })).toBeInTheDocument();
     expect(
-      screen.getByText("Terminal theme, typography, cursor style, and window visual options.")
+      screen.getByText(/application theme, ui scale, workbench layout, and terminal visual options/i)
     ).toBeInTheDocument();
 
+    // App & Workbench Section
+    expect(screen.getByText("App & Workbench")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /app theme & scaling/i, level: 3 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /sidebar & chrome/i, level: 3 })).toBeInTheDocument();
+
+    // Section Divider
+    expect(screen.getByTestId("appearance-section-divider")).toBeInTheDocument();
+
+    // Terminal Appearance Section
+    expect(screen.getByText("Terminal Appearance")).toBeInTheDocument();
     expect(screen.getByTestId("terminal-preview-box")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /terminal theme/i, level: 3 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /typography & layout/i, level: 3 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /cursor & window/i, level: 3 })).toBeInTheDocument();
+  });
+
+  describe("App Theme & Scaling Bento Card", () => {
+    it("updates appTheme when clicking Dark, Light, System segmented buttons", () => {
+      render(<AppearanceSettingsPane />);
+
+      const darkBtn = screen.getByRole("button", { name: /dark 🌙/i });
+      const lightBtn = screen.getByRole("button", { name: /light ☀️/i });
+      const systemBtn = screen.getByRole("button", { name: /system 💻/i });
+
+      expect(darkBtn).toHaveClass("active");
+      expect(lightBtn).not.toHaveClass("active");
+      expect(systemBtn).not.toHaveClass("active");
+
+      // Switch to Light
+      fireEvent.click(lightBtn);
+      expect(useTerminalStore.getState().settings.appearance.appTheme).toBe("light");
+      expect(lightBtn).toHaveClass("active");
+
+      // Switch to System
+      fireEvent.click(systemBtn);
+      expect(useTerminalStore.getState().settings.appearance.appTheme).toBe("system");
+      expect(systemBtn).toHaveClass("active");
+
+      // Switch to Dark
+      fireEvent.click(darkBtn);
+      expect(useTerminalStore.getState().settings.appearance.appTheme).toBe("dark");
+      expect(darkBtn).toHaveClass("active");
+    });
+
+    it("updates uiZoom when clicking preset scale buttons", () => {
+      render(<AppearanceSettingsPane />);
+
+      const zoom80Btn = screen.getByRole("button", { name: /^80%$/i });
+      const zoom90Btn = screen.getByRole("button", { name: /^90%$/i });
+      const zoom100Btn = screen.getByRole("button", { name: /^100%$/i });
+      const zoom110Btn = screen.getByRole("button", { name: /^110%$/i });
+      const zoom125Btn = screen.getByRole("button", { name: /^125%$/i });
+
+      expect(zoom100Btn).toHaveClass("active");
+
+      fireEvent.click(zoom80Btn);
+      expect(useTerminalStore.getState().settings.appearance.uiZoom).toBe(0.8);
+      expect(zoom80Btn).toHaveClass("active");
+
+      fireEvent.click(zoom110Btn);
+      expect(useTerminalStore.getState().settings.appearance.uiZoom).toBe(1.1);
+      expect(zoom110Btn).toHaveClass("active");
+
+      fireEvent.click(zoom125Btn);
+      expect(useTerminalStore.getState().settings.appearance.uiZoom).toBe(1.25);
+      expect(zoom125Btn).toHaveClass("active");
+
+      fireEvent.click(zoom90Btn);
+      expect(useTerminalStore.getState().settings.appearance.uiZoom).toBe(0.9);
+      expect(zoom90Btn).toHaveClass("active");
+    });
+
+    it("updates app UI font family via preset select and custom input", () => {
+      render(<AppearanceSettingsPane />);
+
+      const appFontSelect = screen.getByRole("combobox", { name: /app font family preset/i });
+      expect(appFontSelect).toBeInTheDocument();
+
+      fireEvent.change(appFontSelect, {
+        target: { value: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" },
+      });
+      expect(useTerminalStore.getState().settings.appearance.appFontFamily).toBe(
+        "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"
+      );
+
+      const customInput = screen.getByRole("textbox", { name: /custom app font family/i });
+      expect(customInput).toBeInTheDocument();
+
+      fireEvent.change(customInput, { target: { value: "Fira Sans, sans-serif" } });
+      expect(useTerminalStore.getState().settings.appearance.appFontFamily).toBe(
+        "Fira Sans, sans-serif"
+      );
+    });
+  });
+
+  describe("Sidebar & Chrome Bento Card", () => {
+    it("updates sidebarOnLaunch via segmented control", () => {
+      render(<AppearanceSettingsPane />);
+
+      const openBtn = screen.getByRole("button", { name: /^open$/i });
+      const collapsedBtn = screen.getByRole("button", { name: /^collapsed$/i });
+
+      expect(openBtn).toHaveClass("active");
+      expect(collapsedBtn).not.toHaveClass("active");
+
+      fireEvent.click(collapsedBtn);
+      expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("collapsed");
+      expect(collapsedBtn).toHaveClass("active");
+
+      fireEvent.click(openBtn);
+      expect(useTerminalStore.getState().settings.appearance.sidebarOnLaunch).toBe("open");
+      expect(openBtn).toHaveClass("active");
+    });
+
+    it("toggles showStatusBar switch", () => {
+      render(<AppearanceSettingsPane />);
+
+      const statusBarSwitch = screen.getByRole("switch", { name: /show status bar/i });
+      expect(statusBarSwitch).toBeChecked();
+
+      fireEvent.click(statusBarSwitch);
+      expect(useTerminalStore.getState().settings.appearance.showStatusBar).toBe(false);
+
+      fireEvent.click(statusBarSwitch);
+      expect(useTerminalStore.getState().settings.appearance.showStatusBar).toBe(true);
+    });
+
+    it("toggles showTitlebarLogo switch", () => {
+      render(<AppearanceSettingsPane />);
+
+      const logoSwitch = screen.getByRole("switch", { name: /show "oppa" logo/i });
+      expect(logoSwitch).toBeChecked();
+
+      fireEvent.click(logoSwitch);
+      expect(useTerminalStore.getState().settings.appearance.showTitlebarLogo).toBe(false);
+
+      fireEvent.click(logoSwitch);
+      expect(useTerminalStore.getState().settings.appearance.showTitlebarLogo).toBe(true);
+    });
   });
 
   describe("Terminal Theme Bento Card", () => {
@@ -73,7 +208,7 @@ describe("AppearanceSettingsPane", () => {
     it("updates font family when selecting from preset dropdown", () => {
       render(<AppearanceSettingsPane />);
 
-      const presetSelect = screen.getByRole("combobox", { name: /font family preset/i });
+      const presetSelect = screen.getByRole("combobox", { name: /terminal font family preset/i });
       expect(presetSelect).toBeInTheDocument();
 
       fireEvent.change(presetSelect, { target: { value: "'JetBrains Mono', Consolas, monospace" } });
@@ -85,7 +220,7 @@ describe("AppearanceSettingsPane", () => {
     it("updates font family when typing into custom font family text input", () => {
       render(<AppearanceSettingsPane />);
 
-      const fontInput = screen.getByRole("textbox", { name: /custom font family/i });
+      const fontInput = screen.getByRole("textbox", { name: /custom terminal font family/i });
       expect(fontInput).toBeInTheDocument();
 
       fireEvent.change(fontInput, { target: { value: "Hack, monospace" } });
