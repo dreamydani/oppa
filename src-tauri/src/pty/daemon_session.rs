@@ -279,10 +279,34 @@ impl DaemonSession {
         Ok(())
     }
 
-    /// Kill the child process.
+    /// Kill the child process and its process tree.
     pub fn kill(&self) -> std::io::Result<()> {
-        self.child.lock().kill()
+        let res = self.child.lock().kill();
+
+        #[cfg(windows)]
+        {
+            if self.pid > 0 {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &self.pid.to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output();
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            if self.pid > 0 {
+                unsafe {
+                    libc::killpg(self.pid as i32, libc::SIGKILL);
+                }
+            }
+        }
+
+        res
     }
+
 
     /// Return an ANSI formatted snapshot of the virtual screen state.
     pub fn get_snapshot(&self) -> String {
@@ -510,4 +534,23 @@ mod tests {
         );
         let _ = session.kill();
     }
+
+    #[tokio::test]
+    async fn test_daemon_session_kill_process_tree() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "kill-tree-unit".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+        )
+        .expect("spawn interactive shell");
+
+        assert!(session.pid() > 0);
+        let kill_result = session.kill();
+        assert!(kill_result.is_ok());
+    }
 }
+

@@ -351,3 +351,46 @@ fn test_e2e_daemon_high_throughput_zero_drop_stream() {
     let _ = server_thread.join();
 }
 
+#[test]
+fn test_e2e_daemon_session_kill_process_tree() {
+    let socket_path = generate_test_socket_path("kill_tree");
+    let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client failed");
+    let session_id = "e2e-kill-tree-session";
+
+    let attach_res = client
+        .create_or_attach(session_id, 80, 24, None, None)
+        .expect("create_or_attach failed");
+    assert!(attach_res.is_new);
+
+    // Spawn a background subprocess inside the shell
+    #[cfg(target_os = "windows")]
+    client
+        .write(session_id, "powershell -Command \"Start-Sleep -Seconds 30\"\r\n")
+        .expect("write failed");
+
+    #[cfg(not(target_os = "windows"))]
+    client
+        .write(session_id, "sleep 30\n")
+        .expect("write failed");
+
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Terminate session and process tree
+    client.kill(session_id).expect("kill session failed");
+
+    std::thread::sleep(Duration::from_millis(300));
+
+    let remaining_sessions = client.list_sessions().expect("list_sessions failed");
+    assert!(
+        !remaining_sessions.contains(&session_id.to_string()),
+        "expected session {session_id} to be removed after process tree kill"
+    );
+
+    client.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
+
