@@ -498,25 +498,51 @@ body,
   background-color: var(--bg-terminal);
   position: relative;
   overflow: hidden;
+  margin: 8px 8px 8px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border-divider);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .main-viewport {
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
 }
 
 /* ==========================================================================
-   Left Sidebar (Tabs & Workspaces)
+   Left Sidebar (Floating Drawer)
    ========================================================================== */
 .left-sidebar {
   background-color: var(--bg-sidebar);
-  border-right: 1px solid var(--border-divider);
+  border: 1px solid var(--border-divider);
+  border-radius: 12px;
+  margin: 8px 0 8px 8px;
+  height: calc(100% - 16px);
   display: flex;
   flex-direction: column;
-  height: 100%;
   position: relative;
   flex-shrink: 0;
   user-select: none;
-  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  z-index: 15;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+[data-theme="light"] .left-sidebar {
+  background-color: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .left-sidebar-top {
   padding: 10px 12px;
+  border-bottom: 1px solid var(--border-divider);
+  background: transparent;
+}
+
+[data-theme="light"] .left-sidebar-top {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
 }
 
 .sidebar-search-strip {
@@ -529,12 +555,30 @@ body,
   display: flex;
   align-items: center;
   gap: 6px;
-  background-color: transparent;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 0;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-divider);
+  border-radius: 7px;
+  padding: 5px 8px;
   flex: 1;
   min-width: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sidebar-search-box:focus-within {
+  border-color: var(--accent-blue);
+  background-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+[data-theme="light"] .sidebar-search-box {
+  background-color: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .sidebar-search-box:focus-within {
+  background-color: #ffffff;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.12);
 }
 
 .sidebar-search-icon {
@@ -559,29 +603,30 @@ body,
 
 .sidebar-icon-btn {
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-muted);
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .sidebar-icon-btn:hover {
   background-color: var(--bg-card-hover);
   color: var(--text-primary);
+  border-color: var(--border-divider);
 }
 
 .left-sidebar-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
 }
@@ -600,7 +645,7 @@ body,
 .tab-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   width: 100%;
 }
 
@@ -609,13 +654,13 @@ body,
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 8px;
   background-color: transparent;
   color: var(--text-muted);
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   position: relative;
   user-select: none;
 }
@@ -628,14 +673,15 @@ body,
 .tab-card.active {
   background-color: var(--bg-card-active);
   color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 /* Dark rounded avatar badge */
 .tab-card-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
   background-color: #1b1b1a;
   display: flex;
   align-items: center;
