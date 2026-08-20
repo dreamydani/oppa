@@ -975,10 +975,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const current = get().maximizedSessionId;
     if (id !== undefined) {
       set({ maximizedSessionId: current === id ? null : id });
+      triggerDebouncedSaveLayout(get);
       return;
     }
     if (current !== null) {
       set({ maximizedSessionId: null });
+      triggerDebouncedSaveLayout(get);
       return;
     }
     const state = get();
@@ -987,6 +989,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const focusedId = focus(activeTab.layout, activeTab.focusedPath);
     if (focusedId) {
       set({ maximizedSessionId: focusedId });
+      triggerDebouncedSaveLayout(get);
     }
   },
 
@@ -1420,20 +1423,30 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
 
-  toggleLeftSidebar: () =>
-    set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
+  toggleLeftSidebar: () => {
+    set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen }));
+    triggerDebouncedSaveLayout(get);
+  },
 
-  setLeftSidebarWidth: (width) =>
-    set({ leftSidebarWidth: width }),
+  setLeftSidebarWidth: (width) => {
+    set({ leftSidebarWidth: width });
+    triggerDebouncedSaveLayout(get);
+  },
 
-  toggleRightSidebar: () =>
-    set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen })),
+  toggleRightSidebar: () => {
+    set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen }));
+    triggerDebouncedSaveLayout(get);
+  },
 
-  setRightSidebarWidth: (width) =>
-    set({ rightSidebarWidth: width }),
+  setRightSidebarWidth: (width) => {
+    set({ rightSidebarWidth: width });
+    triggerDebouncedSaveLayout(get);
+  },
 
-  setRightSidebarTab: (tab) =>
-    set({ rightSidebarTab: tab }),
+  setRightSidebarTab: (tab) => {
+    set({ rightSidebarTab: tab });
+    triggerDebouncedSaveLayout(get);
+  },
 
   getActiveCwd: () => {
     const state = get();
@@ -1638,7 +1651,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     return tabId;
   },
 
-  setAppMode: (mode) => set({ activeAppMode: mode }),
+  setAppMode: (mode) => {
+    set({ activeAppMode: mode });
+    triggerDebouncedSaveLayout(get);
+  },
 
   navigateBrowser: (url) => {
     const trimmed = url.trim();
