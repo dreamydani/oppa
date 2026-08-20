@@ -498,6 +498,9 @@ body,
   background-color: var(--bg-terminal);
   position: relative;
   overflow: hidden;
+  margin: 8px 8px;
+  height: calc(100% - 16px);
+  border-radius: 12px;
 }
 
 /* ==========================================================================
@@ -505,14 +508,16 @@ body,
    ========================================================================== */
 .left-sidebar {
   background-color: var(--bg-sidebar);
-  border-right: 1px solid var(--border-divider);
-  height: 100%;
-  margin: 0;
+  border: 1px solid var(--border-divider);
+  border-radius: 12px;
+  margin: 8px 0 8px 8px;
+  height: calc(100% - 16px);
   display: flex;
   flex-direction: column;
   position: relative;
   flex-shrink: 0;
   user-select: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
   overflow: hidden;
   z-index: 15;
   transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
@@ -803,14 +808,16 @@ body,
    ========================================================================== */
 .right-sidebar {
   background-color: var(--bg-sidebar);
-  border-left: 1px solid var(--border-divider);
-  height: 100%;
-  margin: 0;
+  border: 1px solid var(--border-divider);
+  border-radius: 12px;
+  margin: 8px 8px 8px 0;
+  height: calc(100% - 16px);
   display: flex;
   flex-direction: column;
   position: relative;
   flex-shrink: 0;
   user-select: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
   overflow: hidden;
   z-index: 15;
   transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
