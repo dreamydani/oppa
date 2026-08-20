@@ -37,10 +37,37 @@ impl Default for GeneralSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    pub theme_name: String,
+    pub font_family: String,
+    pub font_size: u16,
+    pub line_height: f32,
+    pub cursor_style: String,
+    pub cursor_blink: bool,
+    pub dim_inactive_panes: bool,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme_name: "oppa_dark".into(),
+            font_family: "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace".into(),
+            font_size: 14,
+            line_height: 1.2,
+            cursor_style: "block".into(),
+            cursor_blink: true,
+            dim_inactive_panes: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct AppSettings {
     pub general: GeneralSettings,
+    pub appearance: AppearanceSettings,
 }
 
 /// Persist settings.json to `path`, creating parent directories as needed.
@@ -111,5 +138,28 @@ mod tests {
         let serialized = serde_json::to_string(&settings).unwrap();
         let deserialized: AppSettings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, settings);
+    }
+
+    #[test]
+    fn appearance_settings_default_and_roundtrip() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.appearance.theme_name, "oppa_dark");
+        assert_eq!(settings.appearance.font_family, "'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace");
+        assert_eq!(settings.appearance.font_size, 14);
+        assert_eq!(settings.appearance.line_height, 1.2);
+        assert_eq!(settings.appearance.cursor_style, "block");
+        assert!(settings.appearance.cursor_blink);
+        assert!(settings.appearance.dim_inactive_panes);
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let deserialized: AppSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, settings);
+    }
+
+    #[test]
+    fn appearance_settings_backward_compatibility_without_appearance_key() {
+        let json_without_appearance = r#"{"general":{"default_cwd_mode":"home","custom_default_cwd":"","startup_behavior":"restore_previous","tab_switch_mode":"sequential","confirm_close_tab_with_multiple_panes":true,"confirm_quit_with_running_processes":true,"editor_word_wrap":true,"editor_auto_save_delay":1000,"browser_search_engine":"duckduckgo","browser_home_page":"https://duckduckgo.com"}}"#;
+        let deserialized: AppSettings = serde_json::from_str(json_without_appearance).unwrap();
+        assert_eq!(deserialized.appearance, AppearanceSettings::default());
     }
 }
