@@ -629,13 +629,19 @@ body,
 
 .left-sidebar-body::-webkit-scrollbar,
 .right-sidebar-content::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
 }
 
 .left-sidebar-body::-webkit-scrollbar-thumb,
 .right-sidebar-content::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
+  border-radius: 9999px;
+  transition: background 0.15s ease;
+}
+
+.left-sidebar-body::-webkit-scrollbar-thumb:hover,
+.right-sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .tab-list {
