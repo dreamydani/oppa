@@ -3035,7 +3035,7 @@ describe("terminalStore", () => {
         "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       );
       expect(settings.appearance.uiZoom).toBe(1.0);
-      expect(settings.appearance.sidebarOnLaunch).toBe("open");
+      expect(settings.appearance.sidebarOnLaunch).toBe("remember_last");
       expect(settings.appearance.showStatusBar).toBe(true);
       expect(settings.appearance.showTitlebarLogo).toBe(true);
       expect(settings.appearance.themeName).toBe("oppa_dark");

@@ -19,7 +19,7 @@ export type TerminalThemeId =
 
 export type TerminalCursorStyle = "block" | "bar" | "underline";
 export type AppThemeMode = "dark" | "light" | "system";
-export type SidebarLaunchMode = "open" | "collapsed";
+export type SidebarLaunchMode = "remember_last" | "open" | "collapsed";
 
 export interface AppearanceSettings {
   appTheme: AppThemeMode;
@@ -60,7 +60,7 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   appTheme: "dark",
   appFontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   uiZoom: 1.0,
-  sidebarOnLaunch: "open",
+  sidebarOnLaunch: "remember_last",
   showStatusBar: true,
   showTitlebarLogo: true,
 

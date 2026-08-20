@@ -90,7 +90,7 @@ describe("settings transport", () => {
         "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
       );
       expect(result?.appearance.uiZoom).toBe(1.0);
-      expect(result?.appearance.sidebarOnLaunch).toBe("open");
+      expect(result?.appearance.sidebarOnLaunch).toBe("remember_last");
       expect(result?.appearance.showStatusBar).toBe(true);
       expect(result?.appearance.showTitlebarLogo).toBe(true);
     });

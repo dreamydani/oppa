@@ -120,6 +120,15 @@ describe("AppearanceSettingsPane", () => {
 
   describe("Sidebar & Chrome Bento Card", () => {
     it("updates sidebarOnLaunch via segmented control", () => {
+      useTerminalStore.setState({
+        settings: {
+          ...useTerminalStore.getState().settings,
+          appearance: {
+            ...useTerminalStore.getState().settings.appearance,
+            sidebarOnLaunch: "open",
+          },
+        },
+      });
       render(<AppearanceSettingsPane />);
 
       const openBtn = screen.getByRole("button", { name: /^open$/i });
