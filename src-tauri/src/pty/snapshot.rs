@@ -18,6 +18,27 @@ pub struct SessionSnapshot {
     pub persona_id: Option<String>,
     pub scrollback: String,
     pub timestamp: u64,
+    #[serde(default)]
+    pub foreground_command: Option<String>,
+    #[serde(default)]
+    pub agent_session: Option<AgentSessionRef>,
+}
+
+/// Identity of an agent CLI session (e.g. Claude Code transcript id) captured
+/// while it ran, so a cold-booted machine can relaunch it with its native resume.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentSessionRef {
+    pub agent: String,
+    pub id: String,
+    pub transcript_path: Option<String>,
+}
+
+const APP_IDENTIFIER: &str = "com.pc.oppa";
+
+/// Resolve app data dir without a Tauri context (the headless daemon process).
+/// Mirrors tauri's `app_data_dir`: platform data dir + identifier.
+pub fn resolve_app_data_dir() -> Option<PathBuf> {
+    dirs::data_dir().map(|dir| dir.join(APP_IDENTIFIER))
 }
 
 pub struct SnapshotStorage {
@@ -125,6 +146,8 @@ impl SnapshotStorage {
                 persona_id: None,
                 scrollback: content,
                 timestamp: 0,
+                foreground_command: None,
+                agent_session: None,
             }));
         }
 
@@ -282,6 +305,8 @@ mod tests {
             persona_id: Some("architect".to_string()),
             scrollback: "\x1b[32mSuccess\x1b[0m\r\nDone.".to_string(),
             timestamp: 1724050000000,
+            foreground_command: None,
+            agent_session: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -303,6 +328,96 @@ mod tests {
     }
 
     #[test]
+    fn test_snapshot_roundtrip_with_foreground_and_agent_fields() {
+        let temp_dir = std::env::temp_dir().join(format!("oppa_snap_agent_{}", std::process::id()));
+        let storage = SnapshotStorage::new(temp_dir.clone());
+
+        let snapshot = SessionSnapshot {
+            session_id: "agent-sess-1".to_string(),
+            cwd: "C:\\oppa\\oppa".to_string(),
+            title: None,
+            cols: 100,
+            rows: 30,
+            persona_id: None,
+            scrollback: "claude> ready".to_string(),
+            timestamp: 1724050000000,
+            foreground_command: Some("claude --resume abc123".to_string()),
+            agent_session: Some(AgentSessionRef {
+                agent: "claude".to_string(),
+                id: "abc123".to_string(),
+                transcript_path: Some(
+                    "C:\\Users\\danial\\.claude\\projects\\x\\abc123.jsonl".to_string(),
+                ),
+            }),
+        };
+
+        storage.save_snapshot(&snapshot).expect("save succeeds");
+        let loaded = storage
+            .load_snapshot("agent-sess-1")
+            .expect("load succeeds")
+            .expect("found");
+
+        assert_eq!(loaded.foreground_command, Some("claude --resume abc123".to_string()));
+        assert_eq!(
+            loaded.agent_session,
+            Some(AgentSessionRef {
+                agent: "claude".to_string(),
+                id: "abc123".to_string(),
+                transcript_path: Some(
+                    "C:\\Users\\danial\\.claude\\projects\\x\\abc123.jsonl".to_string()
+                ),
+            })
+        );
+        assert_eq!(loaded, snapshot);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_old_json_without_new_fields_loads_with_defaults() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("oppa_snap_legacy_{}", std::process::id()));
+        let storage = SnapshotStorage::new(temp_dir.clone());
+        fs::create_dir_all(temp_dir.join(SNAPSHOT_DIR)).expect("create snapshot dir");
+
+        let legacy_json = r#"{"session_id":"legacy-1","cwd":"/home/user","title":null,"cols":80,"rows":24,"persona_id":null,"scrollback":"old","timestamp":1724050000000}"#;
+        fs::write(
+            temp_dir.join(SNAPSHOT_DIR).join("legacy-1.json"),
+            legacy_json,
+        )
+        .expect("write legacy json");
+
+        let loaded = storage
+            .load_snapshot("legacy-1")
+            .expect("load succeeds")
+            .expect("found");
+        assert_eq!(loaded.scrollback, "old");
+        assert_eq!(loaded.foreground_command, None);
+        assert_eq!(loaded.agent_session, None);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_bin_fallback_still_loads_with_defaults() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("oppa_snap_binfallback_{}", std::process::id()));
+        let storage = SnapshotStorage::new(temp_dir.clone());
+
+        storage.save("bin-fallback-sess", "raw legacy scrollback").expect("save succeeds");
+        let loaded = storage
+            .load_snapshot("bin-fallback-sess")
+            .expect("load succeeds")
+            .expect("found");
+        assert_eq!(loaded.session_id, "bin-fallback-sess");
+        assert_eq!(loaded.scrollback, "raw legacy scrollback");
+        assert_eq!(loaded.foreground_command, None);
+        assert_eq!(loaded.agent_session, None);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn test_save_snapshot_truncates_large_scrollback() {
         let temp_dir = std::env::temp_dir().join(format!("oppa_snap_trunc_struct_{}", std::process::id()));
         let storage = SnapshotStorage::new(temp_dir.clone());
@@ -317,6 +432,8 @@ mod tests {
             persona_id: None,
             scrollback: base.clone(),
             timestamp: 1724050000000,
+            foreground_command: None,
+            agent_session: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");

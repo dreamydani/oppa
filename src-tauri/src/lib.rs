@@ -20,7 +20,10 @@ pub fn run_daemon() {
         .expect("failed to build tokio runtime for daemon");
     rt.block_on(async {
         let socket_path = pty::ipc_protocol::get_daemon_socket_path();
-        let server = pty::daemon_server::DaemonServer::new();
+        let server = match pty::snapshot::resolve_app_data_dir() {
+            Some(dir) => pty::daemon_server::DaemonServer::with_snapshot_storage(dir),
+            None => pty::daemon_server::DaemonServer::new(),
+        };
         let cancel_token = pty::daemon_server::CancellationToken::new();
         if let Err(e) = server.run_listener(&socket_path, cancel_token).await {
             eprintln!("Daemon listener exited: {e}");

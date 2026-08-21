@@ -2,12 +2,19 @@ use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
     CreateOrAttachResult, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
 };
+use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
 use parking_lot::Mutex;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
+
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Simple cancellation token for graceful shutdown of async listeners and sessions.
 #[derive(Clone, Default)]
@@ -41,6 +48,8 @@ impl CancellationToken {
 /// Detached Daemon Server managing active terminal sessions and IPC request routing.
 pub struct DaemonServer {
     sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>>,
+    // App data dir for periodic session checkpoints; None skips persistence (tests)
+    snapshot_dir: Option<PathBuf>,
 }
 
 impl Default for DaemonServer {
@@ -53,6 +62,14 @@ impl DaemonServer {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            snapshot_dir: None,
+        }
+    }
+
+    pub fn with_snapshot_storage(app_data_dir: PathBuf) -> Self {
+        Self {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            snapshot_dir: Some(app_data_dir),
         }
     }
 
@@ -95,6 +112,9 @@ impl DaemonServer {
                             let session_cols = session.cols();
                             let session_rows = session.rows();
                             let session_cwd = session.cwd();
+                            if let Some(dir) = &self.snapshot_dir {
+                                Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
+                            }
                             sessions.insert(session_id, Arc::clone(&session));
                             DaemonResponse::SessionAttached(CreateOrAttachResult {
                                 is_new: true,
@@ -162,6 +182,13 @@ impl DaemonServer {
             }
             DaemonRequest::Disconnect => DaemonResponse::Ok,
             DaemonRequest::Shutdown => {
+                // Flush final checkpoints before killing: after drain the mirror is gone
+                if let Some(dir) = &self.snapshot_dir {
+                    let storage = SnapshotStorage::new(dir.clone());
+                    for (_, session) in self.sessions.lock().iter() {
+                        let _ = storage.save_snapshot(&Self::build_checkpoint(session));
+                    }
+                }
                 let mut sessions = self.sessions.lock();
                 for (_, session) in sessions.drain() {
                     let _ = session.kill();
@@ -179,8 +206,57 @@ impl DaemonServer {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let server = Arc::new(Self {
             sessions: Arc::clone(&self.sessions),
+            snapshot_dir: self.snapshot_dir.clone(),
         });
         run_server_listener(server, socket_path, cancel_token).await
+    }
+
+    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
+        SessionSnapshot {
+            session_id: session.id.clone(),
+            cwd: session.cwd().unwrap_or_default(),
+            title: None,
+            cols: session.cols(),
+            rows: session.rows(),
+            persona_id: None,
+            scrollback: session.get_snapshot(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            foreground_command: session.foreground_command(),
+            agent_session: None,
+        }
+    }
+
+    // Skip unchanged writes: a quiet pane rewrites identical content forever otherwise
+    fn checkpoint_hash(snapshot: &SessionSnapshot) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        snapshot.scrollback.hash(&mut hasher);
+        snapshot.cwd.hash(&mut hasher);
+        snapshot.foreground_command.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn start_checkpoint_task(session: Arc<DaemonSession>, app_data_dir: PathBuf) {
+        tokio::spawn(async move {
+            let storage = SnapshotStorage::new(app_data_dir);
+            let mut last_hash: Option<u64> = None;
+            loop {
+                tokio::time::sleep(CHECKPOINT_INTERVAL).await;
+                if !session.is_alive() {
+                    break;
+                }
+                let snapshot = Self::build_checkpoint(&session);
+                let hash = Self::checkpoint_hash(&snapshot);
+                if Some(hash) == last_hash {
+                    continue;
+                }
+                if storage.save_snapshot(&snapshot).is_ok() {
+                    last_hash = Some(hash);
+                }
+            }
+        });
     }
 }
 
@@ -870,5 +946,66 @@ mod tests {
             }
             other => panic!("expected SessionAttached, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_task_writes_snapshot_within_debounce_window() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "checkpoint-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => assert!(res.is_new),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let storage = SnapshotStorage::new(temp_dir.path().to_path_buf());
+        let snap = storage
+            .load_snapshot("checkpoint-test")
+            .expect("load succeeds")
+            .expect("checkpoint file written within debounce window");
+        assert_eq!(snap.session_id, "checkpoint-test");
+        assert!(snap.timestamp > 0);
+
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "checkpoint-test".into(),
+        });
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_flushes_final_snapshot_for_live_sessions() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "flush-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => assert!(res.is_new),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        // Shutdown must flush synchronously before draining/killing
+        let resp = server.handle_request(DaemonRequest::Shutdown);
+        assert_eq!(resp, DaemonResponse::Ok);
+
+        let storage = SnapshotStorage::new(temp_dir.path().to_path_buf());
+        let snap = storage
+            .load_snapshot("flush-test")
+            .expect("load succeeds")
+            .expect("shutdown flushed final snapshot");
+        assert_eq!(snap.session_id, "flush-test");
     }
 }
