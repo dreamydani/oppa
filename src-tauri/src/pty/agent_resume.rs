@@ -125,7 +125,25 @@ fn agy_build_resume(session: &AgentSessionRef) -> Option<String> {
 }
 
 // Plain-relaunch agents: no structured resume known; callers re-run foreground_command.
-fn gemini_build_resume(_session: &AgentSessionRef) -> Option<String> {
+// Gemini CLI / Qwen Code (gemini-cli fork): resume by session id from their hooks.
+fn gemini_build_resume(session: &AgentSessionRef) -> Option<String> {
+    Some(format!("gemini --resume {}", session.id))
+}
+
+fn qwen_build_resume(session: &AgentSessionRef) -> Option<String> {
+    // Unverified against a live install — Qwen Code is a gemini-cli fork, so
+    // the flag is assumed; falls back to plain relaunch if the CLI rejects it.
+    Some(format!("qwen --resume {}", session.id))
+}
+
+// OpenCode: resume by session id (SDK plugin captures `sessionID`).
+fn opencode_build_resume(session: &AgentSessionRef) -> Option<String> {
+    Some(format!("opencode --session {}", session.id))
+}
+
+// Grok CLI and Cursor: Orca also treats these as status-only (no resumable
+// session id in their hook payloads) — plain relaunch.
+fn no_resume(_session: &AgentSessionRef) -> Option<String> {
     None
 }
 
@@ -154,6 +172,34 @@ const PROFILES: &[AgentProfile] = &[
         transcript_dir: no_transcript_dir,
         capture_by_cwd: no_capture_by_cwd,
         build_resume: gemini_build_resume,
+    },
+    AgentProfile {
+        name: "qwen",
+        matches_program: |cmd| program_is("qwen", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: qwen_build_resume,
+    },
+    AgentProfile {
+        name: "opencode",
+        matches_program: |cmd| program_is("opencode", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: opencode_build_resume,
+    },
+    AgentProfile {
+        name: "grok",
+        matches_program: |cmd| program_is("grok", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: no_resume,
+    },
+    AgentProfile {
+        name: "cursor",
+        matches_program: |cmd| program_is("cursor-agent", cmd) || program_is("cursor", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: no_resume,
     },
     AgentProfile {
         name: "aider",
@@ -498,11 +544,25 @@ mod tests {
             plan_resume(&agy_ref),
             Some("agy --conversation conv9".to_string())
         );
+
+        for (agent, expected) in [
+            ("gemini", "gemini --resume g1"),
+            ("qwen", "qwen --resume q1"),
+            ("opencode", "opencode --session o1"),
+        ] {
+            let r = AgentSessionRef {
+                agent: agent.to_string(),
+                id: agent[0..1].to_string() + "1",
+                transcript_path: None,
+            };
+            assert_eq!(plan_resume(&r), Some(expected.to_string()), "{agent}");
+        }
     }
 
     #[test]
     fn plain_relaunch_profiles_yield_none_from_plan_resume() {
-        for agent in ["gemini", "aider"] {
+        // Grok/Cursor: status-only agents (Orca parity) — never resumed
+        for agent in ["grok", "cursor"] {
             let session = AgentSessionRef {
                 agent: agent.to_string(),
                 id: "whatever".to_string(),

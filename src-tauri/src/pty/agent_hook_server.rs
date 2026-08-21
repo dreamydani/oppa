@@ -172,11 +172,17 @@ async fn handle_connection(
 }
 
 /// Maps hook endpoints to the agent CLI they report for. Mirrors Orca's
-/// HOOK_SOURCE_BY_PATHNAME.
+/// HOOK_SOURCE_BY_PATHNAME (the agents OPPA supports capture for).
 fn resolve_agent_source(path: &str) -> Option<&'static str> {
     match path {
         "/hook/claude" => Some("claude"),
+        "/hook/codex" => Some("codex"),
+        "/hook/gemini" => Some("gemini"),
+        "/hook/qwen" => Some("qwen"),
         "/hook/antigravity" => Some("agy"),
+        "/hook/opencode" => Some("opencode"),
+        "/hook/grok" => Some("grok"),
+        "/hook/cursor" => Some("cursor"),
         _ => None,
     }
 }
@@ -234,7 +240,7 @@ fn apply_hook_payload(
 
 /// Session-id readers across agents' naming conventions (Orca-style dual-key read).
 fn read_session_id(payload: &serde_json::Value) -> Option<String> {
-    for key in ["session_id", "sessionId", "conversationId"] {
+    for key in ["session_id", "sessionId", "sessionID", "conversationId"] {
         if let Some(id) = payload.get(key).and_then(|v| v.as_str()) {
             let trimmed = id.trim();
             // Same sanity rules as Orca: non-empty, no leading dash, no control chars
