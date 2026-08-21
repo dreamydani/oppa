@@ -176,12 +176,31 @@ fn capture_for_profile(
     cwd: &str,
 ) -> Option<AgentSessionRef> {
     let transcript_dir = (profile.transcript_dir)(home, cwd)?;
-    let (id, transcript_path) = find_newest_transcript(&transcript_dir, "jsonl")?;
+    let (stem_id, transcript_path) = find_newest_transcript(&transcript_dir, "jsonl")?;
+    // Recent Claude Code names the transcript file with a UUID that can differ
+    // from the real session id — prefer the id recorded inside the file.
+    let id = session_id_from_transcript(&transcript_path).unwrap_or(stem_id);
     Some(AgentSessionRef {
         agent: profile.name.to_string(),
         id,
         transcript_path: Some(transcript_path.to_string_lossy().into_owned()),
     })
+}
+
+/// Reads the first few lines of a transcript looking for a top-level
+/// `"sessionId"` field (Claude Code writes it on line 1).
+fn session_id_from_transcript(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    for line in std::io::BufReader::new(file).lines().take(5) {
+        let line = line.ok()?;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(id) = value.get("sessionId").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub fn capture_agent_session(command_line: &str, cwd: &str) -> Option<AgentSessionRef> {
@@ -315,6 +334,36 @@ mod tests {
         let gemini_profile = find_profile("gemini").expect("profile");
         assert!(capture_for_profile(gemini_profile, tmp.path(), r"C:\proj").is_none());
         assert!(capture_agent_session("vim file.txt", "/x").is_none());
+    }
+
+    #[test]
+    fn capture_prefers_session_id_recorded_inside_transcript_over_filename_stem() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let projects = tmp.path().join(".claude").join("projects").join("C--proj");
+        fs::create_dir_all(&projects).expect("mkdir");
+        // Filename UUID deliberately differs from the real session id (recent Claude Code)
+        let content = b"{\"type\":\"mode\",\"mode\":\"normal\",\"sessionId\":\"real-session-uuid\"}\n";
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(projects.join("deadbeef-0000.jsonl"), content).expect("write");
+
+        let claude_profile = find_profile("claude --continue").expect("profile");
+        let captured = capture_for_profile(claude_profile, tmp.path(), r"C:\proj")
+            .expect("captured");
+        assert_eq!(captured.id, "real-session-uuid");
+        assert_eq!(captured.agent, "claude");
+    }
+
+    #[test]
+    fn capture_falls_back_to_stem_when_transcript_has_no_session_id_field() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let projects = tmp.path().join(".claude").join("projects").join("C--proj2");
+        fs::create_dir_all(&projects).expect("mkdir");
+        fs::write(projects.join("stem-id.jsonl"), b"{}\n").expect("write");
+
+        let claude_profile = find_profile("claude").expect("profile");
+        let captured =
+            capture_for_profile(claude_profile, tmp.path(), r"C:\proj2").expect("captured");
+        assert_eq!(captured.id, "stem-id");
     }
 
     #[test]

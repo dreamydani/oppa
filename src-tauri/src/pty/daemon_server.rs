@@ -284,9 +284,20 @@ impl DaemonServer {
         (None, None, None)
     }
 
-    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {        SessionSnapshot {
+    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
+        let cwd = session.cwd().unwrap_or_default();
+        let foreground_command = session.foreground_command();
+        // While a known agent CLI runs, resolve its session id from its
+        // transcripts; the ref persists on the pane even after the agent exits.
+        if let Some(cmd) = &foreground_command {
+            if let Some(captured) = agent_resume::capture_agent_session(cmd, &cwd) {
+                *session.agent_session_ref.lock() = Some(captured);
+            }
+        }
+        let agent_session = session.agent_session_ref.lock().clone();
+        SessionSnapshot {
             session_id: session.id.clone(),
-            cwd: session.cwd().unwrap_or_default(),
+            cwd,
             title: None,
             cols: session.cols(),
             rows: session.rows(),
@@ -296,8 +307,8 @@ impl DaemonServer {
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
-            foreground_command: session.foreground_command(),
-            agent_session: None,
+            foreground_command,
+            agent_session,
         }
     }
 
