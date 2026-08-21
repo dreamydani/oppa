@@ -110,6 +110,13 @@ impl DaemonSession {
             cmd.cwd(cwd);
             cmd.env("OPPA_WORKSPACE_CWD", cwd);
         }
+        // Agent hook plumbing (Orca-parity): managed agent hooks echo these
+        // back to the daemon so a hook payload binds to THIS pane.
+        cmd.env("OPPA_PANE_KEY", id.clone());
+        if let Some(hook) = crate::pty::agent_hook_server::hook_env() {
+            cmd.env("OPPA_HOOK_PORT", hook.0.to_string());
+            cmd.env("OPPA_HOOK_TOKEN", hook.1);
+        }
 
         let child = pair
             .slave
