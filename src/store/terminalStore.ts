@@ -316,7 +316,12 @@ export interface TerminalState {
   cacheScrollback: (id: string, buffer: string) => void;
   setRestoredScrollback: (id: string, data: string) => void;
   clearRestoredScrollback: (id: string) => void;
-  spawnSession: (cwd?: string, shell?: string, existingId?: string) => Promise<string>;
+  spawnSession: (
+    cwd?: string,
+    shell?: string,
+    existingId?: string,
+    geometry?: { cols?: number; rows?: number },
+  ) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, chars: number) => Promise<void>;
@@ -517,21 +522,23 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd, shell, existingId) => {
+  spawnSession: async (cwd, shell, existingId, geometry) => {
     try {
       const targetCwd = cwd ?? (existingId ? undefined : get().resolveDefaultCwd());
       const opts: PtySpawnOptions = {};
       if (existingId) opts.id = existingId;
       if (targetCwd) opts.cwd = targetCwd;
       if (shell) opts.shell = shell;
+      if (geometry?.cols !== undefined) opts.cols = geometry.cols;
+      if (geometry?.rows !== undefined) opts.rows = geometry.rows;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
       const isWarm = typeof res === "string" ? !isNew : (res.is_warm ?? !isNew);
       const snapshot = typeof res === "string" ? null : res.snapshot;
       const coldScrollback = typeof res === "string" ? null : res.cold_scrollback;
-      const cols = (typeof res !== "string" && res.cols) || DEFAULT_COLS;
-      const rows = (typeof res !== "string" && res.rows) || DEFAULT_ROWS;
+      const cols = (typeof res !== "string" && res.cols) || geometry?.cols || DEFAULT_COLS;
+      const rows = (typeof res !== "string" && res.rows) || geometry?.rows || DEFAULT_ROWS;
       const resolvedCwd = (typeof res !== "string" && res.cwd) || targetCwd;
 
       const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
@@ -587,8 +594,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             status: "error",
             error: error instanceof Error ? error.message : String(error),
             cwd: cwd ?? (existingId ? undefined : get().resolveDefaultCwd()),
-            cols: DEFAULT_COLS,
-            rows: DEFAULT_ROWS,
+            cols: geometry?.cols ?? DEFAULT_COLS,
+            rows: geometry?.rows ?? DEFAULT_ROWS,
           },
         },
       }));
@@ -877,7 +884,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       await Promise.all(
         sleepingIds.map(async (oldId) => {
           const savedSession = get().sessions[oldId];
-          const newId = await get().spawnSession(savedSession?.cwd, undefined, oldId);
+          const geometry =
+            savedSession && (savedSession.cols !== undefined || savedSession.rows !== undefined)
+              ? { cols: savedSession.cols, rows: savedSession.rows }
+              : undefined;
+          const newId = await get().spawnSession(savedSession?.cwd, undefined, oldId, geometry);
           remap[oldId] = newId;
 
           if (oldId !== newId) {
@@ -1468,10 +1479,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         await Promise.all(
           Array.from(activeOldIds).map(async (oldId) => {
             const savedSession = byId.get(oldId);
+            const geometry =
+              savedSession && (savedSession.cols !== undefined || savedSession.rows !== undefined)
+                ? { cols: savedSession.cols, rows: savedSession.rows }
+                : undefined;
             const newId = await get().spawnSession(
               savedSession?.cwd,
               undefined,
               oldId,
+              geometry,
             );
             remap[oldId] = newId;
             if (oldId !== newId) {
@@ -1589,10 +1605,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         await Promise.all(
           Array.from(uniqueOldIds).map(async (oldId) => {
             const savedSession = byId.get(oldId);
+            const geometry =
+              savedSession && (savedSession.cols !== undefined || savedSession.rows !== undefined)
+                ? { cols: savedSession.cols, rows: savedSession.rows }
+                : undefined;
             const newId = await get().spawnSession(
               savedSession?.cwd,
               undefined,
               oldId,
+              geometry,
             );
             remap[oldId] = newId;
             if (oldId !== newId) {

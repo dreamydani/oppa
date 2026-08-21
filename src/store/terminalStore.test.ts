@@ -154,6 +154,35 @@ describe("terminalStore", () => {
     expect(session.cwd).toBe("C:\\custom");
   });
 
+  it("spawnSession forwards geometry (cols and rows) in options when provided", async () => {
+    ptySpawnMock.mockResolvedValue({
+      id: "session-geom",
+      is_new: true,
+      pid: 1234,
+      cols: 120,
+      rows: 40,
+      cwd: "C:\\custom",
+    });
+    const id = await useTerminalStore.getState().spawnSession(
+      "C:\\custom",
+      "pwsh",
+      "session-geom",
+      { cols: 120, rows: 40 },
+    );
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      id: "session-geom",
+      cwd: "C:\\custom",
+      shell: "pwsh",
+      cols: 120,
+      rows: 40,
+    });
+    expect(id).toBe("session-geom");
+    const session = useTerminalStore.getState().sessions["session-geom"];
+    expect(session).toBeDefined();
+    expect(session.cols).toBe(120);
+    expect(session.rows).toBe(40);
+  });
+
 
   it("spawnSession records restoredScrollbacks when is_new is false and snapshot is present", async () => {
     ptySpawnMock.mockResolvedValue({
@@ -1242,9 +1271,9 @@ describe("terminalStore", () => {
 
       // Restored sessions pass oldId as existingId to enable warm reattachment.
       expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
-        { id: "old-left", cwd: "C:\\a" },
-        { id: "old-top", cwd: "C:\\b" },
-        { id: "old-right", cwd: "C:\\c" },
+        { id: "old-left", cwd: "C:\\a", cols: 80, rows: 24 },
+        { id: "old-top", cwd: "C:\\b", cols: 80, rows: 24 },
+        { id: "old-right", cwd: "C:\\c", cols: 80, rows: 24 },
       ]);
       const { layout, sessions } = useTerminalStore.getState();
       expect(layout).toEqual({
@@ -1304,8 +1333,8 @@ describe("terminalStore", () => {
       await useTerminalStore.getState().loadLayout();
 
       expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
-        { id: "daemon-s1", cwd: "/app/one" },
-        { id: "daemon-s2", cwd: "/app/two" },
+        { id: "daemon-s1", cwd: "/app/one", cols: 80, rows: 24 },
+        { id: "daemon-s2", cwd: "/app/two", cols: 80, rows: 24 },
       ]);
       const state = useTerminalStore.getState();
       expect(state.restoredScrollbacks["daemon-s1"]).toBe("daemon snapshot 1");
@@ -1725,6 +1754,47 @@ describe("terminalStore", () => {
         await useTerminalStore.getState().wakeTab("tab-running");
         expect(ptySpawnMock).not.toHaveBeenCalled();
       });
+
+      it("wakeTab passes saved session geometry to ptySpawn", async () => {
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-sleeping",
+              title: "Sleeping Tab",
+              layout: { type: "leaf", id: "sess-sleep" },
+              focusedPath: [],
+              isSleeping: true,
+            },
+          ],
+          sessions: {
+            "sess-sleep": {
+              id: "sess-sleep",
+              title: "Sleeping Shell",
+              status: "sleeping",
+              cwd: "C:/projects/saved",
+              cols: 140,
+              rows: 50,
+            },
+          },
+        });
+        ptySpawnMock.mockResolvedValueOnce({
+          id: "sess-sleep",
+          is_new: true,
+          cols: 140,
+          rows: 50,
+          cwd: "C:/projects/saved",
+        });
+
+        await useTerminalStore.getState().wakeTab("tab-sleeping");
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "sess-sleep",
+            cwd: "C:/projects/saved",
+            cols: 140,
+            rows: 50,
+          }),
+        );
+      });
     });
 
     describe("renameTab", () => {
@@ -2036,6 +2106,37 @@ describe("terminalStore", () => {
         expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "new-legacy" });
         expect(state.activeTabId).toBe(state.tabs[0].id);
         expect(state.layout).toEqual({ type: "leaf", id: "new-legacy" });
+      });
+
+      it("loadLayout passes saved session geometry to ptySpawn", async () => {
+        loadLayoutMock.mockResolvedValue(
+          JSON.stringify({
+            tabs: [
+              { id: "t1", title: "Tab One", layout: { type: "leaf", id: "old-1" }, focusedPath: [] },
+            ],
+            activeTabId: "t1",
+            sessions: [
+              { id: "old-1", title: "s1", status: "running", cwd: "C:\\a", cols: 132, rows: 43 },
+            ],
+          }),
+        );
+        ptySpawnMock.mockResolvedValueOnce({
+          id: "new-1",
+          is_new: true,
+          cols: 132,
+          rows: 43,
+          cwd: "C:\\a",
+        });
+
+        await useTerminalStore.getState().loadLayout();
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "old-1",
+            cwd: "C:\\a",
+            cols: 132,
+            rows: 43,
+          }),
+        );
       });
     });
   });
