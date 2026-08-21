@@ -1,3 +1,4 @@
+pub mod agent_resume;
 pub mod commands;
 pub mod daemon_client;
 pub mod daemon_server;
