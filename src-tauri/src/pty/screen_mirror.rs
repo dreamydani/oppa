@@ -44,22 +44,32 @@ impl ScreenMirror {
         // 2. Clear visible screen and return to home position
         result.push_str("\x1b[2J\x1b[H");
 
-        // 3. Render screen lines
+        // 3. Determine the last active row (cursor row or last row with non-empty content)
         let (_rows, cols) = screen.size();
-        let row_iter = screen.rows_formatted(0, cols);
+        let (cursor_row, cursor_col) = screen.cursor_position();
+        let formatted_rows: Vec<Vec<u8>> = screen.rows_formatted(0, cols).collect();
+        let plain_rows: Vec<String> = screen.rows(0, cols).collect();
+
+        let mut last_active_row = cursor_row as usize;
+        for (i, row_str) in plain_rows.iter().enumerate() {
+            if !row_str.trim().is_empty() && i > last_active_row {
+                last_active_row = i;
+            }
+        }
+
+        // 4. Render screen lines up to last active row
         let mut first = true;
-        for row_bytes in row_iter {
+        for row_bytes in formatted_rows.iter().take(last_active_row + 1) {
             if !first {
                 result.push_str("\r\n");
             }
             first = false;
-            result.push_str(&String::from_utf8_lossy(&row_bytes));
+            result.push_str(&String::from_utf8_lossy(row_bytes));
         }
 
-        // 4. Restore absolute cursor position (1-indexed)
-        let (cursor_row, cursor_col) = screen.cursor_position();
+        // 5. Restore absolute cursor position (1-indexed)
         result.push_str(&format!("\x1b[{};{}H", cursor_row + 1, cursor_col + 1));
-        // 5. Restore cursor visibility
+        // 6. Restore cursor visibility
         result.push_str("\x1b[?25h");
 
         result
@@ -104,5 +114,14 @@ mod tests {
         mirror.process(b"\x1b[5;10HHello");
         let snapshot = mirror.get_formatted_snapshot();
         assert!(snapshot.contains("\x1b[5;15H"));
+    }
+
+    #[test]
+    fn test_screen_mirror_snapshot_omits_trailing_blank_lines() {
+        let mut mirror = ScreenMirror::new(80, 24, 1000);
+        mirror.process(b"PS C:\\Users\\danial>\x1b[?25h");
+        let snapshot = mirror.get_formatted_snapshot();
+        assert!(snapshot.contains("PS C:\\Users\\danial>"));
+        assert!(!snapshot.contains("\r\n"));
     }
 }
