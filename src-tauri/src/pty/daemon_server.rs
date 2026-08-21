@@ -329,14 +329,15 @@ impl DaemonServer {
         (None, None, None)
     }
 
-    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
+    pub(crate) fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
         let cwd = session.cwd().unwrap_or_default();
         let foreground_command = session.foreground_command();
-        // Fallback resolution: while a known agent CLI runs and no hook has
-        // already bound an authoritative ref, resolve the id from transcripts.
-        // The ref persists on the pane even after the agent exits.
+        // Scan-tier refresh: while a known agent CLI runs, keep following its
+        // cwd-map/transcript store so /resume or new conversations stay fresh.
+        // Never overwrite hook-captured refs — those are per-pane authoritative
+        // (the cwd map is per-project and would cross-contaminate panes).
         if let Some(cmd) = &foreground_command {
-            if session.agent_session_ref.lock().is_none() {
+            if !*session.agent_ref_from_hook.lock() {
                 if let Some(captured) = agent_resume::capture_agent_session(cmd, &cwd) {
                     *session.agent_session_ref.lock() = Some(captured);
                 }

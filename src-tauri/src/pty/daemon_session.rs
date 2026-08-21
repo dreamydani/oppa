@@ -33,6 +33,9 @@ pub struct DaemonSession {
     // Last known agent session id for this pane; kept even after the command
     // exits so a later cold boot can resume the conversation.
     pub agent_session_ref: Arc<Mutex<Option<AgentSessionRef>>>,
+    // True when the ref was set by a hook payload (authoritative per pane).
+    // Scan-tier refreshes must never overwrite hook-captured ids.
+    pub agent_ref_from_hook: Arc<Mutex<bool>>,
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
     pub initial_command_written: Arc<AtomicBool>,
@@ -148,6 +151,7 @@ impl DaemonSession {
             cwd: Arc::new(Mutex::new(cwd.map(|s| s.to_string()))),
             foreground_command: Arc::new(Mutex::new(None)),
             agent_session_ref: Arc::new(Mutex::new(None)),
+            agent_ref_from_hook: Arc::new(Mutex::new(false)),
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
             initial_command_written: Arc::new(AtomicBool::new(false)),
@@ -177,6 +181,7 @@ impl DaemonSession {
         let session_cwd = Arc::clone(&session.cwd);
         let foreground = Arc::clone(&session.foreground_command);
         let agent_ref = Arc::clone(&session.agent_session_ref);
+        let agent_from_hook = Arc::clone(&session.agent_ref_from_hook);
         let ready_seen = Arc::clone(&session.ready_seen);
         let initial_command_written = Arc::clone(&session.initial_command_written);
         let writer = Arc::clone(&session.writer);
@@ -252,6 +257,7 @@ impl DaemonSession {
                                         if cmdline.is_empty() { None } else { Some(cmdline) };
                                     // New foreground work invalidates the previous agent session
                                     *agent_ref.lock() = None;
+                                    *agent_from_hook.lock() = false;
                                 }
                                 OscEvent::CommandEnd => {
                                     *foreground.lock() = None;
@@ -441,6 +447,7 @@ impl DaemonSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pty::daemon_server::DaemonServer;
 
     fn test_sh_path() -> String {
         if let Some(found) = std::env::var_os("PATH").and_then(|path| {
@@ -737,6 +744,61 @@ mod tests {
             session.agent_session_ref.lock().is_none(),
             "agent ref must be cleared when a new command starts"
         );
+        assert!(
+            !*session.agent_ref_from_hook.lock(),
+            "hook-authority flag must reset with the ref"
+        );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_agent_ref_from_hook_survives_scan_refresh() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "agent-ref-hook".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+        )
+        .expect("spawn hook-ref shell");
+
+        // A running agy foreground command would normally trigger scan-tier
+        // capture — it must NOT overwrite a hook-captured id. Simulate the
+        // hook firing WHILE agy runs (after its own C marker cleared state).
+        session
+            .write(b"printf '\\033]133;C;agy\\007'\n")
+            .expect("write C marker");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if session.foreground_command().as_deref() == Some("agy") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(session.foreground_command().as_deref(), Some("agy"));
+
+        *session.agent_session_ref.lock() = Some(AgentSessionRef {
+            agent: "agy".into(),
+            id: "hook-conv-7".into(),
+            transcript_path: None,
+        });
+        *session.agent_ref_from_hook.lock() = true;
+
+        let snapshot = DaemonServer::build_checkpoint(&session);
+        assert_eq!(
+            snapshot.agent_session.as_ref().map(|r| r.id.as_str()),
+            Some("hook-conv-7"),
+            "scan tier must not overwrite hook-captured refs"
+        );
+
+        // Scan-sourced refs, in contrast, must be refreshable (from_hook=false)
+        *session.agent_ref_from_hook.lock() = false;
+        // Point the cwd at this repo so the real agy cwd-map (if any) decides;
+        // either way the call must not panic and the field stays consistent.
+        let _ = DaemonServer::build_checkpoint(&session);
         let _ = session.kill();
     }
 

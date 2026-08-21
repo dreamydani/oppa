@@ -235,6 +235,10 @@ fn apply_hook_payload(
             id: session_id,
             transcript_path,
         });
+        // Hook payloads are authoritative per pane: the scan tier must not
+        // overwrite this ref (e.g. agy's project-wide cwd map in a
+        // multi-pane-same-directory setup).
+        *session.agent_ref_from_hook.lock() = true;
     }
 }
 
