@@ -116,8 +116,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     const restoredScrollback = state.restoredScrollbacks[id];
     const cachedScrollback = state.cachedScrollbacks[id];
     if (restoredScrollback) {
+      term.reset();
       term.write(restoredScrollback);
-      term.writeln("\r\n\x1b[2m── [Session Restored] ──────────────────────────────────────\x1b[0m\r\n");
       clearRestoredScrollback(id);
     } else if (cachedScrollback) {
       term.write(cachedScrollback);

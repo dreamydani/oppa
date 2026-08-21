@@ -19,6 +19,7 @@ const xtermState = vi.hoisted(() => ({
     write: ReturnType<typeof vi.fn>;
     writeln: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
+    reset: ReturnType<typeof vi.fn>;
     onData: ReturnType<typeof vi.fn>;
     onWriteParsed: ReturnType<typeof vi.fn>;
     open: ReturnType<typeof vi.fn>;
@@ -56,6 +57,7 @@ vi.mock("@xterm/xterm", () => {
     write = vi.fn();
     writeln = vi.fn();
     clear = vi.fn();
+    reset = vi.fn();
     open = vi.fn();
     loadAddon = vi.fn();
     attachCustomKeyEventHandler = vi.fn((fn: (event: KeyboardEvent) => boolean) => {
@@ -556,7 +558,7 @@ describe("TerminalPane", () => {
     expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
   });
 
-  it("replays restored scrollback, prints Session Restored banner, and clears restored state on mount", async () => {
+  it("replays restored scrollback with clean reset, omits in-buffer restore divider, and clears restored state on mount", async () => {
     useTerminalStore.setState({
       restoredScrollbacks: { abc: "saved lines\r\n" },
     });
@@ -564,9 +566,10 @@ describe("TerminalPane", () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
+    expect(term().reset).toHaveBeenCalled();
     expect(term().write).toHaveBeenCalledWith("saved lines\r\n");
-    expect(term().writeln).toHaveBeenCalledWith(
-      "\r\n\x1b[2m── [Session Restored] ──────────────────────────────────────\x1b[0m\r\n",
+    expect(term().writeln).not.toHaveBeenCalledWith(
+      expect.stringContaining("Session Restored"),
     );
     expect(useTerminalStore.getState().restoredScrollbacks["abc"]).toBeUndefined();
   });
