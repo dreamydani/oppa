@@ -8,13 +8,18 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const HIGH_WATERMARK_BYTES: usize = 256 * 1024;
 const LOW_WATERMARK_BYTES: usize = 32 * 1024;
 const READ_CHUNK_SIZE: usize = 8 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SCREEN_SCROLLBACK_LINES: usize = 1000;
+// Bootstrap emits this once after prompt hooks install; injection waits for it
+const READY_MARKER_BYTES: &[u8] = b"\x1b]633;oppa-ready\x07";
+// Shells without our bootstrap (e.g. cmd.exe) never emit the marker — inject anyway
+const FALLBACK_INJECT_SECS: u64 = 15;
+const FALLBACK_INJECT_DURATION: Duration = Duration::from_secs(FALLBACK_INJECT_SECS);
 
 pub struct DaemonSession {
     pub id: String,
@@ -23,6 +28,10 @@ pub struct DaemonSession {
     pub child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     pub screen_mirror: Arc<Mutex<ScreenMirror>>,
     pub cwd: Arc<Mutex<Option<String>>>,
+    pub foreground_command: Arc<Mutex<Option<String>>>,
+    pub ready_seen: Arc<AtomicBool>,
+    pub initial_command: Option<String>,
+    pub initial_command_written: Arc<AtomicBool>,
     pub cols: AtomicU16,
     pub rows: AtomicU16,
     pub pid: u32,
@@ -57,6 +66,7 @@ impl DaemonSession {
             config.cwd.as_deref(),
             cols,
             rows,
+            None,
         )
     }
 
@@ -68,6 +78,7 @@ impl DaemonSession {
         cwd: Option<&str>,
         cols: u16,
         rows: u16,
+        initial_command: Option<&str>,
     ) -> Result<Arc<Self>, String> {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -123,6 +134,10 @@ impl DaemonSession {
             child: Arc::new(Mutex::new(child)),
             screen_mirror,
             cwd: Arc::new(Mutex::new(cwd.map(|s| s.to_string()))),
+            foreground_command: Arc::new(Mutex::new(None)),
+            ready_seen: Arc::new(AtomicBool::new(false)),
+            initial_command: initial_command.map(str::to_string),
+            initial_command_written: Arc::new(AtomicBool::new(false)),
             cols: AtomicU16::new(cols),
             rows: AtomicU16::new(rows),
             pid,
@@ -132,17 +147,24 @@ impl DaemonSession {
             seq: Arc::new(AtomicU64::new(0)),
         });
 
-        Self::start_threads(Arc::clone(&session), reader);
-
+        Self::start_threads(
+            Arc::clone(&session),
+            reader,
+            session.initial_command.clone(),
+        );
         Ok(session)
     }
 
     fn start_threads(
         session: Arc<Self>,
         mut reader: Box<dyn std::io::Read + Send>,
+        initial_command: Option<String>,
     ) {
         let id = session.id.clone();
         let session_cwd = Arc::clone(&session.cwd);
+        let foreground = Arc::clone(&session.foreground_command);
+        let ready_seen = Arc::clone(&session.ready_seen);
+        let initial_command_written = Arc::clone(&session.initial_command_written);
         let writer = Arc::clone(&session.writer);
         let pending = Arc::clone(&session.pending_bytes);
         let paused = Arc::clone(&session.paused);
@@ -158,7 +180,11 @@ impl DaemonSession {
         let subscribers_watch = Arc::clone(&session.subscribers);
 
         // Reader thread: reads PTY output, feeds screen mirror, scans OSC, and emits data events
+        let initial_command_reader = initial_command.clone();
+        let writer_inject = Arc::clone(&writer);
+        let written_inject = Arc::clone(&initial_command_written);
         std::thread::spawn(move || {
+            let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
             let mut utf8_decoder = Utf8ChunkDecoder::new();
@@ -185,7 +211,15 @@ impl DaemonSession {
                             let _ = writer.lock().write_all(b"\x1b[1;1R");
                         }
 
-                        // OSC scanning for CWD tracking; command markers wired up in a later task
+                        // Ready-marker detection; stop scanning once found
+                        if !ready_seen.load(Ordering::SeqCst)
+                            && chunk
+                                .windows(READY_MARKER_BYTES.len())
+                                .any(|w| w == READY_MARKER_BYTES)
+                        {
+                            ready_seen.store(true, Ordering::SeqCst);
+                        }
+
                         for osc_event in osc_scanner.scan(chunk) {
                             match osc_event {
                                 OscEvent::Cwd(new_cwd) => {
@@ -198,7 +232,14 @@ impl DaemonSession {
                                         },
                                     );
                                 }
-                                OscEvent::CommandStart(_) | OscEvent::CommandEnd => {}
+                                OscEvent::CommandStart(cmdline) => {
+                                    // Empty cmdline means the hook couldn't capture it — unknown, not empty
+                                    *foreground.lock() =
+                                        if cmdline.is_empty() { None } else { Some(cmdline) };
+                                }
+                                OscEvent::CommandEnd => {
+                                    *foreground.lock() = None;
+                                }
                             }
                         }
 
@@ -216,6 +257,17 @@ impl DaemonSession {
                                 seq: seq_num,
                             },
                         );
+
+                        // Inject initial command exactly once when the ready marker arrives.
+                        // Fallback timeout lives in a timer thread: the reader blocks in
+                        // read() on quiet shells and would never observe the deadline.
+                        if ready_seen.load(Ordering::SeqCst)
+                            && !initial_command_written.swap(true, Ordering::SeqCst)
+                        {
+                            if let Some(cmd) = initial_command.as_deref() {
+                                let _ = writer.lock().write_all(format!("{cmd}\r").as_bytes());
+                            }
+                        }
                     }
                     Err(_) => break,
                 }
@@ -245,6 +297,22 @@ impl DaemonSession {
                 std::thread::sleep(POLL_INTERVAL);
             }
         });
+
+        // Fallback injector: shells without our bootstrap never emit the ready marker,
+        // so inject after the deadline unless the reader already did (or command absent)
+        if let Some(cmd) = initial_command {
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + FALLBACK_INJECT_DURATION;
+                while Instant::now() < deadline && !written_inject.load(Ordering::SeqCst) {
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+                if !written_inject.swap(true, Ordering::SeqCst) {
+                    let _ = writer_inject
+                        .lock()
+                        .write_all(format!("{cmd}\r").as_bytes());
+                }
+            });
+        }
     }
 
     /// Write input bytes to the PTY's input stream.
@@ -341,6 +409,11 @@ impl DaemonSession {
         self.cwd.lock().clone()
     }
 
+    /// Command currently running in the foreground, per OSC 133 C/D markers.
+    pub fn foreground_command(&self) -> Option<String> {
+        self.foreground_command.lock().clone()
+    }
+
     #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
         self.child.lock().try_wait().ok().flatten().is_none()
@@ -382,6 +455,7 @@ mod tests {
             None,
             80,
             24,
+            None,
         )
         .expect("spawn daemon session");
 
@@ -418,6 +492,7 @@ mod tests {
             None,
             80,
             24,
+            None,
         )
         .expect("spawn interactive shell");
 
@@ -454,6 +529,7 @@ mod tests {
             None,
             80,
             24,
+            None,
         )
         .expect("spawn interactive shell");
 
@@ -476,6 +552,7 @@ mod tests {
             None,
             80,
             24,
+            None,
         )
         .expect("spawn multibyte shell");
 
@@ -513,6 +590,7 @@ mod tests {
             Some("test_ws_cwd"),
             80,
             24,
+            None,
         )
         .expect("spawn session with cwd");
 
@@ -541,6 +619,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_daemon_session_foreground_command_tracking() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "fg-track".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+        )
+        .expect("spawn interactive shell");
+
+        // printf turns the literal \033/\007 text into real ESC/BEL bytes on output
+        session
+            .write(b"printf '\\033]133;C;git status\\007'\n")
+            .expect("write C marker");
+
+        let mut saw_start = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if session.foreground_command().as_deref() == Some("git status") {
+                saw_start = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            saw_start,
+            "expected foreground_command Some(\"git status\"), got {:?}",
+            session.foreground_command()
+        );
+
+        session
+            .write(b"printf '\\033]133;D\\007'\n")
+            .expect("write D marker");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if session.foreground_command().is_none() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            session.foreground_command().is_none(),
+            "expected foreground_command cleared after D marker"
+        );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_initial_command_fallback_injection() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "fallback-inject".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            Some("echo injected_cmd_ok"),
+        )
+        .expect("spawn with initial command");
+
+        let mut rx = session.subscribe();
+        let mut collected = String::new();
+        // Fallback window plus shell startup slack
+        let deadline =
+            std::time::Instant::now() + Duration::from_secs(FALLBACK_INJECT_SECS + 5);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                    collected.push_str(&data);
+                    if collected.contains("injected_cmd_ok") {
+                        break;
+                    }
+                }
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                _ => continue,
+            }
+        }
+
+        assert!(
+            collected.contains("injected_cmd_ok"),
+            "expected fallback injection of initial command, got: {collected}"
+        );
+        assert!(session.initial_command_written.load(Ordering::SeqCst));
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_initial_command_ready_marker_injection() {
+        let sh = test_sh_path();
+        let started = std::time::Instant::now();
+        let session = DaemonSession::spawn_with_args(
+            "marker-inject".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            Some("echo marker_injected_ok"),
+        )
+        .expect("spawn with initial command");
+
+        // Emit the ready marker ourselves, well inside the fallback window
+        session
+            .write(b"printf '\\033]633;oppa-ready\\007'\n")
+            .expect("write ready marker");
+
+        let mut rx = session.subscribe();
+        let mut collected = String::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                    collected.push_str(&data);
+                    if collected.contains("marker_injected_ok") {
+                        break;
+                    }
+                }
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                _ => continue,
+            }
+        }
+
+        assert!(
+            collected.contains("marker_injected_ok"),
+            "expected marker-triggered injection, got: {collected}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "injection should be marker-driven, not fallback-timed; took {:?}",
+            started.elapsed()
+        );
+        assert!(session.ready_seen.load(Ordering::SeqCst));
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
     async fn test_daemon_session_kill_process_tree() {
         let sh = test_sh_path();
         let session = DaemonSession::spawn_with_args(
@@ -550,6 +768,7 @@ mod tests {
             None,
             80,
             24,
+            None,
         )
         .expect("spawn interactive shell");
 
