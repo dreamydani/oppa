@@ -91,6 +91,15 @@ pub fn run() {
             // The renderer signals that it finished the save via a command.
             // (confirm_save_complete below sets the flag.)
             app.manage(save_done);
+
+            // Pre-warm daemon client in background so first terminal spawn is immediate
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Some(manager) = app_handle.try_state::<PtyManager>() {
+                    let _ = manager.get_client();
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {

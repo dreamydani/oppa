@@ -67,7 +67,9 @@ export function WorkspaceSetupWizard({
 
   // Load wizard data and initial active CWD on mount
   useEffect(() => {
-    void loadWizardData();
+    if (recentWorkspaces.length === 0 && workspacePresets.length === 0) {
+      void loadWizardData();
+    }
     const activeCwd = getActiveCwd();
     if (activeCwd) {
       setCwd(activeCwd);

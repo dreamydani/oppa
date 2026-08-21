@@ -749,22 +749,27 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const targetTab = currentTabs.find((t) => t.id === targetId);
     if (!targetTab) return;
 
-    const sessionIds = leafIds(targetTab.layout);
-    for (const sId of sessionIds) {
-      if (sId) {
-        if (get().sessions[sId]) {
-          await get().killSession(sId);
-        }
-        void deleteScrollback(sId).catch(() => {});
-      }
-    }
+    let sessions = get().sessions;
+    let cachedScrollbacks = get().cachedScrollbacks;
 
-    const sessions = { ...get().sessions };
-    const cachedScrollbacks = { ...get().cachedScrollbacks };
-    for (const sId of sessionIds) {
-      if (sId) {
-        delete sessions[sId];
-        delete cachedScrollbacks[sId];
+    if (!targetTab.isWizard) {
+      const sessionIds = leafIds(targetTab.layout);
+      for (const sId of sessionIds) {
+        if (sId) {
+          if (get().sessions[sId]) {
+            await get().killSession(sId);
+          }
+          void deleteScrollback(sId).catch(() => {});
+        }
+      }
+
+      sessions = { ...get().sessions };
+      cachedScrollbacks = { ...get().cachedScrollbacks };
+      for (const sId of sessionIds) {
+        if (sId) {
+          delete sessions[sId];
+          delete cachedScrollbacks[sId];
+        }
       }
     }
 
@@ -1184,21 +1189,31 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       })),
     };
     await transportSaveLayout(JSON.stringify(snapshot));
+    const scrollbackPromises: Promise<void>[] = [];
     for (const s of Object.values(sessions)) {
       const buffer = serializers[s.id]?.() || cachedScrollbacks[s.id];
       if (buffer) {
-        await saveScrollback(s.id, buffer);
+        scrollbackPromises.push(saveScrollback(s.id, buffer).catch(() => {}));
       }
     }
-    await cleanupStaleScrollbacks(Object.keys(sessions));
+    if (scrollbackPromises.length > 0) {
+      await Promise.all(scrollbackPromises);
+    }
+    await cleanupStaleScrollbacks(Object.keys(sessions)).catch(() => {});
   },
 
   // Restore a saved multi-tab (or legacy single-tab) layout.
   loadLayout: async () => {
-    await get().loadSettingsData().catch(() => {});
+    const [, saved] = await Promise.all([
+      get().loadSettingsData().catch(() => {}),
+      transportLoadLayout().catch(() => null),
+      get().loadWizardData().catch(() => {}),
+    ]);
+    if (!saved) {
+      set({ ready: true });
+      return;
+    }
     try {
-      const saved = await transportLoadLayout();
-      if (!saved) return;
       const parsed = JSON.parse(saved) as {
         version?: number;
         window?: WindowState;
@@ -1279,13 +1294,22 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             activeTabId: "",
             layout: { type: "leaf", id: "" },
             focusedPath: [],
+            ready: true,
           });
           return;
         }
+
+        const uniqueOldIds = new Set<string>();
         for (const tab of parsed.tabs) {
           if (tab.isWizard) continue;
           for (const oldId of leafIds(tab.layout)) {
-            if (oldId === "" || remap[oldId]) continue;
+            if (oldId) uniqueOldIds.add(oldId);
+          }
+        }
+
+        // Restore all unique sessions in parallel
+        await Promise.all(
+          Array.from(uniqueOldIds).map(async (oldId) => {
             const savedSession = byId.get(oldId);
             const newId = await get().spawnSession(
               savedSession?.cwd,
@@ -1304,7 +1328,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             if (savedSession?.title && savedSession.title !== newId) {
               get().renameSession(newId, savedSession.title);
             }
-
 
             const prev = await loadScrollback(oldId);
             if (prev) {
@@ -1326,8 +1349,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                 await deleteScrollback(oldId);
               }
             }
-          }
-        }
+          }),
+        );
 
         const restoredTabs: TabState[] = parsed.tabs.map((tab) => {
           if (tab.isWizard) {
@@ -1361,49 +1384,55 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           focusedPath: activeTab ? activeTab.focusedPath : [],
         });
       } else if (parsed.layout) {
+        const uniqueOldIds = new Set<string>();
         for (const oldId of leafIds(parsed.layout)) {
-          if (oldId === "") continue;
-          const savedSession = byId.get(oldId);
-          const newId = await get().spawnSession(
-            savedSession?.cwd,
-            undefined,
-            oldId,
-          );
-          remap[oldId] = newId;
-          if (oldId !== newId) {
-            set((state) => {
-              const sessions = { ...state.sessions };
-              delete sessions[oldId];
-              return { sessions };
-            });
-          }
+          if (oldId) uniqueOldIds.add(oldId);
+        }
 
-          if (savedSession?.title && savedSession.title !== newId) {
-            get().renameSession(newId, savedSession.title);
-          }
-
-
-          const prev = await loadScrollback(oldId);
-          if (prev) {
-            if (!get().restoredScrollbacks[newId]) {
-              get().setRestoredScrollback(newId, prev);
+        await Promise.all(
+          Array.from(uniqueOldIds).map(async (oldId) => {
+            const savedSession = byId.get(oldId);
+            const newId = await get().spawnSession(
+              savedSession?.cwd,
+              undefined,
+              oldId,
+            );
+            remap[oldId] = newId;
+            if (oldId !== newId) {
               set((state) => {
-                const sess = state.sessions[newId];
-                if (!sess) return state;
-                return {
-                  sessions: {
-                    ...state.sessions,
-                    [newId]: { ...sess, isRestored: true },
-                  },
-                };
+                const sessions = { ...state.sessions };
+                delete sessions[oldId];
+                return { sessions };
               });
             }
-            await saveScrollback(newId, prev);
-            if (oldId !== newId) {
-              await deleteScrollback(oldId);
+
+            if (savedSession?.title && savedSession.title !== newId) {
+              get().renameSession(newId, savedSession.title);
             }
-          }
-        }
+
+            const prev = await loadScrollback(oldId);
+            if (prev) {
+              if (!get().restoredScrollbacks[newId]) {
+                get().setRestoredScrollback(newId, prev);
+                set((state) => {
+                  const sess = state.sessions[newId];
+                  if (!sess) return state;
+                  return {
+                    sessions: {
+                      ...state.sessions,
+                      [newId]: { ...sess, isRestored: true },
+                    },
+                  };
+                });
+              }
+              await saveScrollback(newId, prev);
+              if (oldId !== newId) {
+                await deleteScrollback(oldId);
+              }
+            }
+          }),
+        );
+
         const remappedLayout = remapLeafIds(parsed.layout, remap);
         const defaultTab: TabState = {
           id: "tab-1",
