@@ -40,6 +40,10 @@ export function GeneralSettingsPane(): React.ReactElement {
     });
   };
 
+  const toggleAutoResumeAgents = () => {
+    updateSettings({ general: { autoResumeAgents: !general.autoResumeAgents } });
+  };
+
   const toggleWordWrap = () => {
     updateSettings({ general: { editorWordWrap: !general.editorWordWrap } });
   };
@@ -228,6 +232,28 @@ export function GeneralSettingsPane(): React.ReactElement {
                 aria-label="Confirm quit with running processes"
                 className={`settings-switch ${general.confirmQuitWithRunningProcesses ? "checked" : ""}`}
                 onClick={toggleConfirmQuit}
+              >
+                <span className="settings-switch-thumb" />
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <span className="settings-row-label">Resume agents after cold boot</span>
+              <span className="settings-row-desc">
+                After a shutdown or reboot, relaunch agent CLIs (Claude Code, Codex, Gemini, Aider,
+                Antigravity) that were running, using their native resume.
+              </span>
+            </div>
+            <div className="settings-row-control">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={general.autoResumeAgents}
+                aria-label="Resume agents after cold boot"
+                className={`settings-switch ${general.autoResumeAgents ? "checked" : ""}`}
+                onClick={toggleAutoResumeAgents}
               >
                 <span className="settings-switch-thumb" />
               </button>

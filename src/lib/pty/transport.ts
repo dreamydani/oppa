@@ -18,6 +18,11 @@ export interface PtyCwdPayload {
   cwd: string;
 }
 
+export interface ResumePlan {
+  command_line: string;
+  kind: "agent-resume" | "command-relaunch";
+}
+
 export interface PtySpawnResult {
   id: string;
   is_new: boolean;
@@ -28,6 +33,8 @@ export interface PtySpawnResult {
   cols?: number;
   rows?: number;
   cwd?: string | null;
+  resume?: ResumePlan | null;
+  resume_declined_reason?: string | null;
 }
 
 
@@ -38,6 +45,7 @@ export type PtySpawnOptions = {
   cwd?: string;
   cols?: number;
   rows?: number;
+  resumeAgents?: boolean;
 };
 
 export async function ptySpawn(opts?: PtySpawnOptions): Promise<PtySpawnResult> {

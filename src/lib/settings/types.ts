@@ -49,6 +49,8 @@ export interface GeneralSettings {
   editorAutoSaveDelay: number; // 0 = disabled, milliseconds delay otherwise
   browserSearchEngine: BrowserSearchEngine;
   browserHomePage: string;
+  // Relaunch known agent CLIs after a cold boot via their native resume
+  autoResumeAgents: boolean;
 }
 
 export interface AppSettings {
@@ -85,6 +87,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     editorAutoSaveDelay: 1000,
     browserSearchEngine: "duckduckgo",
     browserHomePage: "https://duckduckgo.com",
+    autoResumeAgents: true,
   },
   appearance: DEFAULT_APPEARANCE_SETTINGS,
 };

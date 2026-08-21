@@ -363,6 +363,50 @@ describe("TerminalPaneHeader", () => {
       expect(screen.queryByRole("status", { name: /session restored/i })).toBeNull();
     });
 
+    it("shows Agent resumed text and green variant for agent-resume kind", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: true,
+            resumeKind: "agent-resume",
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      const badge = screen.getByRole("status", { name: /session restored/i });
+      expect(badge.className).toContain("terminal-restored-badge--resumed");
+      expect(badge.textContent).toContain("Agent resumed");
+    });
+
+    it("shows Command relaunched text for command-relaunch kind", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            isRestored: true,
+            resumeKind: "command-relaunch",
+          },
+        },
+      });
+
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      const badge = screen.getByRole("status", { name: /session restored/i });
+      expect(badge.className).not.toContain("terminal-restored-badge--resumed");
+      expect(badge.textContent).toContain("Command relaunched");
+    });
+
     it("clicking dismiss button calls dismissSessionRestoredBanner", () => {
       useTerminalStore.setState({
         sessions: {

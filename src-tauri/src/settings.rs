@@ -18,6 +18,7 @@ pub struct GeneralSettings {
     pub editor_auto_save_delay: u64,
     pub browser_search_engine: String,
     pub browser_home_page: String,
+    pub auto_resume_agents: bool,
 }
 
 impl Default for GeneralSettings {
@@ -33,6 +34,7 @@ impl Default for GeneralSettings {
             editor_auto_save_delay: 1000,
             browser_search_engine: "duckduckgo".into(),
             browser_home_page: "https://duckduckgo.com".into(),
+            auto_resume_agents: true,
         }
     }
 }

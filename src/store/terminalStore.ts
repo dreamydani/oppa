@@ -211,6 +211,8 @@ export interface SessionInfo {
   cols: number;
   rows: number;
   isRestored?: boolean;
+  // How the cold-restored session's work was brought back, when it was
+  resumeKind?: "agent-resume" | "command-relaunch";
 }
 
 export type TerminalSession = SessionInfo;
@@ -531,12 +533,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       if (shell) opts.shell = shell;
       if (geometry?.cols !== undefined) opts.cols = geometry.cols;
       if (geometry?.rows !== undefined) opts.rows = geometry.rows;
+      // Rust defaults to resume-on; only ever send the explicit opt-out
+      const autoResume = get().settings.general.autoResumeAgents;
+      if (autoResume === false) opts.resumeAgents = false;
       const res = await ptySpawn(Object.keys(opts).length > 0 ? opts : undefined);
       const id = typeof res === "string" ? res : res.id;
       const isNew = typeof res === "string" ? true : res.is_new;
       const isWarm = typeof res === "string" ? !isNew : (res.is_warm ?? !isNew);
       const snapshot = typeof res === "string" ? null : res.snapshot;
       const coldScrollback = typeof res === "string" ? null : res.cold_scrollback;
+      const resumeKind = typeof res === "string" ? undefined : res.resume?.kind;
       const cols = (typeof res !== "string" && res.cols) || geometry?.cols || DEFAULT_COLS;
       const rows = (typeof res !== "string" && res.rows) || geometry?.rows || DEFAULT_ROWS;
       const resolvedCwd = (typeof res !== "string" && res.cwd) || targetCwd;
@@ -572,6 +578,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               cols,
               rows,
               ...(isColdRestored || existingSession?.isRestored ? { isRestored: true } : {}),
+              ...(resumeKind ? { resumeKind } : {}),
             },
           },
         };

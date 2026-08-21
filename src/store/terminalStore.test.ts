@@ -124,6 +124,32 @@ describe("terminalStore", () => {
     expect(session.rows).toBe(24);
   });
 
+  it("spawnSession stores resumeKind when the daemon returns a resume plan", async () => {
+    ptySpawnMock.mockResolvedValue({
+      ...spawnRes("agent-1"),
+      is_warm: false,
+      resume: { command_line: "claude --resume abc123", kind: "agent-resume" },
+    });
+    await useTerminalStore.getState().spawnSession();
+    const session = useTerminalStore.getState().sessions["agent-1"];
+    expect(session.resumeKind).toBe("agent-resume");
+    expect(session.isRestored).toBeUndefined();
+  });
+
+  it("spawnSession sends resumeAgents:false when auto-resume setting is disabled", async () => {
+    useTerminalStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        general: { ...DEFAULT_APP_SETTINGS.general, autoResumeAgents: false },
+      },
+    });
+    ptySpawnMock.mockResolvedValue(spawnRes("no-resume"));
+    await useTerminalStore.getState().spawnSession();
+    expect(ptySpawnMock).toHaveBeenCalledWith({ resumeAgents: false });
+    const session = useTerminalStore.getState().sessions["no-resume"];
+    expect(session.resumeKind).toBeUndefined();
+  });
+
   it("spawnSession forwards cwd and stores it on the session", async () => {
     ptySpawnMock.mockResolvedValue(spawnRes("def"));
     await useTerminalStore.getState().spawnSession("C:\\work");

@@ -273,7 +273,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         )}
         {session?.isRestored && (
           <div
-            className="terminal-restored-badge"
+            className={`terminal-restored-badge${session?.resumeKind === "agent-resume" ? " terminal-restored-badge--resumed" : ""}`}
             role="status"
             aria-label="Session restored"
             title="Session restored from disk checkpoint. Press any key or click to dismiss."
@@ -284,7 +284,13 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             onPointerDown={(e) => e.stopPropagation()}
           >
             <span className="restored-dot" />
-            <span className="restored-text">Session restored</span>
+            <span className="restored-text">
+              {session?.resumeKind === "agent-resume"
+                ? "Agent resumed"
+                : session?.resumeKind === "command-relaunch"
+                  ? "Command relaunched"
+                  : "Session restored"}
+            </span>
             <button
               type="button"
               className="restored-dismiss-btn"

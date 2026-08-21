@@ -203,6 +203,24 @@
   color: #fafafa;
 }
 
+/* Native agent resume succeeded — green to signal live continuity */
+.terminal-restored-badge--resumed {
+  background-color: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.25);
+  color: #34d399;
+}
+
+.terminal-restored-badge--resumed .restored-dot {
+  background-color: #34d399;
+  box-shadow: 0 0 4px rgba(52, 211, 153, 0.4);
+}
+
+.terminal-restored-badge--resumed:hover {
+  background-color: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #6ee7b7;
+}
+
 .restored-dot {
   width: 5px;
   height: 5px;
