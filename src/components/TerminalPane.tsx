@@ -319,7 +319,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   if (
     session.status === "loading" ||
     session.status === "restoring" ||
-    session.status === "spawning"
+    session.status === "spawning" ||
+    session.status === "sleeping"
   ) {
     return (
       <div

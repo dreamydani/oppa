@@ -229,4 +229,50 @@ describe("SessionLeaf", () => {
     const pane = container.querySelector(".terminal-pane");
     expect(pane?.getAttribute("data-path")).toBe("0.1");
   });
+
+  it("displays loading shimmer when session has status sleeping", () => {
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Sleeping Session",
+          status: "sleeping",
+          cwd: "/home/user/proj",
+          cols: 80,
+          rows: 24,
+        },
+      },
+      layout: { type: "leaf", id: "s1" },
+    });
+
+    const { container } = render(<SessionLeaf id="s1" />);
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+    const skeleton = container.querySelector(".session-leaf-loading.terminal-loading-skeleton");
+    expect(skeleton).not.toBeNull();
+    expect(container.querySelector(".terminal-loading-shimmer")).not.toBeNull();
+    expect(container.querySelector(".terminal-pane")).toBeNull();
+  });
+
+  it("displays loading shimmer when session has status restoring", () => {
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Restoring Session",
+          status: "restoring",
+          cwd: "/home/user/proj",
+          cols: 80,
+          rows: 24,
+        },
+      },
+      layout: { type: "leaf", id: "s1" },
+    });
+
+    const { container } = render(<SessionLeaf id="s1" />);
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+    const skeleton = container.querySelector(".session-leaf-loading.terminal-loading-skeleton");
+    expect(skeleton).not.toBeNull();
+    expect(container.querySelector(".terminal-loading-shimmer")).not.toBeNull();
+    expect(container.querySelector(".terminal-pane")).toBeNull();
+  });
 });

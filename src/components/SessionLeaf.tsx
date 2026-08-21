@@ -34,9 +34,11 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
     });
   }, [id, session, spawnSession, substituteSessionId]);
 
-  if (session) return <TerminalPane id={session.id} path={path} />;
+  if (session && session.status !== "sleeping" && session.status !== "restoring") {
+    return <TerminalPane id={session.id} path={path} />;
+  }
 
-  // Placeholder while the spawn is in flight (or the leaf has no session yet).
+  // Placeholder while spawn is in flight, or session is sleeping/restoring.
   return (
     <div
       ref={nodeRef}
@@ -46,7 +48,18 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
       <div className="terminal-loading-shimmer" />
       <div className="terminal-loading-content">
         <span className="terminal-loading-spinner" />
-        <span className="terminal-loading-text">Session loading...</span>
+        <span className="terminal-loading-text">
+          {session?.status === "restoring"
+            ? "Restoring session..."
+            : session?.status === "sleeping"
+            ? "Session sleeping..."
+            : "Session loading..."}
+        </span>
+        {(session?.title || session?.cwd) && (
+          <span className="terminal-loading-subtext">
+            {session.title || session.cwd}
+          </span>
+        )}
       </div>
     </div>
   );

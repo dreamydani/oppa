@@ -355,4 +355,63 @@ describe("TabBar", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(useTerminalStore.getState().tabs[0].title).toBe("original-title");
   });
+
+  it("renders working directory or title for sleeping tabs", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-active",
+          layout: { type: "leaf", id: "s-active" },
+          focusedPath: [],
+          isSleeping: false,
+        },
+        {
+          id: "tab-sleeping-cwd",
+          layout: { type: "leaf", id: "s-sleeping-1" },
+          focusedPath: [],
+          isSleeping: true,
+        },
+        {
+          id: "tab-sleeping-title",
+          layout: { type: "leaf", id: "s-sleeping-2" },
+          focusedPath: [],
+          isSleeping: true,
+        },
+      ],
+      activeTabId: "tab-active",
+      sessions: {
+        "s-active": {
+          id: "s-active",
+          title: "s-active",
+          status: "running",
+          cwd: "/home/user/active-app",
+          cols: 80,
+          rows: 24,
+        },
+        "s-sleeping-1": {
+          id: "s-sleeping-1",
+          title: "s-sleeping-1",
+          status: "sleeping",
+          cwd: "C:\\workspaces\\sleeping-project",
+          cols: 80,
+          rows: 24,
+        },
+        "s-sleeping-2": {
+          id: "s-sleeping-2",
+          title: "Custom Sleeping Name",
+          status: "sleeping",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+
+    const { container } = render(<TabBar />);
+    const tabElements = container.querySelectorAll(".tab-item");
+    expect(tabElements).toHaveLength(3);
+
+    expect(tabElements[0].textContent).toContain("active-app");
+    expect(tabElements[1].textContent).toContain("sleeping-project");
+    expect(tabElements[2].textContent).toContain("Custom Sleeping Name");
+  });
 });
