@@ -79,6 +79,35 @@ describe("SessionLeaf", () => {
     );
   });
 
+  it("spawns a session with geometry computed from container dimensions when available", async () => {
+    ptySpawnMock.mockResolvedValue({ id: "s1", is_new: true, pid: 100 });
+
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = vi.fn().mockReturnValue({
+      width: 900,
+      height: 720,
+      top: 0,
+      left: 0,
+      bottom: 720,
+      right: 900,
+    });
+
+    try {
+      render(<LeafHarness />);
+
+      await waitFor(() => expect(ptySpawnMock).toHaveBeenCalledTimes(1));
+      // 900 / 9 = 100 cols, 720 / 18 = 40 rows
+      expect(ptySpawnMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cols: 100,
+          rows: 40,
+        }),
+      );
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("renders the terminal immediately when the session already exists", () => {
     ptySpawnMock.mockResolvedValue({ id: "unused", is_new: true, pid: 100 });
     useTerminalStore.setState({

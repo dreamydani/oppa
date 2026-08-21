@@ -20,7 +20,16 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
   useEffect(() => {
     if (session || startedRef.current) return;
     startedRef.current = true;
-    spawnSession().then((realId) => {
+    let geometry: { cols: number; rows: number } | undefined;
+    if (nodeRef.current?.isConnected) {
+      const rect = nodeRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const cols = Math.max(10, Math.floor(rect.width / 9));
+        const rows = Math.max(4, Math.floor(rect.height / 18));
+        geometry = { cols, rows };
+      }
+    }
+    spawnSession(undefined, undefined, undefined, geometry).then((realId) => {
       // Only bind when this leaf is still on screen. A real unmount removes
       // the node (React also nulls the ref); StrictMode's dev-only effect
       // replay does not, so the swap survives the double-invoked mount.
