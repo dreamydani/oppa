@@ -1,3 +1,5 @@
+pub mod agent_hook_installer;
+pub mod agent_hook_server;
 pub mod agent_resume;
 pub mod commands;
 pub mod daemon_client;

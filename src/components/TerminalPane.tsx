@@ -112,16 +112,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     term.open(containerRef.current!);
 
+    // Fit before anything renders so cell metrics settle at the real
+    // container size; attaching the GPU renderer before replay avoids the
+    // canvas-fallback glyph mismatch seen on cold-restored panes.
+    try {
+      fit.fit();
+    } catch {}
+
     const state = useTerminalStore.getState();
     const restoredScrollback = state.restoredScrollbacks[id];
     const cachedScrollback = state.cachedScrollbacks[id];
-    if (restoredScrollback) {
-      term.reset();
-      term.write(restoredScrollback);
-      clearRestoredScrollback(id);
-    } else if (cachedScrollback) {
-      term.write(cachedScrollback);
-    }
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -139,8 +139,54 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       } catch {}
     }
 
+    if (restoredScrollback) {
+      term.reset();
+      term.write(restoredScrollback);
+      clearRestoredScrollback(id);
+    } else if (cachedScrollback) {
+      term.write(cachedScrollback);
+    }
+
+    // Re-assert appearance + refit after replay: large writes land while
+    // layout is still settling and can leave stale glyph metrics behind.
+    term.options.fontSize = currentAppearance.fontSize;
+    term.options.fontFamily = currentAppearance.fontFamily;
+    term.options.lineHeight = currentAppearance.lineHeight;
+    try {
+      fit.fit();
+    } catch {}
+
     const unsubs: (() => void)[] = [];
     let disposed = false;
+
+    // Font-metrics race fix: panes mounting during startup measure their cell
+    // grid before the custom mono font has loaded, so glyphs render slightly
+    // cramped/small inside fallback-sized cells. Once fonts are ready, swap
+    // the metrics and refit — content is preserved, only measurements change.
+    let fontSettleCancelled = false;
+    // Guarded: test DOMs may lack the FontFaceSet API entirely
+    document.fonts?.ready?.then(() => {
+      if (fontSettleCancelled) return;
+      term.options.fontSize = appearanceRef.current.fontSize;
+      term.options.fontFamily = appearanceRef.current.fontFamily;
+      try {
+        fit.fit();
+      } catch {}
+    });
+    unsubs.push(() => {
+      fontSettleCancelled = true;
+    });
+
+    // Settle-time refit: App applies root UI zoom in a parent effect AFTER
+    // this child effect runs, which shifts measured widths. A short delayed
+    // refit absorbs that pass without dropping any PTY output.
+    const settleTimer = setTimeout(() => {
+      if (disposed) return;
+      try {
+        fit.fit();
+      } catch {}
+    }, 150);
+    unsubs.push(() => clearTimeout(settleTimer));
 
     // Attach keyboard shortcut for Ctrl+F / Cmd+F and Escape
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {

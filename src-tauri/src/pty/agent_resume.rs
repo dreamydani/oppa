@@ -10,6 +10,9 @@ pub struct AgentProfile {
     pub matches_program: fn(&str) -> bool,
     /// Transcript dir for this agent given home + cwd; None when unknown
     pub transcript_dir: fn(home: &Path, cwd: &str) -> Option<PathBuf>,
+    // Per-cwd capture from the agent's own store (e.g. agy's cwd->id map);
+    // preferred over transcript scanning because it is authoritative per project.
+    pub capture_by_cwd: fn(home: &Path, cwd: &str) -> Option<AgentSessionRef>,
     /// Native resume command line; None => caller falls back to plain relaunch of foreground_command
     pub build_resume: fn(&AgentSessionRef) -> Option<String>,
 }
@@ -68,6 +71,46 @@ fn no_transcript_dir(_home: &Path, _cwd: &str) -> Option<PathBuf> {
     None
 }
 
+// agy keeps a cwd -> last-conversation-id map, so each project's own
+// conversation can be resumed precisely (verified on a real install:
+// ~/.gemini/antigravity-cli/cache/last_conversations.json).
+fn normalize_path_key(p: &str) -> String {
+    p.trim_end_matches(['\\', '/'])
+        .to_ascii_lowercase()
+}
+
+fn agy_capture_by_cwd(home: &Path, cwd: &str) -> Option<AgentSessionRef> {
+    let cache = home
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("cache")
+        .join("last_conversations.json");
+    let raw = fs::read_to_string(cache).ok()?;
+    let map: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let norm = normalize_path_key(cwd);
+    let id = map
+        .as_object()?
+        .iter()
+        .find(|(k, _)| normalize_path_key(k) == norm)
+        .and_then(|(_, v)| v.as_str())?;
+    Some(AgentSessionRef {
+        agent: "agy".to_string(),
+        id: id.to_string(),
+        transcript_path: Some(
+            home.join(".gemini")
+                .join("antigravity-cli")
+                .join("conversations")
+                .join(format!("{id}.db"))
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    })
+}
+
+fn no_capture_by_cwd(_home: &Path, _cwd: &str) -> Option<AgentSessionRef> {
+    None
+}
+
 fn claude_build_resume(session: &AgentSessionRef) -> Option<String> {
     Some(format!("claude --resume {}", session.id))
 }
@@ -82,7 +125,25 @@ fn agy_build_resume(session: &AgentSessionRef) -> Option<String> {
 }
 
 // Plain-relaunch agents: no structured resume known; callers re-run foreground_command.
-fn gemini_build_resume(_session: &AgentSessionRef) -> Option<String> {
+// Gemini CLI / Qwen Code (gemini-cli fork): resume by session id from their hooks.
+fn gemini_build_resume(session: &AgentSessionRef) -> Option<String> {
+    Some(format!("gemini --resume {}", session.id))
+}
+
+fn qwen_build_resume(session: &AgentSessionRef) -> Option<String> {
+    // Unverified against a live install — Qwen Code is a gemini-cli fork, so
+    // the flag is assumed; falls back to plain relaunch if the CLI rejects it.
+    Some(format!("qwen --resume {}", session.id))
+}
+
+// OpenCode: resume by session id (SDK plugin captures `sessionID`).
+fn opencode_build_resume(session: &AgentSessionRef) -> Option<String> {
+    Some(format!("opencode --session {}", session.id))
+}
+
+// Grok CLI and Cursor: Orca also treats these as status-only (no resumable
+// session id in their hook payloads) — plain relaunch.
+fn no_resume(_session: &AgentSessionRef) -> Option<String> {
     None
 }
 
@@ -95,36 +156,153 @@ const PROFILES: &[AgentProfile] = &[
         name: "claude",
         matches_program: |cmd| program_is("claude", cmd),
         transcript_dir: claude_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: claude_build_resume,
     },
     AgentProfile {
         name: "codex",
         matches_program: |cmd| program_is("codex", cmd),
         transcript_dir: codex_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: codex_build_resume,
     },
     AgentProfile {
         name: "gemini",
         matches_program: |cmd| program_is("gemini", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: gemini_build_resume,
+    },
+    AgentProfile {
+        name: "qwen",
+        matches_program: |cmd| program_is("qwen", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: qwen_build_resume,
+    },
+    AgentProfile {
+        name: "opencode",
+        matches_program: |cmd| program_is("opencode", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: opencode_build_resume,
+    },
+    AgentProfile {
+        name: "grok",
+        matches_program: |cmd| program_is("grok", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: no_resume,
+    },
+    AgentProfile {
+        name: "cursor",
+        matches_program: |cmd| program_is("cursor-agent", cmd) || program_is("cursor", cmd),
+        transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
+        build_resume: no_resume,
     },
     AgentProfile {
         name: "aider",
         matches_program: |cmd| program_is("aider", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: aider_build_resume,
     },
     AgentProfile {
         name: "agy",
         matches_program: |cmd| program_is("agy", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: agy_capture_by_cwd,
         build_resume: agy_build_resume,
     },
 ];
 
 pub fn find_profile(command_line: &str) -> Option<&'static AgentProfile> {
     PROFILES.iter().find(|p| (p.matches_program)(command_line))
+}
+
+/// Extracts an explicit session id the user themselves passed on the command
+/// line (`agy --conversation X`, `claude --resume Y`, `opencode --session Z`).
+/// Strongest non-hook signal: it IS the conversation running in that pane.
+pub fn explicit_id_from_command(command_line: &str) -> Option<AgentSessionRef> {
+    let profile = find_profile(command_line)?;
+    let lower = command_line.to_ascii_lowercase();
+    let flag = match profile.name {
+        "agy" => "--conversation",
+        "opencode" => "--session",
+        _ => "--resume",
+    };
+    let idx = lower.find(flag)?;
+    let after = &command_line[idx + flag.len()..];
+    let id = after.split_whitespace().next()?.trim_matches('"');
+    if id.is_empty() || id.starts_with('-') {
+        return None;
+    }
+    Some(AgentSessionRef {
+        agent: profile.name.to_string(),
+        id: id.to_string(),
+        transcript_path: None,
+    })
+}
+
+/// Most-recent unclaimed conversation ids for this agent+cwd, used to give
+/// each of several same-project panes its own conversation on cold restore.
+pub fn recent_unclaimed_ids(
+    agent: &str,
+    home: &Path,
+    cwd: &str,
+    exclude: &std::collections::HashSet<String>,
+    limit: usize,
+) -> Vec<String> {
+    let Some(profile) = PROFILES.iter().find(|p| p.name == agent) else {
+        return Vec::new();
+    };
+    // agy: conversations dir holds one .db per conversation (stem = id).
+    let dir = if profile.name == "agy" {
+        Some(home.join(".gemini").join("antigravity-cli").join("conversations"))
+    } else {
+        (profile.transcript_dir)(home, cwd)
+    };
+    let Some(dir) = dir else {
+        return Vec::new();
+    };
+    let mut candidates: Vec<(std::time::SystemTime, String)> = Vec::new();
+    if profile.name == "agy" {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("db") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if exclude.contains(stem) {
+                continue;
+            }
+            if let Ok(meta) = path.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    candidates.push((modified, stem.to_string()));
+                }
+            }
+        }
+    } else {
+        walk_transcripts(&dir, "jsonl", &mut |path| {
+            if let Ok(meta) = path.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !exclude.contains(stem) {
+                            candidates.push((modified, stem.to_string()));
+                        }
+                    }
+                }
+            }
+        });
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.into_iter().take(limit).map(|(_, id)| id).collect()
 }
 
 pub fn is_known_agent_program(command_line: &str) -> bool {
@@ -175,13 +353,37 @@ fn capture_for_profile(
     home: &Path,
     cwd: &str,
 ) -> Option<AgentSessionRef> {
+    // The agent's own cwd->id store is authoritative per project; fall back
+    // to scanning transcript files when it has no such store or no entry.
+    if let Some(by_cwd) = (profile.capture_by_cwd)(home, cwd) {
+        return Some(by_cwd);
+    }
     let transcript_dir = (profile.transcript_dir)(home, cwd)?;
-    let (id, transcript_path) = find_newest_transcript(&transcript_dir, "jsonl")?;
+    let (stem_id, transcript_path) = find_newest_transcript(&transcript_dir, "jsonl")?;
+    // Recent Claude Code names the transcript file with a UUID that can differ
+    // from the real session id — prefer the id recorded inside the file.
+    let id = session_id_from_transcript(&transcript_path).unwrap_or(stem_id);
     Some(AgentSessionRef {
         agent: profile.name.to_string(),
         id,
         transcript_path: Some(transcript_path.to_string_lossy().into_owned()),
     })
+}
+
+/// Reads the first few lines of a transcript looking for a top-level
+/// `"sessionId"` field (Claude Code writes it on line 1).
+fn session_id_from_transcript(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    for line in std::io::BufReader::new(file).lines().take(5) {
+        let line = line.ok()?;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(id) = value.get("sessionId").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub fn capture_agent_session(command_line: &str, cwd: &str) -> Option<AgentSessionRef> {
@@ -318,6 +520,87 @@ mod tests {
     }
 
     #[test]
+    fn capture_prefers_session_id_recorded_inside_transcript_over_filename_stem() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let projects = tmp.path().join(".claude").join("projects").join("C--proj");
+        fs::create_dir_all(&projects).expect("mkdir");
+        // Filename UUID deliberately differs from the real session id (recent Claude Code)
+        let content = b"{\"type\":\"mode\",\"mode\":\"normal\",\"sessionId\":\"real-session-uuid\"}\n";
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(projects.join("deadbeef-0000.jsonl"), content).expect("write");
+
+        let claude_profile = find_profile("claude --continue").expect("profile");
+        let captured = capture_for_profile(claude_profile, tmp.path(), r"C:\proj")
+            .expect("captured");
+        assert_eq!(captured.id, "real-session-uuid");
+        assert_eq!(captured.agent, "claude");
+    }
+
+    #[test]
+    fn capture_falls_back_to_stem_when_transcript_has_no_session_id_field() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let projects = tmp.path().join(".claude").join("projects").join("C--proj2");
+        fs::create_dir_all(&projects).expect("mkdir");
+        fs::write(projects.join("stem-id.jsonl"), b"{}\n").expect("write");
+
+        let claude_profile = find_profile("claude").expect("profile");
+        let captured =
+            capture_for_profile(claude_profile, tmp.path(), r"C:\proj2").expect("captured");
+        assert_eq!(captured.id, "stem-id");
+    }
+
+    #[test]
+    fn agy_capture_resolves_own_conversation_per_cwd() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        // Mirrors the real cache: keys are absolute Windows paths per project
+        let cache_dir = tmp
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("cache");
+        fs::create_dir_all(&cache_dir).expect("mkdir");
+        fs::write(
+            cache_dir.join("last_conversations.json"),
+            r#"{
+  "C:\\01_DeveloperSpace": "a974f46f-8746-4c0c-8cad-550506546873",
+  "C:\\oppa\\oppa": "c9187a6c-3496-4542-a719-1b456cd50eb5",
+  "C:\\Users\\danial": "31e5a925-6ade-4e11-9499-ef59b9f57770"
+}"#,
+        )
+        .expect("write cache");
+
+        let captured = agy_capture_by_cwd(tmp.path(), r"C:\oppa\oppa").expect("captured");
+        assert_eq!(captured.agent, "agy");
+        assert_eq!(captured.id, "c9187a6c-3496-4542-a719-1b456cd50eb5");
+
+        // Case-insensitive + trailing-separator tolerant
+        let captured = agy_capture_by_cwd(tmp.path(), r"c:\OPPA\oppa\").expect("captured ci");
+        assert_eq!(captured.id, "c9187a6c-3496-4542-a719-1b456cd50eb5");
+    }
+
+    #[test]
+    fn agy_capture_miss_returns_none() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let cache_dir = tmp
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("cache");
+        fs::create_dir_all(&cache_dir).expect("mkdir");
+        fs::write(cache_dir.join("last_conversations.json"), r#"{"C:\\other": "x"}"#)
+            .expect("write cache");
+        assert!(agy_capture_by_cwd(tmp.path(), r"C:\nomatch").is_none());
+        // Missing file entirely
+        assert!(
+            agy_capture_by_cwd(
+                &tempfile::tempdir().expect("tmp2").path(),
+                r"C:\anything"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn plan_resume_builds_native_commands() {
         let claude_ref = AgentSessionRef {
             agent: "claude".to_string(),
@@ -345,11 +628,25 @@ mod tests {
             plan_resume(&agy_ref),
             Some("agy --conversation conv9".to_string())
         );
+
+        for (agent, expected) in [
+            ("gemini", "gemini --resume g1"),
+            ("qwen", "qwen --resume q1"),
+            ("opencode", "opencode --session o1"),
+        ] {
+            let r = AgentSessionRef {
+                agent: agent.to_string(),
+                id: agent[0..1].to_string() + "1",
+                transcript_path: None,
+            };
+            assert_eq!(plan_resume(&r), Some(expected.to_string()), "{agent}");
+        }
     }
 
     #[test]
     fn plain_relaunch_profiles_yield_none_from_plan_resume() {
-        for agent in ["gemini", "aider"] {
+        // Grok/Cursor: status-only agents (Orca parity) — never resumed
+        for agent in ["grok", "cursor"] {
             let session = AgentSessionRef {
                 agent: agent.to_string(),
                 id: "whatever".to_string(),

@@ -20,10 +20,43 @@ pub fn run_daemon() {
         .expect("failed to build tokio runtime for daemon");
     rt.block_on(async {
         let socket_path = pty::ipc_protocol::get_daemon_socket_path();
-        let server = match pty::snapshot::resolve_app_data_dir() {
-            Some(dir) => pty::daemon_server::DaemonServer::with_snapshot_storage(dir),
+        let app_data_dir = pty::snapshot::resolve_app_data_dir();
+        let server = match &app_data_dir {
+            Some(dir) => pty::daemon_server::DaemonServer::with_snapshot_storage(dir.clone()),
             None => pty::daemon_server::DaemonServer::new(),
         };
+        // Agent hook receiver: managed hooks POST authoritative session ids here
+        if let Some(hook) =
+            pty::agent_hook_server::AgentHookServer::start(server.sessions()).await
+        {
+            pty::agent_hook_server::write_endpoint_files(
+                app_data_dir.as_deref(),
+                hook.port,
+                &hook.token,
+            );
+            // Install/remove the Claude Code managed hooks per user setting.
+            // The hook payload is what enables true resume-by-session-id.
+            let auto_resume = app_data_dir
+                .as_deref()
+                .map(|dir| {
+                    std::path::Path::new(dir)
+                        .join("settings.json")
+                })
+                .and_then(|path| crate::settings::load_settings_at(&path).ok().flatten())
+                .and_then(|json| serde_json::from_str::<crate::settings::AppSettings>(&json).ok())
+                .map(|s| s.general.auto_resume_agents)
+                .unwrap_or(true);
+            if let (Some(dir), Some(home)) = (app_data_dir.as_deref(), dirs::home_dir()) {
+                let result = if auto_resume {
+                    pty::agent_hook_installer::install(dir, &home)
+                } else {
+                    pty::agent_hook_installer::uninstall(&home)
+                };
+                if let Err(e) = result {
+                    eprintln!("agent hook installer: {e}");
+                }
+            }
+        }
         let cancel_token = pty::daemon_server::CancellationToken::new();
         if let Err(e) = server.run_listener(&socket_path, cancel_token).await {
             eprintln!("Daemon listener exited: {e}");
