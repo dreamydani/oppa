@@ -240,11 +240,10 @@ impl DaemonServer {
         run_server_listener(server, socket_path, cancel_token).await
     }
 
-    // Resume priority: native agent resume by session id, else plain relaunch for
-    // known-agent programs. Unknown programs are never re-executed.
-    // Resume priority: native resume by session id, then the agent's
-    // --continue-style fallback, then plain re-execution. Unknown programs
-    // are never re-executed.
+    // Resume priority: native resume by session id (hook, cwd-map or transcript
+    // scan), then plain re-execution of the known-agent command. Unknown
+    // programs are never re-executed. No blind "--continue": it pulls the
+    // globally most recent conversation and duplicates it across panes.
     fn plan_resume_from_checkpoint(
         checkpoint: &Option<SessionSnapshot>,
     ) -> (
@@ -269,18 +268,9 @@ impl DaemonServer {
         }
         if let Some(cmd) = &snap.foreground_command {
             if agent_resume::is_known_agent_program(cmd) {
-                // Prefer the agent's --continue over blind re-execution when no
-                // session id was captured (e.g. agy, whose store we can't read)
-                if let Some(fallback) = agent_resume::fallback_resume(cmd) {
-                    return (
-                        Some(ResumePlan {
-                            command_line: fallback.clone(),
-                            kind: ResumeKind::AgentResume,
-                        }),
-                        None,
-                        Some(fallback),
-                    );
-                }
+                // No id captured: plain relaunch. Never blind-continue —
+                // "--continue" pulls the globally most recent conversation,
+                // which duplicates it across every pane (user-reported bug).
                 return (
                     Some(ResumePlan {
                         command_line: cmd.clone(),
@@ -1085,15 +1075,16 @@ mod tests {
                 assert_eq!(
                     res.resume,
                     Some(ResumePlan {
-                        // User-typed resume flags pass through unchanged, but
-                        // classify as AgentResume since they resume by id
+                        // No captured session ref: plain relaunch of the known
+                        // agent's original command line
                         command_line: "claude --resume abc123".into(),
-                        kind: ResumeKind::AgentResume,
+                        kind: ResumeKind::CommandRelaunch,
                     })
                 );
-                // Empty snapshot cwd must not override the request's (absent) cwd
-                assert!(res.cwd.is_none());
-                assert!(res.resume_declined_reason.is_none());
+                assert_eq!(
+                    res.resume_declined_reason,
+                    Some("no verified resume command for this agent".into())
+                );
             }
             other => panic!("expected SessionAttached, got {other:?}"),
         }

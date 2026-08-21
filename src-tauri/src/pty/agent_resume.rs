@@ -10,11 +10,11 @@ pub struct AgentProfile {
     pub matches_program: fn(&str) -> bool,
     /// Transcript dir for this agent given home + cwd; None when unknown
     pub transcript_dir: fn(home: &Path, cwd: &str) -> Option<PathBuf>,
+    // Per-cwd capture from the agent's own store (e.g. agy's cwd->id map);
+    // preferred over transcript scanning because it is authoritative per project.
+    pub capture_by_cwd: fn(home: &Path, cwd: &str) -> Option<AgentSessionRef>,
     /// Native resume command line; None => caller falls back to plain relaunch of foreground_command
     pub build_resume: fn(&AgentSessionRef) -> Option<String>,
-    // Resume flag usable without a captured session id, e.g. Claude/agy "--continue"
-    // of the most recent conversation. None => no id-less resume known.
-    pub fallback_continue_flag: fn() -> Option<&'static str>,
 }
 
 fn program_is(expected: &'static str, command_line: &str) -> bool {
@@ -71,6 +71,46 @@ fn no_transcript_dir(_home: &Path, _cwd: &str) -> Option<PathBuf> {
     None
 }
 
+// agy keeps a cwd -> last-conversation-id map, so each project's own
+// conversation can be resumed precisely (verified on a real install:
+// ~/.gemini/antigravity-cli/cache/last_conversations.json).
+fn normalize_path_key(p: &str) -> String {
+    p.trim_end_matches(['\\', '/'])
+        .to_ascii_lowercase()
+}
+
+fn agy_capture_by_cwd(home: &Path, cwd: &str) -> Option<AgentSessionRef> {
+    let cache = home
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("cache")
+        .join("last_conversations.json");
+    let raw = fs::read_to_string(cache).ok()?;
+    let map: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let norm = normalize_path_key(cwd);
+    let id = map
+        .as_object()?
+        .iter()
+        .find(|(k, _)| normalize_path_key(k) == norm)
+        .and_then(|(_, v)| v.as_str())?;
+    Some(AgentSessionRef {
+        agent: "agy".to_string(),
+        id: id.to_string(),
+        transcript_path: Some(
+            home.join(".gemini")
+                .join("antigravity-cli")
+                .join("conversations")
+                .join(format!("{id}.db"))
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    })
+}
+
+fn no_capture_by_cwd(_home: &Path, _cwd: &str) -> Option<AgentSessionRef> {
+    None
+}
+
 fn claude_build_resume(session: &AgentSessionRef) -> Option<String> {
     Some(format!("claude --resume {}", session.id))
 }
@@ -93,74 +133,46 @@ fn aider_build_resume(_session: &AgentSessionRef) -> Option<String> {
     None
 }
 
-// Id-less fallback flags: verified against the CLIs' own --help output.
-fn agy_fallback_flag() -> Option<&'static str> {
-    Some("--continue")
-}
-
-fn claude_fallback_flag() -> Option<&'static str> {
-    Some("--continue")
-}
-
-fn no_fallback_flag() -> Option<&'static str> {
-    None
-}
-
 const PROFILES: &[AgentProfile] = &[
     AgentProfile {
         name: "claude",
         matches_program: |cmd| program_is("claude", cmd),
         transcript_dir: claude_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: claude_build_resume,
-        fallback_continue_flag: claude_fallback_flag,
     },
     AgentProfile {
         name: "codex",
         matches_program: |cmd| program_is("codex", cmd),
         transcript_dir: codex_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: codex_build_resume,
-        fallback_continue_flag: no_fallback_flag,
     },
     AgentProfile {
         name: "gemini",
         matches_program: |cmd| program_is("gemini", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: gemini_build_resume,
-        fallback_continue_flag: no_fallback_flag,
     },
     AgentProfile {
         name: "aider",
         matches_program: |cmd| program_is("aider", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: no_capture_by_cwd,
         build_resume: aider_build_resume,
-        fallback_continue_flag: no_fallback_flag,
     },
     AgentProfile {
         name: "agy",
         matches_program: |cmd| program_is("agy", cmd),
         transcript_dir: no_transcript_dir,
+        capture_by_cwd: agy_capture_by_cwd,
         build_resume: agy_build_resume,
-        fallback_continue_flag: agy_fallback_flag,
     },
 ];
 
 pub fn find_profile(command_line: &str) -> Option<&'static AgentProfile> {
     PROFILES.iter().find(|p| (p.matches_program)(command_line))
-}
-
-/// Resume by appending the profile's continue flag to the user's own command,
-/// unless they already typed a resume/continue flag themselves.
-pub fn fallback_resume(command_line: &str) -> Option<String> {
-    let profile = find_profile(command_line)?;
-    let flag = (profile.fallback_continue_flag)()?;
-    let lower = command_line.to_ascii_lowercase();
-    if lower.contains("--continue")
-        || lower.contains("--resume")
-        || lower.contains("--conversation")
-    {
-        return Some(command_line.to_string());
-    }
-    Some(format!("{} {}", command_line.trim_end(), flag))
 }
 
 pub fn is_known_agent_program(command_line: &str) -> bool {
@@ -211,6 +223,11 @@ fn capture_for_profile(
     home: &Path,
     cwd: &str,
 ) -> Option<AgentSessionRef> {
+    // The agent's own cwd->id store is authoritative per project; fall back
+    // to scanning transcript files when it has no such store or no entry.
+    if let Some(by_cwd) = (profile.capture_by_cwd)(home, cwd) {
+        return Some(by_cwd);
+    }
     let transcript_dir = (profile.transcript_dir)(home, cwd)?;
     let (stem_id, transcript_path) = find_newest_transcript(&transcript_dir, "jsonl")?;
     // Recent Claude Code names the transcript file with a UUID that can differ
@@ -403,28 +420,54 @@ mod tests {
     }
 
     #[test]
-    fn fallback_resume_appends_continue_flag_for_supported_agents() {
-        assert_eq!(
-            fallback_resume("agy"),
-            Some("agy --continue".to_string())
-        );
-        assert_eq!(
-            fallback_resume("claude.exe --dangerously-skip-permissions"),
-            Some("claude.exe --dangerously-skip-permissions --continue".to_string())
-        );
-        // Never duplicate a resume flag the user already typed
-        assert_eq!(
-            fallback_resume("claude --continue"),
-            Some("claude --continue".to_string())
-        );
-        assert_eq!(fallback_resume("agy --conversation abc"), Some("agy --conversation abc".to_string()));
+    fn agy_capture_resolves_own_conversation_per_cwd() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        // Mirrors the real cache: keys are absolute Windows paths per project
+        let cache_dir = tmp
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("cache");
+        fs::create_dir_all(&cache_dir).expect("mkdir");
+        fs::write(
+            cache_dir.join("last_conversations.json"),
+            r#"{
+  "C:\\01_DeveloperSpace": "a974f46f-8746-4c0c-8cad-550506546873",
+  "C:\\oppa\\oppa": "c9187a6c-3496-4542-a719-1b456cd50eb5",
+  "C:\\Users\\danial": "31e5a925-6ade-4e11-9499-ef59b9f57770"
+}"#,
+        )
+        .expect("write cache");
+
+        let captured = agy_capture_by_cwd(tmp.path(), r"C:\oppa\oppa").expect("captured");
+        assert_eq!(captured.agent, "agy");
+        assert_eq!(captured.id, "c9187a6c-3496-4542-a719-1b456cd50eb5");
+
+        // Case-insensitive + trailing-separator tolerant
+        let captured = agy_capture_by_cwd(tmp.path(), r"c:\OPPA\oppa\").expect("captured ci");
+        assert_eq!(captured.id, "c9187a6c-3496-4542-a719-1b456cd50eb5");
     }
 
     #[test]
-    fn fallback_resume_none_for_unsupported_or_unknown() {
-        assert_eq!(fallback_resume("codex"), None);
-        assert_eq!(fallback_resume("gemini"), None);
-        assert_eq!(fallback_resume("vim file.txt"), None);
+    fn agy_capture_miss_returns_none() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let cache_dir = tmp
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("cache");
+        fs::create_dir_all(&cache_dir).expect("mkdir");
+        fs::write(cache_dir.join("last_conversations.json"), r#"{"C:\\other": "x"}"#)
+            .expect("write cache");
+        assert!(agy_capture_by_cwd(tmp.path(), r"C:\nomatch").is_none());
+        // Missing file entirely
+        assert!(
+            agy_capture_by_cwd(
+                &tempfile::tempdir().expect("tmp2").path(),
+                r"C:\anything"
+            )
+            .is_none()
+        );
     }
 
     #[test]
