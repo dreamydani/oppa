@@ -159,6 +159,35 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     const unsubs: (() => void)[] = [];
     let disposed = false;
 
+    // Font-metrics race fix: panes mounting during startup measure their cell
+    // grid before the custom mono font has loaded, so glyphs render slightly
+    // cramped/small inside fallback-sized cells. Once fonts are ready, swap
+    // the metrics and refit — content is preserved, only measurements change.
+    let fontSettleCancelled = false;
+    // Guarded: test DOMs may lack the FontFaceSet API entirely
+    document.fonts?.ready?.then(() => {
+      if (fontSettleCancelled) return;
+      term.options.fontSize = appearanceRef.current.fontSize;
+      term.options.fontFamily = appearanceRef.current.fontFamily;
+      try {
+        fit.fit();
+      } catch {}
+    });
+    unsubs.push(() => {
+      fontSettleCancelled = true;
+    });
+
+    // Settle-time refit: App applies root UI zoom in a parent effect AFTER
+    // this child effect runs, which shifts measured widths. A short delayed
+    // refit absorbs that pass without dropping any PTY output.
+    const settleTimer = setTimeout(() => {
+      if (disposed) return;
+      try {
+        fit.fit();
+      } catch {}
+    }, 150);
+    unsubs.push(() => clearTimeout(settleTimer));
+
     // Attach keyboard shortcut for Ctrl+F / Cmd+F and Escape
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
