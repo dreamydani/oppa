@@ -1,4 +1,11 @@
-// In-flight OSC 7 and OSC 9;9 directory scanner for PTY output streams.
+// In-flight OSC scanner for PTY output streams: cwd tracking (7 / 9;9) and shell-integration command markers (133).
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OscEvent {
+    Cwd(String),
+    CommandStart(String),
+    CommandEnd,
+}
 
 pub struct OscScanner {
     buffer: Vec<u8>,
@@ -19,8 +26,8 @@ impl OscScanner {
         }
     }
 
-    pub fn scan(&mut self, chunk: &[u8]) -> Option<String> {
-        let mut result = None;
+    pub fn scan(&mut self, chunk: &[u8]) -> Vec<OscEvent> {
+        let mut events = Vec::new();
 
         for &b in chunk {
             if !self.in_osc {
@@ -50,7 +57,7 @@ impl OscScanner {
                     };
 
                     if let Some(parsed) = parse_osc_payload(payload_bytes) {
-                        result = Some(parsed);
+                        events.push(parsed);
                     }
                     self.buffer.clear();
                 } else if self.buffer.len() > 1024 {
@@ -61,11 +68,11 @@ impl OscScanner {
             }
         }
 
-        result
+        events
     }
 }
 
-fn parse_osc_payload(payload: &[u8]) -> Option<String> {
+fn parse_osc_payload(payload: &[u8]) -> Option<OscEvent> {
     let s = std::str::from_utf8(payload).ok()?;
 
     if let Some(rest) = s.strip_prefix("7;") {
@@ -74,13 +81,29 @@ fn parse_osc_payload(payload: &[u8]) -> Option<String> {
         let slash_idx = path.find('/')?;
         let raw_path = &path[slash_idx..];
         let decoded = url_decode(raw_path);
-        Some(normalize_parsed_path(&decoded))
+        Some(OscEvent::Cwd(normalize_parsed_path(&decoded)))
     } else if let Some(rest) = s.strip_prefix("9;9;") {
         let unquoted = rest.trim_matches('"');
-        Some(normalize_parsed_path(unquoted))
+        Some(OscEvent::Cwd(normalize_parsed_path(unquoted)))
+    } else if let Some(rest) = s.strip_prefix("133;") {
+        parse_shell_integration_payload(rest)
     } else {
         None
     }
+}
+
+// Final-term markers: C starts a command (cmdline optional), D ends it; A/B are prompt markers we don't track.
+fn parse_shell_integration_payload(rest: &str) -> Option<OscEvent> {
+    if rest == "C" {
+        return Some(OscEvent::CommandStart(String::new()));
+    }
+    if let Some(cmdline) = rest.strip_prefix("C;") {
+        return Some(OscEvent::CommandStart(cmdline.to_string()));
+    }
+    if rest == "D" || rest.starts_with("D;") {
+        return Some(OscEvent::CommandEnd);
+    }
+    None
 }
 
 fn url_decode(input: &str) -> String {
@@ -132,38 +155,38 @@ mod tests {
     fn test_osc_scanner_extracts_osc7_path() {
         let mut scanner = OscScanner::new();
         let stream = b"\x1b]7;file://MYHOST/C:/Users/oppa/repo\x07";
-        let cwd = scanner.scan(stream);
+        let events = scanner.scan(stream);
         #[cfg(target_os = "windows")]
-        assert_eq!(cwd, Some("C:\\Users\\oppa\\repo".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("C:\\Users\\oppa\\repo".to_string())]);
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(cwd, Some("/C:/Users/oppa/repo".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("/C:/Users/oppa/repo".to_string())]);
     }
 
     #[test]
     fn test_osc_scanner_extracts_osc7_with_escaped_spaces() {
         let mut scanner = OscScanner::new();
         let stream = b"\x1b]7;file://localhost/home/user/my%20project\x1b\\";
-        let cwd = scanner.scan(stream);
+        let events = scanner.scan(stream);
         #[cfg(target_os = "windows")]
-        assert_eq!(cwd, Some("\\home\\user\\my project".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("\\home\\user\\my project".to_string())]);
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(cwd, Some("/home/user/my project".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("/home/user/my project".to_string())]);
     }
 
     #[test]
     fn test_osc_scanner_extracts_osc9_9_path() {
         let mut scanner = OscScanner::new();
         let stream = b"\x1b]9;9;C:\\projects\\oppa\x07";
-        let cwd = scanner.scan(stream);
-        assert_eq!(cwd, Some("C:\\projects\\oppa".to_string()));
+        let events = scanner.scan(stream);
+        assert_eq!(events, vec![OscEvent::Cwd("C:\\projects\\oppa".to_string())]);
     }
 
     #[test]
     fn test_osc_scanner_extracts_osc9_9_quoted_path() {
         let mut scanner = OscScanner::new();
         let stream = b"\x1b]9;9;\"C:\\projects\\oppa\"\x1b\\";
-        let cwd = scanner.scan(stream);
-        assert_eq!(cwd, Some("C:\\projects\\oppa".to_string()));
+        let events = scanner.scan(stream);
+        assert_eq!(events, vec![OscEvent::Cwd("C:\\projects\\oppa".to_string())]);
     }
 
     #[test]
@@ -171,11 +194,11 @@ mod tests {
         let mut scanner = OscScanner::new();
         let part1 = b"some random output\x1b]7;file://host";
         let part2 = b"/tmp/worktree\x07and trailing data";
-        assert_eq!(scanner.scan(part1), None);
+        assert_eq!(scanner.scan(part1), Vec::<OscEvent>::new());
         #[cfg(target_os = "windows")]
-        assert_eq!(scanner.scan(part2), Some("\\tmp\\worktree".to_string()));
+        assert_eq!(scanner.scan(part2), vec![OscEvent::Cwd("\\tmp\\worktree".to_string())]);
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(scanner.scan(part2), Some("/tmp/worktree".to_string()));
+        assert_eq!(scanner.scan(part2), vec![OscEvent::Cwd("/tmp/worktree".to_string())]);
     }
 
     #[test]
@@ -183,33 +206,31 @@ mod tests {
         let mut scanner = OscScanner::new();
         let part1 = b"\x1b]7;file://host/var/log\x1b";
         let part2 = b"\\tailing";
-        assert_eq!(scanner.scan(part1), None);
+        assert_eq!(scanner.scan(part1), Vec::<OscEvent>::new());
         #[cfg(target_os = "windows")]
-        assert_eq!(scanner.scan(part2), Some("\\var\\log".to_string()));
+        assert_eq!(scanner.scan(part2), vec![OscEvent::Cwd("\\var\\log".to_string())]);
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(scanner.scan(part2), Some("/var/log".to_string()));
+        assert_eq!(scanner.scan(part2), vec![OscEvent::Cwd("/var/log".to_string())]);
     }
 
     #[test]
     fn test_osc_scanner_ignores_non_osc_and_other_oscs() {
         let mut scanner = OscScanner::new();
         let stream1 = b"hello world\n";
-        let stream2 = b"\x1b]133;A\x07";
         let stream3 = b"\x1b]0;terminal title\x07";
-        assert_eq!(scanner.scan(stream1), None);
-        assert_eq!(scanner.scan(stream2), None);
-        assert_eq!(scanner.scan(stream3), None);
+        assert_eq!(scanner.scan(stream1), Vec::<OscEvent>::new());
+        assert_eq!(scanner.scan(stream3), Vec::<OscEvent>::new());
     }
 
     #[test]
     fn test_osc_scanner_url_decodes_utf8() {
         let mut scanner = OscScanner::new();
         let stream = b"\x1b]7;file://localhost/home/user/%E4%BD%A0%E5%A5%BD\x07";
-        let cwd = scanner.scan(stream);
+        let events = scanner.scan(stream);
         #[cfg(target_os = "windows")]
-        assert_eq!(cwd, Some("\\home\\user\\你好".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("\\home\\user\\你好".to_string())]);
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(cwd, Some("/home/user/你好".to_string()));
+        assert_eq!(events, vec![OscEvent::Cwd("/home/user/你好".to_string())]);
     }
 
     #[test]
@@ -218,9 +239,85 @@ mod tests {
         let mut huge_garbage = vec![b'a'; 1100];
         huge_garbage[0] = 0x1b;
         huge_garbage[1] = b']';
-        assert_eq!(scanner.scan(&huge_garbage), None);
+        assert_eq!(scanner.scan(&huge_garbage), Vec::<OscEvent>::new());
         // Ensure scanner can recover on subsequent valid sequence
         let valid = b"\x1b]9;9;C:\\valid\x07";
-        assert_eq!(scanner.scan(valid), Some("C:\\valid".to_string()));
+        assert_eq!(scanner.scan(valid), vec![OscEvent::Cwd("C:\\valid".to_string())]);
+    }
+
+    #[test]
+    fn test_osc_scanner_parses_command_start_with_cmdline_bel() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;C;git status\x07";
+        assert_eq!(
+            scanner.scan(stream),
+            vec![OscEvent::CommandStart("git status".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_osc_scanner_parses_command_start_with_cmdline_st() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;C;cargo build --release\x1b\\";
+        assert_eq!(
+            scanner.scan(stream),
+            vec![OscEvent::CommandStart("cargo build --release".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_osc_scanner_parses_bare_command_start_as_empty_cmdline() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;C\x07";
+        assert_eq!(
+            scanner.scan(stream),
+            vec![OscEvent::CommandStart(String::new())]
+        );
+    }
+
+    #[test]
+    fn test_osc_scanner_parses_command_end_without_exit_code() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;D\x07";
+        assert_eq!(scanner.scan(stream), vec![OscEvent::CommandEnd]);
+    }
+
+    #[test]
+    fn test_osc_scanner_parses_command_end_with_exit_code() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;D;0\x07";
+        assert_eq!(scanner.scan(stream), vec![OscEvent::CommandEnd]);
+    }
+
+    #[test]
+    fn test_osc_scanner_prompt_markers_a_and_b_produce_no_events() {
+        let mut scanner = OscScanner::new();
+        assert_eq!(scanner.scan(b"\x1b]133;A\x07"), Vec::<OscEvent>::new());
+        assert_eq!(scanner.scan(b"\x1b]133;B\x07"), Vec::<OscEvent>::new());
+    }
+
+    #[test]
+    fn test_osc_scanner_command_start_split_across_chunks() {
+        let mut scanner = OscScanner::new();
+        let part1 = b"\x1b]133;C;git com";
+        let part2 = b"mit -m \"msg\"\x07rest";
+        assert_eq!(scanner.scan(part1), Vec::<OscEvent>::new());
+        assert_eq!(
+            scanner.scan(part2),
+            vec![OscEvent::CommandStart("git commit -m \"msg\"".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_osc_scanner_multiple_events_in_one_chunk_in_order() {
+        let mut scanner = OscScanner::new();
+        let stream = b"\x1b]133;D;0\x07\x1b]133;C;npm test\x07";
+        assert_eq!(
+            scanner.scan(stream),
+            vec![
+                OscEvent::CommandEnd,
+                OscEvent::CommandStart("npm test".to_string()),
+            ]
+        );
     }
 }

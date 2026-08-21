@@ -1,5 +1,5 @@
 use crate::pty::ipc_protocol::DaemonEvent;
-use crate::pty::osc_scanner::OscScanner;
+use crate::pty::osc_scanner::{OscEvent, OscScanner};
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
 use crate::pty::utf8_decoder::Utf8ChunkDecoder;
@@ -185,16 +185,21 @@ impl DaemonSession {
                             let _ = writer.lock().write_all(b"\x1b[1;1R");
                         }
 
-                        // OSC scanning for CWD tracking
-                        if let Some(new_cwd) = osc_scanner.scan(chunk) {
-                            *session_cwd.lock() = Some(new_cwd.clone());
-                            emit_event(
-                                &subscribers,
-                                DaemonEvent::Cwd {
-                                    session_id: id.clone(),
-                                    cwd: new_cwd,
-                                },
-                            );
+                        // OSC scanning for CWD tracking; command markers wired up in a later task
+                        for osc_event in osc_scanner.scan(chunk) {
+                            match osc_event {
+                                OscEvent::Cwd(new_cwd) => {
+                                    *session_cwd.lock() = Some(new_cwd.clone());
+                                    emit_event(
+                                        &subscribers,
+                                        DaemonEvent::Cwd {
+                                            session_id: id.clone(),
+                                            cwd: new_cwd,
+                                        },
+                                    );
+                                }
+                                OscEvent::CommandStart(_) | OscEvent::CommandEnd => {}
+                            }
                         }
 
                         // Feed VT100 virtual screen buffer
