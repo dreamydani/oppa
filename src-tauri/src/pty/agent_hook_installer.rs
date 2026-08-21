@@ -11,6 +11,15 @@ use std::path::Path;
 const MANAGED_MARKER: &str = "oppa-claude-hook";
 const HOOK_EVENTS: &[&str] = &["SessionStart", "Stop", "UserPromptSubmit"];
 
+// Antigravity (agy) hooks live in ~/.gemini/config/hooks.json as a named
+// bundle — same mechanism Orca registers under "orca-status".
+const AGY_BUNDLE_NAME: &str = "oppa-status";
+const AGY_EVENTS: &[&str] = &["PreInvocation", "PostInvocation", "Stop"];
+
+fn gemini_hooks_path(home: &Path) -> std::path::PathBuf {
+    home.join(".gemini").join("config").join("hooks.json")
+}
+
 fn claude_settings_path(home: &Path) -> std::path::PathBuf {
     home.join(".claude").join("settings.json")
 }
@@ -61,6 +70,47 @@ printf '{"pane_key":"%s","token":"%s","payload":%s}' "$OPPA_PANE_KEY" "$token" "
 exit 0
 "#;
 
+// Antigravity core script: echoes the response agy expects BEFORE forwarding
+// (agy blocks the loop on hooks), then POSTs the stdin JSON to the daemon.
+// Ported 1:1 from Orca's antigravity-hook.cmd (OPPA env names).
+const AGY_CORE_CMD: &str = r#"@echo off
+setlocal
+if /I "%OPPA_ANTIGRAVITY_EVENT%"=="Stop" (
+  echo {"decision":""}
+) else (
+  echo {}
+)
+if "%OPPA_AGENT_HOOK_PORT%"=="" goto oppa_drain_stdin
+if "%OPPA_AGENT_HOOK_TOKEN%"=="" goto oppa_drain_stdin
+if "%OPPA_PANE_KEY%"=="" goto oppa_drain_stdin
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$utf8=[System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding=$utf8; $inputData=[Console]::In.ReadToEnd(); try { $payload=if ([string]::IsNullOrWhiteSpace($inputData)) { @{} } else { $inputData | ConvertFrom-Json }; $body=@{ pane_key=$env:OPPA_PANE_KEY; token=$env:OPPA_HOOK_TOKEN; hook_event_name=$env:OPPA_ANTIGRAVITY_EVENT; payload=$payload } | ConvertTo-Json -Depth 100 -Compress; Invoke-RestMethod -Method Post -Uri ('http://127.0.0.1:' + $env:OPPA_AGENT_HOOK_PORT + '/hook/antigravity') -ContentType 'application/json; charset=utf-8' -Body ($utf8.GetBytes($body)) -TimeoutSec 2 | Out-Null } catch {}"
+exit /b 0
+:oppa_drain_stdin
+"%SystemRoot%\System32\more.com" >nul 2>nul
+exit /b 0
+"#;
+
+fn agy_wrapper_cmd(event: &str) -> String {
+    format!(
+        r#"@echo off
+setlocal
+set "OPPA_ANTIGRAVITY_EVENT={event}"
+set "OPPA_ANTIGRAVITY_CORE=%~dp0oppa-antigravity-hook.cmd"
+if exist "%OPPA_ANTIGRAVITY_CORE%" (
+  call "%OPPA_ANTIGRAVITY_CORE%"
+  exit /b 0
+)
+if /I "%OPPA_ANTIGRAVITY_EVENT%"=="Stop" (
+  echo {{"decision":""}}
+) else (
+  echo {{}}
+)
+"%SystemRoot%\System32\more.com" >nul 2>nul
+exit /b 0
+"#
+    )
+}
+
 /// Writes the hook scripts next to the endpoint files and registers the
 /// managed hooks in Claude Code's settings.json (merging, never clobbering).
 pub fn install(app_data_dir: &Path, home: &Path) -> std::io::Result<()> {
@@ -69,26 +119,78 @@ pub fn install(app_data_dir: &Path, home: &Path) -> std::io::Result<()> {
     fs::write(hook_dir.join("oppa-claude-hook.ps1"), POWERSHELL_HOOK)?;
     fs::write(hook_dir.join("oppa-claude-hook.sh"), SH_HOOK)?;
 
+    // Antigravity scripts: per-event wrappers + shared core (Orca structure)
+    fs::write(hook_dir.join("oppa-antigravity-hook.cmd"), AGY_CORE_CMD)?;
+    for event in AGY_EVENTS {
+        let file = format!(
+            "oppa-antigravity-{}.cmd",
+            event.replace("Invocation", "-invocation").replace("Stop", "stop")
+        );
+        fs::write(hook_dir.join(&file), agy_wrapper_cmd(event))?;
+    }
+
     let settings_path = claude_settings_path(home);
     let mut root: Value = read_settings(&settings_path)?;
     let command = hook_command(app_data_dir);
     for event in HOOK_EVENTS {
         set_event_hook(&mut root, event, &command);
     }
-    write_atomic(&settings_path, &root)
+    write_atomic(&settings_path, &root)?;
+
+    install_agy_bundle(app_data_dir, home)
+}
+
+fn install_agy_bundle(app_data_dir: &Path, home: &Path) -> std::io::Result<()> {
+    let hooks_path = gemini_hooks_path(home);
+    let mut root: Value = read_settings(&hooks_path)?;
+    let dir = app_data_dir.join("agent-hooks");
+    let command_for = |event: &str| -> String {
+        let file = format!(
+            "oppa-antigravity-{}.cmd",
+            event
+                .replace("Invocation", "-invocation")
+                .replace("Stop", "stop")
+        );
+        format!("\"{}\"", dir.join(&file).display())
+    };
+    let handlers_for = |event: &str| -> Value {
+        json!([{ "type": "command", "command": command_for(event), "timeout": 10 }])
+    };
+
+    root.as_object_mut()
+        .unwrap_or_else(|| panic!("root is an object"))
+        .insert(
+            AGY_BUNDLE_NAME.to_string(),
+            json!({
+                "PreInvocation": handlers_for("PreInvocation"),
+                "PostInvocation": handlers_for("PostInvocation"),
+                "Stop": handlers_for("Stop"),
+            }),
+        );
+    write_atomic(&hooks_path, &root)
 }
 
 /// Removes our managed entries while leaving the user's own hooks untouched.
 pub fn uninstall(home: &Path) -> std::io::Result<()> {
     let settings_path = claude_settings_path(home);
-    if !settings_path.exists() {
-        return Ok(());
+    if settings_path.exists() {
+        let mut root: Value = read_settings(&settings_path)?;
+        for event in HOOK_EVENTS {
+            remove_managed_entries(&mut root, event);
+        }
+        write_atomic(&settings_path, &root)?;
     }
-    let mut root: Value = read_settings(&settings_path)?;
-    for event in HOOK_EVENTS {
-        remove_managed_entries(&mut root, event);
+
+    // Antigravity: remove our whole named bundle (user bundles untouched)
+    let hooks_path = gemini_hooks_path(home);
+    if hooks_path.exists() {
+        let mut root: Value = read_settings(&hooks_path)?;
+        if let Some(obj) = root.as_object_mut() {
+            obj.remove(AGY_BUNDLE_NAME);
+        }
+        write_atomic(&hooks_path, &root)?;
     }
-    write_atomic(&settings_path, &root)
+    Ok(())
 }
 
 fn read_settings(path: &Path) -> std::io::Result<Value> {
@@ -263,5 +365,56 @@ mod tests {
     fn uninstall_on_missing_settings_is_noop() {
         let home = tempfile::tempdir().expect("home tmp");
         uninstall(home.path()).expect("noop uninstall");
+    }
+
+    #[test]
+    fn agy_bundle_merges_into_existing_hooks_json_and_uninstalls_cleanly() {
+        let home = tempfile::tempdir().expect("home tmp");
+        let app = tempfile::tempdir().expect("app tmp");
+        // Mirror the real-world file: user already has Orca's bundle registered
+        let hooks_path = gemini_hooks_path(home.path());
+        fs::create_dir_all(hooks_path.parent().unwrap()).expect("mkdir");
+        fs::write(
+            &hooks_path,
+            json!({
+                "orca-status": {
+                    "Stop": [
+                        { "type": "command", "command": "C:\\Users\\me\\.orca\\agent-hooks\\antigravity-stop.cmd", "timeout": 10 }
+                    ]
+                }
+            })
+            .to_string(),
+        )
+        .expect("seed");
+
+        install(app.path(), home.path()).expect("install");
+
+        let root: Value =
+            serde_json::from_str(&fs::read_to_string(&hooks_path).expect("read")).expect("json");
+        // Orca's bundle untouched
+        assert!(root["orca-status"]["Stop"].as_array().is_some());
+        // Ours present with all three events
+        let ours = &root["oppa-status"];
+        for event in AGY_EVENTS {
+            let arr = ours[event].as_array().expect(event);
+            assert_eq!(arr.len(), 1, "{event}: one managed handler");
+            let cmd = arr[0]["command"].as_str().unwrap();
+            assert!(
+                cmd.contains("oppa-antigravity"),
+                "{event}: command points at our wrapper"
+            );
+        }
+
+        // Re-install replaces (no duplicates possible: named bundle)
+        install(app.path(), home.path()).expect("reinstall");
+        let root: Value =
+            serde_json::from_str(&fs::read_to_string(&hooks_path).expect("read")).expect("json");
+        assert_eq!(root.as_object().unwrap().len(), 2, "two bundles total");
+
+        uninstall(home.path()).expect("uninstall");
+        let root: Value =
+            serde_json::from_str(&fs::read_to_string(&hooks_path).expect("read")).expect("json");
+        assert!(root.get("oppa-status").is_none(), "our bundle removed");
+        assert!(root["orca-status"]["Stop"].as_array().is_some(), "orca kept");
     }
 }

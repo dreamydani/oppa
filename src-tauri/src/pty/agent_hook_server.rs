@@ -158,7 +158,7 @@ async fn handle_connection(
     // Always answer promptly: agent CLIs block on the hook with a timeout.
     // Payload authenticity (token) is checked when applying, not here —
     // the connection must be released fast regardless.
-    let response = if method != "POST" || !path.starts_with("/hook/") {
+    let response = if method != "POST" || resolve_agent_source(&path).is_none() {
         http_response(404, "not found")
     } else {
         http_response(200, "ok")
@@ -166,8 +166,18 @@ async fn handle_connection(
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.flush().await;
 
-    if path.starts_with("/hook/claude") {
-        apply_hook_payload(&body, sessions, token);
+    if let Some(agent) = resolve_agent_source(&path) {
+        apply_hook_payload(&body, sessions, token, agent);
+    }
+}
+
+/// Maps hook endpoints to the agent CLI they report for. Mirrors Orca's
+/// HOOK_SOURCE_BY_PATHNAME.
+fn resolve_agent_source(path: &str) -> Option<&'static str> {
+    match path {
+        "/hook/claude" => Some("claude"),
+        "/hook/antigravity" => Some("agy"),
+        _ => None,
     }
 }
 
@@ -182,35 +192,61 @@ fn apply_hook_payload(
     body: &[u8],
     sessions: &Arc<Mutex<HashMap<String, Arc<DaemonSession>>>>,
     token: &str,
+    agent: &'static str,
 ) {
     let Ok(text) = std::str::from_utf8(body) else {
         return;
     };
-    // Hook scripts send JSON: {"pane_key": ..., "payload": {<raw hook stdin>}}
+    // Hook scripts send JSON: {"pane_key": ..., "token": ..., "payload": {<raw hook stdin>}}
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
         return;
     };
     if value.get("token").and_then(|t| t.as_str()) != Some(token) {
         return;
     }
-    let pane_key = value.get("pane_key").and_then(|v| v.as_str()).unwrap_or("");
-    let payload = value.get("payload").cloned().unwrap_or(value.clone());
-    let Some(session_id) = payload.get("session_id").and_then(|v| v.as_str()) else {
+    let Some(pane_key) = value.get("pane_key").and_then(|v| v.as_str()) else {
         return;
     };
+    let payload = value.get("payload").cloned().unwrap_or(value.clone());
+    // Field names differ per agent: Claude writes snake_case `session_id`,
+    // agy/Antigravity writes camelCase `conversationId`
+    let session_id = read_session_id(&payload).unwrap_or_else(|| {
+        read_session_id(&value).unwrap_or_default()
+    });
+    if session_id.is_empty() {
+        return;
+    }
     let transcript_path = payload
-        .get("transcript_path")
+        .get("transcriptPath")
+        .or_else(|| payload.get("transcript_path"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
     let map = sessions.lock();
     if let Some(session) = map.get(pane_key) {
         *session.agent_session_ref.lock() = Some(crate::pty::snapshot::AgentSessionRef {
-            agent: "claude".into(),
-            id: session_id.to_string(),
+            agent: agent.to_string(),
+            id: session_id,
             transcript_path,
         });
     }
+}
+
+/// Session-id readers across agents' naming conventions (Orca-style dual-key read).
+fn read_session_id(payload: &serde_json::Value) -> Option<String> {
+    for key in ["session_id", "sessionId", "conversationId"] {
+        if let Some(id) = payload.get(key).and_then(|v| v.as_str()) {
+            let trimmed = id.trim();
+            // Same sanity rules as Orca: non-empty, no leading dash, no control chars
+            if !trimmed.is_empty()
+                && !trimmed.starts_with('-')
+                && !trimmed.chars().any(|c| c.is_control() || c == '\u{7f}')
+            {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -236,8 +272,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hook_payload_binds_authoritative_session_id() {
-        // Same resolution logic as daemon_session's test helper
+    async fn test_hook_payload_binds_authoritative_session_id() {        // Same resolution logic as daemon_session's test helper
         let sh = std::env::var_os("PATH")
             .and_then(|path| {
                 std::env::split_paths(&path)
@@ -312,6 +347,77 @@ mod tests {
                     assert!(
                         tokio::time::Instant::now() < deadline,
                         "expected authoritative ref bound within deadline"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        }
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_antigravity_route_binds_camelcase_conversation_id() {
+        let sh = std::env::var_os("PATH")
+            .and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|dir| dir.join("sh.exe"))
+                    .find(|candidate| candidate.exists())
+            })
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sh".to_string());
+        let sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let session = DaemonSession::spawn_with_args(
+            "agy-pane-1".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+        )
+        .expect("spawn session for agy hook test");
+        sessions
+            .lock()
+            .insert("agy-pane-1".into(), Arc::clone(&session));
+
+        let server = AgentHookServer::start(Arc::clone(&sessions))
+            .await
+            .expect("server started");
+
+        // Antigravity payload: camelCase keys, nested under payload like the script sends
+        let body = serde_json::json!({
+            "pane_key": "agy-pane-1",
+            "token": server.token,
+            "hook_event_name": "PreInvocation",
+            "payload": {
+                "conversationId": "ec33ebf9-0cba-4100-8142-c61503f6c587",
+                "workspacePaths": ["C:\\proj"],
+                "transcriptPath": "C:\\proj\\.gemini\\antigravity-cli\\transcript.jsonl",
+                "modelName": "auto"
+            }
+        });
+        post("/hook/antigravity", &body.to_string(), server.port)
+            .await
+            .expect("post");
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let bound = session.agent_session_ref.lock().clone();
+            match bound {
+                Some(r) => {
+                    assert_eq!(r.agent, "agy");
+                    assert_eq!(r.id, "ec33ebf9-0cba-4100-8142-c61503f6c587");
+                    assert_eq!(
+                        r.transcript_path,
+                        Some("C:\\proj\\.gemini\\antigravity-cli\\transcript.jsonl".into())
+                    );
+                    break;
+                }
+                None => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "expected agy conversation bound within deadline"
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
