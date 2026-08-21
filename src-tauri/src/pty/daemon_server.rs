@@ -297,11 +297,14 @@ impl DaemonServer {
     fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
         let cwd = session.cwd().unwrap_or_default();
         let foreground_command = session.foreground_command();
-        // While a known agent CLI runs, resolve its session id from its
-        // transcripts; the ref persists on the pane even after the agent exits.
+        // Fallback resolution: while a known agent CLI runs and no hook has
+        // already bound an authoritative ref, resolve the id from transcripts.
+        // The ref persists on the pane even after the agent exits.
         if let Some(cmd) = &foreground_command {
-            if let Some(captured) = agent_resume::capture_agent_session(cmd, &cwd) {
-                *session.agent_session_ref.lock() = Some(captured);
+            if session.agent_session_ref.lock().is_none() {
+                if let Some(captured) = agent_resume::capture_agent_session(cmd, &cwd) {
+                    *session.agent_session_ref.lock() = Some(captured);
+                }
             }
         }
         let agent_session = session.agent_session_ref.lock().clone();
