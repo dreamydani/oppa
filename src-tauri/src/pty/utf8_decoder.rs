@@ -17,16 +17,45 @@ impl Utf8ChunkDecoder {
             return String::new();
         }
 
-        let combined = if self.residual.is_empty() {
-            chunk.to_vec()
-        } else {
-            let mut buf = std::mem::take(&mut self.residual);
-            buf.extend_from_slice(chunk);
-            buf
-        };
+        // Fast path: no pending residual — decode straight from the input
+        // slice without copying into a combined buffer.
+        if self.residual.is_empty() {
+            let mut output = String::with_capacity(chunk.len());
+            let mut slice = chunk;
+            loop {
+                match std::str::from_utf8(slice) {
+                    Ok(valid_str) => {
+                        output.push_str(valid_str);
+                        break;
+                    }
+                    Err(err) => {
+                        let valid_len = err.valid_up_to();
+                        if valid_len > 0 {
+                            output.push_str(unsafe {
+                                std::str::from_utf8_unchecked(&slice[..valid_len])
+                            });
+                        }
+                        match err.error_len() {
+                            None => {
+                                self.residual.extend_from_slice(&slice[valid_len..]);
+                                break;
+                            }
+                            Some(invalid_len) => {
+                                output.push(std::char::REPLACEMENT_CHARACTER);
+                                slice = &slice[valid_len + invalid_len..];
+                            }
+                        }
+                    }
+                }
+            }
+            return output;
+        }
 
-        let mut output = String::with_capacity(combined.len());
-        let mut slice = &combined[..];
+        let mut buf = std::mem::take(&mut self.residual);
+        buf.extend_from_slice(chunk);
+
+        let mut output = String::with_capacity(buf.len());
+        let mut slice = &buf[..];
 
         loop {
             if slice.is_empty() {
@@ -175,5 +204,35 @@ mod tests {
         let flushed = decoder.flush();
         assert_eq!(flushed, "\u{FFFD}");
         assert_eq!(decoder.flush(), "");
+    }
+
+    // Regression guard for the zero-copy fast path: chunked decoding must be
+    // byte-identical to single-shot decoding regardless of split points.
+    #[test]
+    fn test_chunked_decode_equals_single_shot() {
+        let text = "ascii ✓ then 日本語 CJK, more 🚀🔥 emojis, é accent, plain end";
+        let full = decode_all_chunks(&[text.as_bytes()]);
+        assert_eq!(full, text);
+
+        // Deterministic boundary sweep: every possible 1-byte-at-a-time split.
+        let bytes = text.as_bytes();
+        let mut chunked: Vec<&[u8]> = Vec::new();
+        for (i, b) in bytes.iter().enumerate() {
+            chunked.push(std::slice::from_ref(b));
+            if i == bytes.len() - 1 {
+                break;
+            }
+        }
+        assert_eq!(decode_all_chunks(&chunked), text);
+    }
+
+    fn decode_all_chunks(chunks: &[&[u8]]) -> String {
+        let mut decoder = Utf8ChunkDecoder::new();
+        let mut out = String::new();
+        for chunk in chunks {
+            out.push_str(&decoder.decode(chunk));
+        }
+        out.push_str(&decoder.flush());
+        out
     }
 }
