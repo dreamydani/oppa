@@ -1373,6 +1373,77 @@ describe("terminalStore", () => {
       expect(sessions[restoredId]?.cwd).toBe("C:\\gone");
     });
 
+    it("loadLayout only spawns sessions for the active tab and marks inactive tabs as sleeping", async () => {
+      const layoutData = {
+        version: 2,
+        activeTabId: "tab-1",
+        tabs: [
+          {
+            id: "tab-1",
+            title: "Project Active",
+            layout: { type: "leaf", id: "sess-active-1" },
+            focusedPath: [],
+          },
+          {
+            id: "tab-2",
+            title: "Project Dormant",
+            layout: { type: "leaf", id: "sess-dormant-1" },
+            focusedPath: [],
+          },
+        ],
+        sessions: [
+          {
+            id: "sess-active-1",
+            title: "Active Shell",
+            status: "running",
+            cwd: "C:/projects/active",
+            cols: 80,
+            rows: 24,
+          },
+          {
+            id: "sess-dormant-1",
+            title: "Dormant Shell",
+            status: "running",
+            cwd: "C:/projects/dormant",
+            cols: 80,
+            rows: 24,
+          },
+        ],
+      };
+
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify(layoutData),
+      );
+      ptySpawnMock.mockResolvedValueOnce(spawnRes("sess-active-1"));
+
+      await useTerminalStore.getState().loadLayout();
+
+      const state = useTerminalStore.getState();
+      expect(state.tabs).toHaveLength(2);
+      expect(state.activeTabId).toBe("tab-1");
+
+      const activeTab = state.tabs.find((t) => t.id === "tab-1");
+      const dormantTab = state.tabs.find((t) => t.id === "tab-2");
+
+      expect(activeTab?.isSleeping).toBeFalsy();
+      expect(dormantTab?.isSleeping).toBe(true);
+
+      expect(state.sessions["sess-active-1"]).toBeDefined();
+      expect(state.sessions["sess-active-1"].status).toBe("running");
+
+      expect(state.sessions["sess-dormant-1"]).toBeDefined();
+      expect(state.sessions["sess-dormant-1"].status).toBe("sleeping");
+      expect(state.sessions["sess-dormant-1"].cwd).toBe("C:/projects/dormant");
+
+      // Verify spawnSession was only called for the active tab's session
+      expect(ptySpawnMock).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "sess-active-1", cwd: "C:/projects/active" }),
+      );
+      expect(ptySpawnMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: "sess-dormant-1" }),
+      );
+    });
+
     it("leaves the store untouched when the saved JSON is malformed", async () => {
       loadLayoutMock.mockResolvedValue("{not valid json");
       await expect(useTerminalStore.getState().loadLayout()).rejects.toThrow();
@@ -1650,7 +1721,7 @@ describe("terminalStore", () => {
         expect(parsed.sessions).toHaveLength(2);
       });
 
-      it("loadLayout restores multiple tabs, remapping session IDs across all tabs", async () => {
+      it("loadLayout restores multiple tabs, remapping active tab and leaving inactive tabs sleeping", async () => {
         loadLayoutMock.mockResolvedValue(
           JSON.stringify({
             tabs: [
@@ -1664,21 +1735,27 @@ describe("terminalStore", () => {
             ],
           }),
         );
-        ptySpawnMock
-          .mockResolvedValueOnce(spawnRes("new-1"))
-          .mockResolvedValueOnce(spawnRes("new-2"));
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("new-2"));
 
         await useTerminalStore.getState().loadLayout();
         const state = useTerminalStore.getState();
         expect(state.tabs).toHaveLength(2);
         expect(state.tabs[0].id).toBe("t1");
         expect(state.tabs[0].title).toBe("Tab One");
-        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "new-1" });
+        expect(state.tabs[0].layout).toEqual({ type: "leaf", id: "old-1" });
+        expect(state.tabs[0].isSleeping).toBe(true);
         expect(state.tabs[1].id).toBe("t2");
         expect(state.tabs[1].title).toBe("Tab Two");
         expect(state.tabs[1].layout).toEqual({ type: "leaf", id: "new-2" });
+        expect(state.tabs[1].isSleeping).toBeFalsy();
         expect(state.activeTabId).toBe("t2");
         expect(state.layout).toEqual({ type: "leaf", id: "new-2" });
+        expect(state.sessions["old-1"]?.status).toBe("sleeping");
+        expect(state.sessions["new-2"]?.status).toBe("running");
+        expect(ptySpawnMock).toHaveBeenCalledTimes(1);
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "old-2", cwd: "C:\\b" }),
+        );
       });
 
       it("loadLayout promotes legacy single-layout snapshot into tabs[0]", async () => {

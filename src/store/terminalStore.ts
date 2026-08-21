@@ -91,6 +91,7 @@ export interface WorkspaceConfig {
 }
 
 export type SessionStatus =
+  | "sleeping"
   | "spawning"
   | "loading"
   | "restoring"
@@ -221,6 +222,7 @@ export interface TabState {
   layout: Layout;
   focusedPath: Path;
   isWizard?: boolean;
+  isSleeping?: boolean;
 }
 
 // Monotonic counter for synthetic error-session ids. Avoids
@@ -1266,27 +1268,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const byId = new Map((parsed.sessions ?? []).map((s) => [s.id, s]));
       const remap: Record<string, string> = {};
 
-      // Seed sessions with restoring status so the UI knows restore is in flight.
-      if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
-        set((state) => {
-          const updatedSessions = { ...state.sessions };
-          for (const s of parsed.sessions!) {
-            if (s.id) {
-              updatedSessions[s.id] = {
-                id: s.id,
-                title: s.title || s.id,
-                status: "restoring",
-                cwd: s.cwd,
-                cols: s.cols || DEFAULT_COLS,
-                rows: s.rows || DEFAULT_ROWS,
-                ...(s.isRestored ? { isRestored: true } : {}),
-              };
-            }
-          }
-          return { sessions: updatedSessions };
-        });
-      }
-
       if (Array.isArray(parsed.tabs)) {
         if (parsed.tabs.length === 0) {
           set({
@@ -1299,17 +1280,82 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           return;
         }
 
-        const uniqueOldIds = new Set<string>();
-        for (const tab of parsed.tabs) {
-          if (tab.isWizard) continue;
-          for (const oldId of leafIds(tab.layout)) {
-            if (oldId) uniqueOldIds.add(oldId);
+        const activeTabId =
+          parsed.activeTabId && parsed.tabs.some((t) => t.id === parsed.activeTabId)
+            ? parsed.activeTabId
+            : parsed.tabs[0].id;
+        const activeTab = parsed.tabs.find((t) => t.id === activeTabId) ?? parsed.tabs[0];
+
+        const activeOldIds = new Set<string>();
+        if (activeTab && !activeTab.isWizard) {
+          for (const oldId of leafIds(activeTab.layout)) {
+            if (oldId) activeOldIds.add(oldId);
           }
         }
 
-        // Restore all unique sessions in parallel
+        const dormantOldIds = new Set<string>();
+        for (const tab of parsed.tabs) {
+          if (tab.id === activeTabId || tab.isWizard) continue;
+          for (const oldId of leafIds(tab.layout)) {
+            if (oldId && !activeOldIds.has(oldId)) {
+              dormantOldIds.add(oldId);
+            }
+          }
+        }
+
+        // Seed state.sessions: restoring for active, sleeping for dormant.
+        set((state) => {
+          const updatedSessions = { ...state.sessions };
+          if (Array.isArray(parsed.sessions)) {
+            for (const s of parsed.sessions) {
+              if (s.id) {
+                const isRestoring = activeOldIds.has(s.id);
+                updatedSessions[s.id] = {
+                  id: s.id,
+                  title: s.title || s.id,
+                  status: isRestoring ? "restoring" : "sleeping",
+                  cwd: s.cwd,
+                  cols: s.cols || DEFAULT_COLS,
+                  rows: s.rows || DEFAULT_ROWS,
+                  ...(s.isRestored ? { isRestored: true } : {}),
+                };
+              }
+            }
+          }
+          for (const oldId of dormantOldIds) {
+            if (!updatedSessions[oldId]) {
+              const saved = byId.get(oldId);
+              updatedSessions[oldId] = {
+                id: oldId,
+                title: saved?.title || oldId,
+                status: "sleeping",
+                cwd: saved?.cwd,
+                cols: saved?.cols || DEFAULT_COLS,
+                rows: saved?.rows || DEFAULT_ROWS,
+                ...(saved?.isRestored ? { isRestored: true } : {}),
+              };
+            }
+          }
+          for (const oldId of activeOldIds) {
+            if (!updatedSessions[oldId]) {
+              const saved = byId.get(oldId);
+              updatedSessions[oldId] = {
+                id: oldId,
+                title: saved?.title || oldId,
+                status: "restoring",
+                cwd: saved?.cwd,
+                cols: saved?.cols || DEFAULT_COLS,
+                rows: saved?.rows || DEFAULT_ROWS,
+                ...(saved?.isRestored ? { isRestored: true } : {}),
+              };
+            }
+          }
+          return { sessions: updatedSessions };
+        });
+
+        // Restore active sessions in parallel
         await Promise.all(
-          Array.from(uniqueOldIds).map(async (oldId) => {
+          Array.from(activeOldIds).map(async (oldId) => {
             const savedSession = byId.get(oldId);
             const newId = await get().spawnSession(
               savedSession?.cwd,
@@ -1362,32 +1408,72 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               focusedPath: [],
             };
           }
-          const remappedLayout = remapLeafIds(tab.layout, remap);
+          if (tab.id === activeTabId) {
+            const remappedLayout = remapLeafIds(tab.layout, remap);
+            return {
+              id: tab.id,
+              ...(tab.title !== undefined ? { title: tab.title } : {}),
+              layout: remappedLayout,
+              focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
+              isSleeping: false,
+            };
+          }
           return {
             id: tab.id,
             ...(tab.title !== undefined ? { title: tab.title } : {}),
-            layout: remappedLayout,
-            focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
+            layout: tab.layout,
+            focusedPath: tab.focusedPath ?? firstLeafPath(tab.layout),
+            isSleeping: true,
           };
         });
 
-        const activeTabId =
-          parsed.activeTabId && restoredTabs.some((t) => t.id === parsed.activeTabId)
-            ? parsed.activeTabId
-            : restoredTabs[0].id;
-        const activeTab = restoredTabs.find((t) => t.id === activeTabId) ?? restoredTabs[0];
+        const activeRestoredTab = restoredTabs.find((t) => t.id === activeTabId) ?? restoredTabs[0];
 
         set({
           tabs: restoredTabs,
           activeTabId,
-          layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
-          focusedPath: activeTab ? activeTab.focusedPath : [],
+          layout: activeRestoredTab ? activeRestoredTab.layout : { type: "leaf", id: "" },
+          focusedPath: activeRestoredTab ? activeRestoredTab.focusedPath : [],
         });
       } else if (parsed.layout) {
         const uniqueOldIds = new Set<string>();
         for (const oldId of leafIds(parsed.layout)) {
           if (oldId) uniqueOldIds.add(oldId);
         }
+
+        set((state) => {
+          const updatedSessions = { ...state.sessions };
+          if (Array.isArray(parsed.sessions)) {
+            for (const s of parsed.sessions) {
+              if (s.id) {
+                updatedSessions[s.id] = {
+                  id: s.id,
+                  title: s.title || s.id,
+                  status: "restoring",
+                  cwd: s.cwd,
+                  cols: s.cols || DEFAULT_COLS,
+                  rows: s.rows || DEFAULT_ROWS,
+                  ...(s.isRestored ? { isRestored: true } : {}),
+                };
+              }
+            }
+          }
+          for (const oldId of uniqueOldIds) {
+            if (!updatedSessions[oldId]) {
+              const saved = byId.get(oldId);
+              updatedSessions[oldId] = {
+                id: oldId,
+                title: saved?.title || oldId,
+                status: "restoring",
+                cwd: saved?.cwd,
+                cols: saved?.cols || DEFAULT_COLS,
+                rows: saved?.rows || DEFAULT_ROWS,
+                ...(saved?.isRestored ? { isRestored: true } : {}),
+              };
+            }
+          }
+          return { sessions: updatedSessions };
+        });
 
         await Promise.all(
           Array.from(uniqueOldIds).map(async (oldId) => {
@@ -1438,6 +1524,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           id: "tab-1",
           layout: remappedLayout,
           focusedPath: firstLeafPath(remappedLayout),
+          isSleeping: false,
         };
         set({
           tabs: [defaultTab],
