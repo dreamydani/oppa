@@ -52,6 +52,9 @@ pub struct DaemonServer {
     sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>>,
     // App data dir for periodic session checkpoints; None skips persistence (tests)
     snapshot_dir: Option<PathBuf>,
+    // Conversation ids already resumed since this daemon booted: a conversation
+    // may be open in at most one pane (second claimant falls back to relaunch)
+    resumed_agent_ids: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl Default for DaemonServer {
@@ -65,6 +68,7 @@ impl DaemonServer {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             snapshot_dir: None,
+            resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -72,6 +76,7 @@ impl DaemonServer {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             snapshot_dir: Some(app_data_dir),
+            resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -118,8 +123,42 @@ impl DaemonServer {
                             .ok()
                             .flatten()
                     });
-                    let (resume, declined, initial_command) =
-                        if resume_agents { Self::plan_resume_from_checkpoint(&checkpoint) } else { (None, None, None) };
+                    let (resume, declined, initial_command) = if resume_agents {
+                        let planned = Self::plan_resume_from_checkpoint(&checkpoint);
+                        // One conversation per pane: if another pane already
+                        // claimed this conversation id this boot, downgrade to
+                        // a plain relaunch instead of opening it twice.
+                        match (
+                            &planned.0,
+                            checkpoint.as_ref().and_then(|s| s.agent_session.as_ref()),
+                        ) {
+                            (Some(_), Some(agent_ref))
+                                if matches!(planned.0.as_ref().unwrap().kind, ResumeKind::AgentResume) =>
+                            {
+                                let mut claimed = self.resumed_agent_ids.lock();
+                                if claimed.insert(agent_ref.id.clone()) {
+                                    planned
+                                } else {
+                                    let fg = Self::snapshot_foreground(&checkpoint);
+                                    (
+                                        fg.clone()
+                                            .map(|cmd| ResumePlan {
+                                                command_line: cmd,
+                                                kind: ResumeKind::CommandRelaunch,
+                                            }),
+                                        Some(
+                                            "conversation already resumed in another pane"
+                                                .to_string(),
+                                        ),
+                                        fg,
+                                    )
+                                }
+                            }
+                            _ => planned,
+                        }
+                    } else {
+                        (None, None, None)
+                    };
                     let spawn_cwd = cwd.or_else(|| {
                         checkpoint
                             .as_ref()
@@ -236,16 +275,22 @@ impl DaemonServer {
         let server = Arc::new(Self {
             sessions: Arc::clone(&self.sessions),
             snapshot_dir: self.snapshot_dir.clone(),
+            resumed_agent_ids: Arc::clone(&self.resumed_agent_ids),
         });
         run_server_listener(server, socket_path, cancel_token).await
+    }
+
+    fn snapshot_foreground(checkpoint: &Option<SessionSnapshot>) -> Option<String> {
+        checkpoint
+            .as_ref()
+            .and_then(|s| s.foreground_command.clone())
     }
 
     // Resume priority: native resume by session id (hook, cwd-map or transcript
     // scan), then plain re-execution of the known-agent command. Unknown
     // programs are never re-executed. No blind "--continue": it pulls the
     // globally most recent conversation and duplicates it across panes.
-    fn plan_resume_from_checkpoint(
-        checkpoint: &Option<SessionSnapshot>,
+    fn plan_resume_from_checkpoint(        checkpoint: &Option<SessionSnapshot>,
     ) -> (
         Option<ResumePlan>,
         Option<String>,
@@ -1159,6 +1204,86 @@ mod tests {
         }
         let _ = server.handle_request(DaemonRequest::Kill {
             session_id: "no-resume-test".into(),
+        });
+    }
+
+    #[tokio::test]
+    async fn test_same_conversation_claimed_by_second_pane_downgrades_to_relaunch() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = SnapshotStorage::new(temp_dir.path().to_path_buf());
+        // Two panes ran the same agent conversation (e.g. same cwd)
+        for sid in ["dedup-a", "dedup-b"] {
+            storage
+                .save_snapshot(&SessionSnapshot {
+                    session_id: sid.into(),
+                    cwd: r"C:\shared\project".into(),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                    persona_id: None,
+                    scrollback: "old screen".into(),
+                    timestamp: 1,
+                    foreground_command: Some("agy".into()),
+                    agent_session: Some(crate::pty::snapshot::AgentSessionRef {
+                        agent: "agy".into(),
+                        id: "same-conv-1".into(),
+                        transcript_path: None,
+                    }),
+                })
+                .expect("seed checkpoint");
+        }
+
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+
+        // First pane wins the conversation
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "dedup-a".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: true,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(matches!(
+                    res.resume,
+                    Some(ResumePlan { kind: ResumeKind::AgentResume, .. })
+                ));
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        // Second pane must NOT reopen the same conversation
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "dedup-b".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: true,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(matches!(
+                    res.resume,
+                    Some(ResumePlan {
+                        command_line: ref cmd,
+                        kind: ResumeKind::CommandRelaunch,
+                    }) if cmd == "agy"
+                ));
+                assert_eq!(
+                    res.resume_declined_reason,
+                    Some("conversation already resumed in another pane".into())
+                );
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "dedup-a".into(),
+        });
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "dedup-b".into(),
         });
     }
 
