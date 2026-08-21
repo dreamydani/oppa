@@ -76,6 +76,9 @@ impl DaemonServer {
             } => {
                 let mut sessions = self.sessions.lock();
                 if let Some(session) = sessions.get(&session_id) {
+                    if cols > 0 && rows > 0 && (session.cols() != cols || session.rows() != rows) {
+                        let _ = session.resize(cols, rows);
+                    }
                     let snapshot = session.get_snapshot();
                     DaemonResponse::SessionAttached(CreateOrAttachResult {
                         is_new: false,
@@ -827,5 +830,45 @@ mod tests {
 
         // Clean up
         cancel_token.cancel();
+    }
+
+    #[tokio::test]
+    async fn test_create_or_attach_resizes_before_taking_snapshot() {
+        let server = DaemonServer::new();
+
+        // 1. Initial create at 80x24
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "resize-reattach-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(res.is_new);
+                assert_eq!(res.cols, 80);
+                assert_eq!(res.rows, 24);
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        // 2. Reattach with 50x14
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "resize-reattach-test".into(),
+            cols: 50,
+            rows: 14,
+            cwd: None,
+            shell: None,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(!res.is_new);
+                assert_eq!(res.cols, 50);
+                assert_eq!(res.rows, 14);
+                assert!(res.snapshot.is_some());
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
     }
 }
