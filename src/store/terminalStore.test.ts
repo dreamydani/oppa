@@ -930,6 +930,40 @@ describe("terminalStore", () => {
       );
     });
 
+    it("saveLayout preserves sleeping sessions and prevents their scrollback cleanup", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "tab-1",
+            title: "Active Tab",
+            layout: { type: "leaf", id: "sess-1" },
+            focusedPath: [],
+            isSleeping: false,
+          },
+          {
+            id: "tab-2",
+            title: "Sleeping Tab",
+            layout: { type: "leaf", id: "sess-2" },
+            focusedPath: [],
+            isSleeping: true,
+          },
+        ],
+        sessions: {
+          "sess-1": { id: "sess-1", title: "Active", status: "running", cols: 80, rows: 24, cwd: "C:/a" },
+          "sess-2": { id: "sess-2", title: "Sleeping", status: "sleeping", cols: 80, rows: 24, cwd: "C:/b" },
+        },
+      });
+
+      await useTerminalStore.getState().saveLayout();
+
+      expect(saveLayoutMock).toHaveBeenCalledWith(
+        expect.stringContaining('"id":"sess-2"'),
+      );
+      expect(cleanupStaleScrollbacksMock).toHaveBeenCalledWith(
+        expect.arrayContaining(["sess-1", "sess-2"]),
+      );
+    });
+
     it("captures active serializer buffers and cleans up stale scrollbacks", async () => {
       useTerminalStore.setState({
         sessions: {
@@ -1778,6 +1812,40 @@ describe("terminalStore", () => {
         expect(state.activeTabId).toBe("");
         expect(state.sessions).toEqual({});
       });
+
+      it("closeTab on a sleeping tab cleans up sessions without calling ptyKill", async () => {
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-1",
+              title: "Tab 1",
+              layout: { type: "leaf", id: "sess-1" },
+              focusedPath: [],
+              isSleeping: false,
+            },
+            {
+              id: "tab-2",
+              title: "Tab 2",
+              layout: { type: "leaf", id: "sess-2" },
+              focusedPath: [],
+              isSleeping: true,
+            },
+          ],
+          activeTabId: "tab-1",
+          sessions: {
+            "sess-1": { id: "sess-1", title: "Active", status: "running", cols: 80, rows: 24 },
+            "sess-2": { id: "sess-2", title: "Sleeping", status: "sleeping", cols: 80, rows: 24 },
+          },
+        });
+
+        ptyKillMock.mockClear();
+
+        await useTerminalStore.getState().closeTab("tab-2");
+
+        expect(ptyKillMock).not.toHaveBeenCalledWith("sess-2");
+        expect(deleteScrollbackMock).toHaveBeenCalledWith("sess-2");
+        expect(useTerminalStore.getState().sessions["sess-2"]).toBeUndefined();
+      });
     });
 
     describe("split isolation across tabs", () => {
@@ -1842,6 +1910,46 @@ describe("terminalStore", () => {
         expect(state.tabs[1].layout).toEqual({ type: "leaf", id: "s3" });
         expect(state.sessions["s3"]).toBeDefined();
         expect(state.sessions["s2"]).toBeUndefined();
+      });
+
+      it("closePane on a sleeping session cleans up session without calling ptyKill", async () => {
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-1",
+              title: "Tab 1",
+              layout: {
+                type: "split",
+                dir: "h",
+                ratio: 0.5,
+                a: { type: "leaf", id: "sess-1" },
+                b: { type: "leaf", id: "sess-2" },
+              },
+              focusedPath: [1],
+            },
+          ],
+          activeTabId: "tab-1",
+          layout: {
+            type: "split",
+            dir: "h",
+            ratio: 0.5,
+            a: { type: "leaf", id: "sess-1" },
+            b: { type: "leaf", id: "sess-2" },
+          },
+          focusedPath: [1],
+          sessions: {
+            "sess-1": { id: "sess-1", title: "Active", status: "running", cols: 80, rows: 24 },
+            "sess-2": { id: "sess-2", title: "Sleeping", status: "sleeping", cols: 80, rows: 24 },
+          },
+        });
+
+        ptyKillMock.mockClear();
+
+        await useTerminalStore.getState().closePane([1]);
+
+        expect(ptyKillMock).not.toHaveBeenCalledWith("sess-2");
+        expect(deleteScrollbackMock).toHaveBeenCalledWith("sess-2");
+        expect(useTerminalStore.getState().sessions["sess-2"]).toBeUndefined();
       });
     });
 

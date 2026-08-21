@@ -760,7 +760,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const sessionIds = leafIds(targetTab.layout);
       for (const sId of sessionIds) {
         if (sId) {
-          if (get().sessions[sId]) {
+          const session = get().sessions[sId];
+          if (session && session.status !== "sleeping") {
             await get().killSession(sId);
           }
           void deleteScrollback(sId).catch(() => {});
@@ -1052,7 +1053,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
       return;
     }
-    if (get().sessions[removedId]) {
+    const session = get().sessions[removedId];
+    if (session && session.status !== "sleeping") {
       await get().killSession(removedId);
     }
     if (removedId) {
