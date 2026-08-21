@@ -1538,6 +1538,159 @@ describe("terminalStore", () => {
         useTerminalStore.getState().selectTab("non-existent");
         expect(useTerminalStore.getState().activeTabId).toBe("t1");
       });
+
+      it("selectTab on a sleeping tab wakes up its sessions on-demand", async () => {
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("sess-2"));
+        loadScrollbackMock.mockResolvedValue("cached scrollback output for sess-2");
+
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-1",
+              title: "Tab 1",
+              layout: { type: "leaf", id: "sess-1" },
+              focusedPath: [],
+              isSleeping: false,
+            },
+            {
+              id: "tab-2",
+              title: "Tab 2",
+              layout: { type: "leaf", id: "sess-2" },
+              focusedPath: [],
+              isSleeping: true,
+            },
+          ],
+          activeTabId: "tab-1",
+          sessions: {
+            "sess-1": {
+              id: "sess-1",
+              title: "Shell 1",
+              status: "running",
+              cols: 80,
+              rows: 24,
+            },
+            "sess-2": {
+              id: "sess-2",
+              title: "Shell 2",
+              status: "sleeping",
+              cwd: "C:/projects/proj2",
+              cols: 80,
+              rows: 24,
+            },
+          },
+        });
+
+        // Select sleeping tab
+        useTerminalStore.getState().selectTab("tab-2");
+
+        const stateImmediately = useTerminalStore.getState();
+        expect(stateImmediately.activeTabId).toBe("tab-2");
+        expect(stateImmediately.tabs.find((t) => t.id === "tab-2")?.isSleeping).toBe(false);
+
+        // Await wakeTab completion
+        await useTerminalStore.getState().wakeTab("tab-2");
+
+        const stateAfterWake = useTerminalStore.getState();
+        expect(stateAfterWake.sessions["sess-2"]?.status).toBe("running");
+        expect(stateAfterWake.restoredScrollbacks["sess-2"]).toBe(
+          "cached scrollback output for sess-2",
+        );
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "sess-2", cwd: "C:/projects/proj2" }),
+        );
+      });
+
+      it("wakeTab handles split sleeping sessions and renames/scrollback restoration", async () => {
+        ptySpawnMock
+          .mockResolvedValueOnce(spawnRes("sess-split-1"))
+          .mockResolvedValueOnce(spawnRes("sess-split-2"));
+        loadScrollbackMock.mockImplementation(async (id) =>
+          id === "sess-split-1" ? "output-1" : null,
+        );
+
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-split",
+              title: "Split Tab",
+              layout: {
+                type: "split",
+                dir: "h",
+                ratio: 0.5,
+                a: { type: "leaf", id: "sess-split-1" },
+                b: { type: "leaf", id: "sess-split-2" },
+              },
+              focusedPath: [],
+              isSleeping: true,
+            },
+          ],
+          activeTabId: "tab-split",
+          sessions: {
+            "sess-split-1": {
+              id: "sess-split-1",
+              title: "Custom Title 1",
+              status: "sleeping",
+              cwd: "C:/proj/app1",
+              cols: 80,
+              rows: 24,
+            },
+            "sess-split-2": {
+              id: "sess-split-2",
+              title: "Custom Title 2",
+              status: "sleeping",
+              cwd: "C:/proj/app2",
+              cols: 80,
+              rows: 24,
+            },
+          },
+        });
+
+        await useTerminalStore.getState().wakeTab("tab-split");
+
+        const state = useTerminalStore.getState();
+        expect(state.sessions["sess-split-1"]?.status).toBe("running");
+        expect(state.sessions["sess-split-1"]?.title).toBe("Custom Title 1");
+        expect(state.sessions["sess-split-1"]?.isRestored).toBe(true);
+        expect(state.restoredScrollbacks["sess-split-1"]).toBe("output-1");
+
+        expect(state.sessions["sess-split-2"]?.status).toBe("running");
+        expect(state.sessions["sess-split-2"]?.title).toBe("Custom Title 2");
+        expect(state.tabs.find((t) => t.id === "tab-split")?.isSleeping).toBe(false);
+      });
+
+      it("wakeTab no-ops for wizard tabs or tabs without sleeping sessions", async () => {
+        ptySpawnMock.mockClear();
+        useTerminalStore.setState({
+          tabs: [
+            {
+              id: "tab-wiz",
+              title: "Setup Wizard",
+              isWizard: true,
+              layout: { type: "leaf", id: "" },
+              focusedPath: [],
+            },
+            {
+              id: "tab-running",
+              title: "Running Tab",
+              layout: { type: "leaf", id: "sess-run" },
+              focusedPath: [],
+            },
+          ],
+          sessions: {
+            "sess-run": {
+              id: "sess-run",
+              title: "Run",
+              status: "running",
+              cols: 80,
+              rows: 24,
+            },
+          },
+        });
+
+        await useTerminalStore.getState().wakeTab("tab-wiz");
+        await useTerminalStore.getState().wakeTab("tab-running");
+        expect(ptySpawnMock).not.toHaveBeenCalled();
+      });
     });
 
     describe("renameTab", () => {

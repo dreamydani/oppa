@@ -329,6 +329,7 @@ export interface TerminalState {
   createTab: (cwd?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
   selectTab: (tabId: string) => void;
+  wakeTab: (tabId: string) => Promise<void>;
   renameTab: (tabId: string, title: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
@@ -441,6 +442,7 @@ function getActiveTab(state: TerminalState): TabState | undefined {
 let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let editorAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingWakeTabs = new Map<string, Promise<void>>();
 
 function triggerDebouncedSaveLayout(get: () => TerminalState, delayMs = 2000) {
   if (layoutSaveTimer) clearTimeout(layoutSaveTimer);
@@ -825,14 +827,121 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const currentTabs = getSyncedTabs(state);
     const tab = currentTabs.find((t) => t.id === tabId);
     if (!tab) return;
+
+    const wasSleeping = Boolean(tab.isSleeping);
+    const updatedTabs = wasSleeping
+      ? currentTabs.map((t) => (t.id === tabId ? { ...t, isSleeping: false } : t))
+      : currentTabs;
+
     set({
-      tabs: currentTabs,
+      tabs: updatedTabs,
       activeTabId: tab.id,
       layout: tab.layout,
       focusedPath: tab.focusedPath,
       tabFocusHistory: [tab.id, ...state.tabFocusHistory.filter((id) => id !== tab.id)],
     });
+
+    if (wasSleeping) {
+      void get().wakeTab(tabId);
+    }
     void get().saveLayout().catch(() => {});
+  },
+
+  wakeTab: async (tabId: string) => {
+    const existing = pendingWakeTabs.get(tabId);
+    if (existing) return existing;
+
+    const wakePromise = (async () => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === tabId);
+      if (!tab || tab.isWizard) return;
+
+      const ids = leafIds(tab.layout).filter(Boolean);
+      const sleepingIds = ids.filter((id) => state.sessions[id]?.status === "sleeping");
+      if (sleepingIds.length === 0) return;
+
+      // Transition sleeping sessions to restoring state immediately for UI feedback
+      set((s) => {
+        const updated = { ...s.sessions };
+        for (const id of sleepingIds) {
+          if (updated[id]) {
+            updated[id] = { ...updated[id], status: "restoring" };
+          }
+        }
+        return { sessions: updated };
+      });
+
+      const remap: Record<string, string> = {};
+
+      await Promise.all(
+        sleepingIds.map(async (oldId) => {
+          const savedSession = get().sessions[oldId];
+          const newId = await get().spawnSession(savedSession?.cwd, undefined, oldId);
+          remap[oldId] = newId;
+
+          if (oldId !== newId) {
+            set((s) => {
+              const sessions = { ...s.sessions };
+              delete sessions[oldId];
+              return { sessions };
+            });
+          }
+
+          if (savedSession?.title && savedSession.title !== newId) {
+            get().renameSession(newId, savedSession.title);
+          }
+
+          const prev = await loadScrollback(oldId);
+          if (prev) {
+            if (!get().restoredScrollbacks[newId]) {
+              get().setRestoredScrollback(newId, prev);
+              set((s) => {
+                const sess = s.sessions[newId];
+                if (!sess) return s;
+                return {
+                  sessions: {
+                    ...s.sessions,
+                    [newId]: { ...sess, isRestored: true },
+                  },
+                };
+              });
+            }
+            await saveScrollback(newId, prev);
+            if (oldId !== newId) {
+              await deleteScrollback(oldId);
+            }
+          }
+        }),
+      );
+
+      // Remap layout leaf IDs if any session IDs changed upon spawn
+      set((s) => {
+        const currentTabs = getSyncedTabs(s);
+        const remappedTabs = currentTabs.map((t) => {
+          if (t.id !== tabId) return t;
+          const remappedLayout = remapLeafIds(t.layout, remap);
+          return {
+            ...t,
+            isSleeping: false,
+            layout: remappedLayout,
+          };
+        });
+        const updatedActiveTab = remappedTabs.find((t) => t.id === s.activeTabId);
+        return {
+          tabs: remappedTabs,
+          ...(updatedActiveTab ? { layout: updatedActiveTab.layout } : {}),
+        };
+      });
+
+      void get().saveLayout().catch(() => {});
+    })();
+
+    pendingWakeTabs.set(tabId, wakePromise);
+    try {
+      await wakePromise;
+    } finally {
+      pendingWakeTabs.delete(tabId);
+    }
   },
 
   renameTab: (tabId, title) => {
