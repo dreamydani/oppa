@@ -50,11 +50,12 @@ if ($ExecutionContext.SessionState.LanguageMode -eq "FullLanguage" -and (-not (T
     if ($Global:__OppaOscState.HasPSReadLine -and $null -ne $Global:__OppaOscState.OriginalReadLine) {{
         function Global:PSConsoleHostReadLine {{
             $commandLine = $Global:__OppaOscState.OriginalReadLine.Invoke()
-            [Console]::Write("$($Global:__OppaOscState.Esc)]133;C$($Global:__OppaOscState.Bel)")
+            [Console]::Write("$($Global:__OppaOscState.Esc)]133;C;$commandLine$($Global:__OppaOscState.Bel)")
             return $commandLine
         }}
     }}
-}}{restore_cwd}"#
+    }}
+[Console]::Write("$([char]27)]633;oppa-ready$([char]7)"){restore_cwd}"#
     )
 }
 
@@ -83,6 +84,20 @@ mod tests {
         assert!(bootstrap.contains("133;A"));
         assert!(bootstrap.contains("133;D"));
         assert!(bootstrap.contains("]7;file://"));
+        assert!(bootstrap.contains("Set-Location -LiteralPath 'C:\\test\\dir'"));
+    }
+
+    #[test]
+    fn test_bootstrap_emits_command_line_in_command_start() {
+        let bootstrap = generate_powershell_bootstrap_text(None);
+        assert!(bootstrap.contains("133;C;$commandLine"));
+    }
+
+    #[test]
+    fn test_bootstrap_emits_ready_marker_exactly_once() {
+        let bootstrap = generate_powershell_bootstrap_text(Some("C:\\test\\dir"));
+        assert!(bootstrap.contains("633;oppa-ready"));
+        assert_eq!(bootstrap.matches("633;oppa-ready").count(), 1);
         assert!(bootstrap.contains("Set-Location -LiteralPath 'C:\\test\\dir'"));
     }
 
