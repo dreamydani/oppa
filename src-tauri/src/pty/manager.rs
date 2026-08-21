@@ -69,7 +69,20 @@ impl PtyManager {
             }
         };
 
-        let client = Arc::new(DaemonClient::connect(&socket_path)?);
+        let client = Arc::new(match DaemonClient::connect(&socket_path) {
+            Ok(c) => c,
+            Err(e) => {
+                // A daemon left running by an older build speaks an old protocol.
+                // Restart it (its shutdown handler flushes session checkpoints)
+                // and reconnect once; sessions restore via warm/cold paths.
+                if e.contains("protocol version mismatch") {
+                    crate::pty::daemon_spawner::restart_stale_daemon(&socket_path)?;
+                    DaemonClient::connect(&socket_path)?
+                } else {
+                    return Err(e);
+                }
+            }
+        });
         *client_guard = Some(Arc::clone(&client));
         Ok(client)
     }
