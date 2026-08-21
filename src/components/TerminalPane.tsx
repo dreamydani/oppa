@@ -112,16 +112,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     term.open(containerRef.current!);
 
+    // Fit before anything renders so cell metrics settle at the real
+    // container size; attaching the GPU renderer before replay avoids the
+    // canvas-fallback glyph mismatch seen on cold-restored panes.
+    try {
+      fit.fit();
+    } catch {}
+
     const state = useTerminalStore.getState();
     const restoredScrollback = state.restoredScrollbacks[id];
     const cachedScrollback = state.cachedScrollbacks[id];
-    if (restoredScrollback) {
-      term.reset();
-      term.write(restoredScrollback);
-      clearRestoredScrollback(id);
-    } else if (cachedScrollback) {
-      term.write(cachedScrollback);
-    }
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -138,6 +138,23 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         term.loadAddon(new CanvasAddon());
       } catch {}
     }
+
+    if (restoredScrollback) {
+      term.reset();
+      term.write(restoredScrollback);
+      clearRestoredScrollback(id);
+    } else if (cachedScrollback) {
+      term.write(cachedScrollback);
+    }
+
+    // Re-assert appearance + refit after replay: large writes land while
+    // layout is still settling and can leave stale glyph metrics behind.
+    term.options.fontSize = currentAppearance.fontSize;
+    term.options.fontFamily = currentAppearance.fontFamily;
+    term.options.lineHeight = currentAppearance.lineHeight;
+    try {
+      fit.fit();
+    } catch {}
 
     const unsubs: (() => void)[] = [];
     let disposed = false;

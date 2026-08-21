@@ -221,6 +221,90 @@ pub fn find_profile(command_line: &str) -> Option<&'static AgentProfile> {
     PROFILES.iter().find(|p| (p.matches_program)(command_line))
 }
 
+/// Extracts an explicit session id the user themselves passed on the command
+/// line (`agy --conversation X`, `claude --resume Y`, `opencode --session Z`).
+/// Strongest non-hook signal: it IS the conversation running in that pane.
+pub fn explicit_id_from_command(command_line: &str) -> Option<AgentSessionRef> {
+    let profile = find_profile(command_line)?;
+    let lower = command_line.to_ascii_lowercase();
+    let flag = match profile.name {
+        "agy" => "--conversation",
+        "opencode" => "--session",
+        _ => "--resume",
+    };
+    let idx = lower.find(flag)?;
+    let after = &command_line[idx + flag.len()..];
+    let id = after.split_whitespace().next()?.trim_matches('"');
+    if id.is_empty() || id.starts_with('-') {
+        return None;
+    }
+    Some(AgentSessionRef {
+        agent: profile.name.to_string(),
+        id: id.to_string(),
+        transcript_path: None,
+    })
+}
+
+/// Most-recent unclaimed conversation ids for this agent+cwd, used to give
+/// each of several same-project panes its own conversation on cold restore.
+pub fn recent_unclaimed_ids(
+    agent: &str,
+    home: &Path,
+    cwd: &str,
+    exclude: &std::collections::HashSet<String>,
+    limit: usize,
+) -> Vec<String> {
+    let Some(profile) = PROFILES.iter().find(|p| p.name == agent) else {
+        return Vec::new();
+    };
+    // agy: conversations dir holds one .db per conversation (stem = id).
+    let dir = if profile.name == "agy" {
+        Some(home.join(".gemini").join("antigravity-cli").join("conversations"))
+    } else {
+        (profile.transcript_dir)(home, cwd)
+    };
+    let Some(dir) = dir else {
+        return Vec::new();
+    };
+    let mut candidates: Vec<(std::time::SystemTime, String)> = Vec::new();
+    if profile.name == "agy" {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("db") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if exclude.contains(stem) {
+                continue;
+            }
+            if let Ok(meta) = path.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    candidates.push((modified, stem.to_string()));
+                }
+            }
+        }
+    } else {
+        walk_transcripts(&dir, "jsonl", &mut |path| {
+            if let Ok(meta) = path.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !exclude.contains(stem) {
+                            candidates.push((modified, stem.to_string()));
+                        }
+                    }
+                }
+            }
+        });
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.into_iter().take(limit).map(|(_, id)| id).collect()
+}
+
 pub fn is_known_agent_program(command_line: &str) -> bool {
     find_profile(command_line).is_some()
 }
