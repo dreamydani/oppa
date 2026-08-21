@@ -297,6 +297,7 @@ impl DaemonClient {
         rows: u16,
         cwd: Option<String>,
         shell: Option<String>,
+        resume_agents: bool,
     ) -> Result<CreateOrAttachResult, String> {
         let req = DaemonRequest::CreateOrAttach {
             session_id: session_id.to_string(),
@@ -304,6 +305,7 @@ impl DaemonClient {
             rows,
             cwd,
             shell,
+            resume_agents,
         };
         match self.send_request(req)? {
             DaemonResponse::SessionAttached(res) => Ok(res),
@@ -491,7 +493,7 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("client-session-1", 80, 24, None, Some(sh))
+            .create_or_attach("client-session-1", 80, 24, None, Some(sh), false)
             .expect("create_or_attach");
 
         assert!(attach_res.is_new);
@@ -530,7 +532,7 @@ mod tests {
 
         // 5. Reattach to session
         let reattach_res = client
-            .create_or_attach("client-session-1", 100, 30, None, None)
+            .create_or_attach("client-session-1", 100, 30, None, None, false)
             .expect("reattach");
         assert!(!reattach_res.is_new);
         assert!(reattach_res.snapshot.is_some());
@@ -587,7 +589,7 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("ack-test-session", 80, 24, None, Some(sh))
+            .create_or_attach("ack-test-session", 80, 24, None, Some(sh), false)
             .expect("create_or_attach");
         assert!(attach_res.is_new);
 

@@ -75,6 +75,7 @@ impl PtyManager {
     }
 
     /// Create or attach to a session in the background daemon.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_or_attach(
         &self,
         session_id: &str,
@@ -85,11 +86,12 @@ impl PtyManager {
         on_data: Option<OnData>,
         on_exit: Option<OnExit>,
         on_cwd: Option<OnCwd>,
+        resume_agents: bool,
     ) -> Result<CreateOrAttachResult, String> {
         let client = self.get_client()?;
         client.register_callbacks(session_id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(session_id);
-        client.create_or_attach(session_id, cols, rows, cwd, shell)
+        client.create_or_attach(session_id, cols, rows, cwd, shell, resume_agents)
     }
 
     /// Spawn a new shell session and return its id.
@@ -110,7 +112,7 @@ impl PtyManager {
         client.register_callbacks(&id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(&id);
 
-        client.create_or_attach(&id, cols, rows, cwd, shell)?;
+        client.create_or_attach(&id, cols, rows, cwd, shell, false)?;
         Ok(id)
     }
 
@@ -319,6 +321,7 @@ pub(crate) mod tests {
                 None,
                 None,
                 None,
+                false,
             )
             .expect("create");
         assert!(res.is_new);
@@ -341,6 +344,7 @@ pub(crate) mod tests {
                 None,
                 None,
                 None,
+                false,
             )
             .expect("reattach");
         assert!(!reattach.is_new);

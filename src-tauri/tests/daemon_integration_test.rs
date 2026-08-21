@@ -64,7 +64,7 @@ fn test_e2e_daemon_spawn_and_data_flow() {
     );
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("create_or_attach failed");
 
     assert!(attach_res.is_new, "expected new session to have is_new = true");
@@ -119,7 +119,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     );
 
     let attach1 = client1
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("client 1 create_or_attach failed");
     assert!(attach1.is_new, "first connection must be a new session");
 
@@ -154,7 +154,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     // 2. Second client connects and reattaches to the existing session
     let client2 = DaemonClient::connect(&socket_path).expect("connect client 2 failed");
     let attach2 = client2
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("client 2 reattach failed");
 
     assert!(
@@ -188,7 +188,7 @@ fn test_e2e_daemon_session_kill_lifecycle() {
     let session_id = "e2e-kill-session";
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
@@ -242,6 +242,7 @@ fn test_e2e_daemon_cwd_env_injection() {
             24,
             Some("test_ws_cwd".into()),
             None,
+            false,
         )
         .expect("create_or_attach with cwd failed");
     assert!(attach_res.is_new);
@@ -299,7 +300,7 @@ fn test_e2e_daemon_high_throughput_zero_drop_stream() {
     );
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
@@ -360,7 +361,7 @@ fn test_e2e_daemon_session_kill_process_tree() {
     let session_id = "e2e-kill-tree-session";
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None)
+        .create_or_attach(session_id, 80, 24, None, None, false)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 

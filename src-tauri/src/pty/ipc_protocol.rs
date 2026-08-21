@@ -1,7 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 1;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 2;
+
+/// How a cold-restored session's foreground work will be brought back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResumeKind {
+    /// Relaunch via the agent's native resume (session id known)
+    AgentResume,
+    /// Re-execute the captured foreground command (known agent, no session id)
+    CommandRelaunch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResumePlan {
+    pub command_line: String,
+    pub kind: ResumeKind,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateOrAttachResult {
@@ -11,6 +27,10 @@ pub struct CreateOrAttachResult {
     pub rows: u16,
     pub cwd: Option<String>,
     pub snapshot: Option<String>,
+    #[serde(default)]
+    pub resume: Option<ResumePlan>,
+    #[serde(default)]
+    pub resume_declined_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +46,8 @@ pub enum DaemonRequest {
         rows: u16,
         cwd: Option<String>,
         shell: Option<String>,
+        #[serde(default)]
+        resume_agents: bool,
     },
     Write {
         session_id: String,
@@ -102,6 +124,7 @@ mod tests {
             rows: 24,
             cwd: Some("C:\\projects".into()),
             shell: None,
+            resume_agents: true,
         };
         let encoded = serde_json::to_string(&req).expect("serialize");
         let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
@@ -121,6 +144,7 @@ mod tests {
                 rows: 30,
                 cwd: None,
                 shell: Some("/bin/bash".into()),
+                resume_agents: false,
             },
             DaemonRequest::Write {
                 session_id: "s1".into(),
@@ -159,6 +183,8 @@ mod tests {
             rows: 24,
             cwd: Some("C:\\projects".into()),
             snapshot: Some("\x1b[32mhello\x1b[0m".into()),
+            resume: None,
+            resume_declined_reason: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -182,6 +208,8 @@ mod tests {
                 rows: 24,
                 cwd: None,
                 snapshot: None,
+                resume: None,
+                resume_declined_reason: None,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -220,6 +248,26 @@ mod tests {
             let decoded: DaemonEvent = serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(event, decoded);
         }
+    }
+
+    #[test]
+    fn test_serialize_resume_plan_roundtrip() {
+        let res = DaemonResponse::SessionAttached(CreateOrAttachResult {
+            is_new: true,
+            pid: 1,
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            snapshot: None,
+            resume: Some(ResumePlan {
+                command_line: "claude --resume abc".into(),
+                kind: ResumeKind::AgentResume,
+            }),
+            resume_declined_reason: None,
+        });
+        let encoded = serde_json::to_string(&res).expect("serialize");
+        let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");
+        assert_eq!(res, decoded);
     }
 
     #[test]

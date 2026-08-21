@@ -27,6 +27,14 @@ pub struct PtyCwdPayload {
     pub cwd: String,
 }
 
+/// Resume plan surfaced to the frontend when a cold-restored session relaunches work.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumePlanPayload {
+    pub command_line: String,
+    pub kind: String,
+}
+
 /// Payload returned when spawning or attaching to a PTY session.
 #[derive(Clone, Serialize)]
 pub struct PtySpawnResultPayload {
@@ -39,6 +47,8 @@ pub struct PtySpawnResultPayload {
     pub cols: u16,
     pub rows: u16,
     pub cwd: Option<String>,
+    pub resume: Option<ResumePlanPayload>,
+    pub resume_declined_reason: Option<String>,
 }
 
 /// Spawn or reattach to a PTY session running in the background daemon.
@@ -54,6 +64,7 @@ pub fn pty_spawn(
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
+    resume_agents: Option<bool>,
 ) -> Result<PtySpawnResultPayload, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -107,6 +118,7 @@ pub fn pty_spawn(
         Some(on_data),
         Some(on_exit),
         Some(on_cwd),
+        resume_agents.unwrap_or(true),
     )?;
 
     let (is_warm, cold_scrollback) = if !attach_res.is_new {
@@ -130,6 +142,14 @@ pub fn pty_spawn(
         cols: attach_res.cols,
         rows: attach_res.rows,
         cwd: attach_res.cwd,
+        resume: attach_res.resume.map(|r| ResumePlanPayload {
+            command_line: r.command_line,
+            kind: match r.kind {
+                crate::pty::ipc_protocol::ResumeKind::AgentResume => "agent-resume".into(),
+                crate::pty::ipc_protocol::ResumeKind::CommandRelaunch => "command-relaunch".into(),
+            },
+        }),
+        resume_declined_reason: attach_res.resume_declined_reason,
     })
 }
 
@@ -282,6 +302,8 @@ mod tests {
             cols: 80,
             rows: 24,
             cwd: Some("/test/cwd".into()),
+            resume: None,
+            resume_declined_reason: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"id\":\"s1\""));

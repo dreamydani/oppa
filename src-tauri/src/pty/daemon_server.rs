@@ -1,6 +1,8 @@
+use crate::pty::agent_resume;
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
-    CreateOrAttachResult, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
+    CreateOrAttachResult, DaemonRequest, DaemonResponse, ResumeKind, ResumePlan,
+    DAEMON_PROTOCOL_VERSION,
 };
 use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
 use parking_lot::Mutex;
@@ -90,6 +92,7 @@ impl DaemonServer {
                 rows,
                 cwd,
                 shell,
+                resume_agents,
             } => {
                 let mut sessions = self.sessions.lock();
                 if let Some(session) = sessions.get(&session_id) {
@@ -104,9 +107,33 @@ impl DaemonServer {
                         rows: session.rows(),
                         cwd: session.cwd(),
                         snapshot: Some(snapshot),
+                        resume: None,
+                        resume_declined_reason: None,
                     })
                 } else {
-                    match DaemonSession::spawn(session_id.clone(), shell, cwd, cols, rows) {
+                    // Cold restore: consult the disk checkpoint for agent resume state
+                    let checkpoint = self.snapshot_dir.as_ref().and_then(|dir| {
+                        SnapshotStorage::new(dir.clone())
+                            .load_snapshot(&session_id)
+                            .ok()
+                            .flatten()
+                    });
+                    let (resume, declined, initial_command) =
+                        if resume_agents { Self::plan_resume_from_checkpoint(&checkpoint) } else { (None, None, None) };
+                    let spawn_cwd = cwd.or_else(|| {
+                        checkpoint
+                            .as_ref()
+                            .map(|s| s.cwd.clone())
+                            .filter(|c| !c.is_empty())
+                    });
+                    match DaemonSession::spawn(
+                        session_id.clone(),
+                        shell,
+                        spawn_cwd,
+                        cols,
+                        rows,
+                        initial_command.as_deref(),
+                    ) {
                         Ok(session) => {
                             let pid = session.pid();
                             let session_cols = session.cols();
@@ -123,6 +150,8 @@ impl DaemonServer {
                                 rows: session_rows,
                                 cwd: session_cwd,
                                 snapshot: None,
+                                resume,
+                                resume_declined_reason: declined,
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),
@@ -211,8 +240,51 @@ impl DaemonServer {
         run_server_listener(server, socket_path, cancel_token).await
     }
 
-    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {
-        SessionSnapshot {
+    // Resume priority: native agent resume by session id, else plain relaunch for
+    // known-agent programs. Unknown programs are never re-executed.
+    fn plan_resume_from_checkpoint(
+        checkpoint: &Option<SessionSnapshot>,
+    ) -> (
+        Option<ResumePlan>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let Some(snap) = checkpoint else {
+            return (None, None, None);
+        };
+        if let Some(agent_ref) = &snap.agent_session {
+            if let Some(cmd) = agent_resume::plan_resume(agent_ref) {
+                return (
+                    Some(ResumePlan {
+                        command_line: cmd.clone(),
+                        kind: ResumeKind::AgentResume,
+                    }),
+                    None,
+                    Some(cmd),
+                );
+            }
+            return (
+                None,
+                Some("no verified resume command for this agent".into()),
+                None,
+            );
+        }
+        if let Some(cmd) = &snap.foreground_command {
+            if agent_resume::is_known_agent_program(cmd) {
+                return (
+                    Some(ResumePlan {
+                        command_line: cmd.clone(),
+                        kind: ResumeKind::CommandRelaunch,
+                    }),
+                    None,
+                    Some(cmd.clone()),
+                );
+            }
+        }
+        (None, None, None)
+    }
+
+    fn build_checkpoint(session: &DaemonSession) -> SessionSnapshot {        SessionSnapshot {
             session_id: session.id.clone(),
             cwd: session.cwd().unwrap_or_default(),
             title: None,
@@ -498,6 +570,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -547,6 +620,7 @@ mod tests {
             rows: 40,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -667,6 +741,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         };
         let mut create_str = serde_json::to_string(&create_req).unwrap();
         create_str.push('\n');
@@ -759,6 +834,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         };
         let mut reattach_str = serde_json::to_string(&reattach_req).unwrap();
         reattach_str.push('\n');
@@ -870,6 +946,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         })
         .unwrap()
             + "\n";
@@ -919,6 +996,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -936,6 +1014,7 @@ mod tests {
             rows: 14,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -949,6 +1028,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cold_restore_returns_resume_plan_and_injects_command() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = SnapshotStorage::new(temp_dir.path().to_path_buf());
+        storage
+            .save_snapshot(&SessionSnapshot {
+                session_id: "resume-test".into(),
+                cwd: String::new(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                persona_id: None,
+                scrollback: "old screen".into(),
+                timestamp: 1,
+                foreground_command: Some("claude --resume abc123".into()),
+                agent_session: None,
+            })
+            .expect("seed checkpoint");
+
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "resume-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: true,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(res.is_new);
+                assert_eq!(
+                    res.resume,
+                    Some(ResumePlan {
+                        command_line: "claude --resume abc123".into(),
+                        kind: ResumeKind::CommandRelaunch,
+                    })
+                );
+                // Empty snapshot cwd must not override the request's (absent) cwd
+                assert!(res.cwd.is_none());
+                assert!(res.resume_declined_reason.is_none());
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        // Marker-triggered injection: feed the ready marker, expect the resumed
+        // command written into the PTY (echoed back in the data stream)
+        let session = server
+            .sessions()
+            .lock()
+            .get("resume-test")
+            .cloned()
+            .expect("session live");
+        let mut rx = session.subscribe();
+        session.write(b"\x1b]633;oppa-ready\x07").expect("marker");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut collected = String::new();
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                    collected.push_str(&data);
+                    if collected.contains("claude") {
+                        break;
+                    }
+                }
+                _ => continue,
+            }
+        }
+        assert!(
+            collected.contains("claude"),
+            "expected injected resume command echoed, got: {collected}"
+        );
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "resume-test".into(),
+        });
+    }
+
+    #[tokio::test]
+    async fn test_cold_restore_without_resume_flag_stays_plain() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let storage = SnapshotStorage::new(temp_dir.path().to_path_buf());
+        storage
+            .save_snapshot(&SessionSnapshot {
+                session_id: "no-resume-test".into(),
+                cwd: String::new(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                persona_id: None,
+                scrollback: "old screen".into(),
+                timestamp: 1,
+                foreground_command: Some("claude --resume abc123".into()),
+                agent_session: None,
+            })
+            .expect("seed checkpoint");
+
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "no-resume-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+        });
+        match resp {
+            DaemonResponse::SessionAttached(res) => {
+                assert!(res.is_new);
+                assert!(res.resume.is_none());
+                assert!(res.resume_declined_reason.is_none());
+            }
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "no-resume-test".into(),
+        });
+    }
+
+    #[tokio::test]
     async fn test_checkpoint_task_writes_snapshot_within_debounce_window() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
@@ -959,6 +1156,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
@@ -991,6 +1189,7 @@ mod tests {
             rows: 24,
             cwd: None,
             shell: None,
+            resume_agents: false,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),

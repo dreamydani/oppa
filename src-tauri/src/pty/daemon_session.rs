@@ -57,6 +57,7 @@ impl DaemonSession {
         cwd: Option<String>,
         cols: u16,
         rows: u16,
+        initial_command: Option<&str>,
     ) -> Result<Arc<Self>, String> {
         let config = resolve_shell_launch_config(shell, cwd);
         Self::spawn_with_args(
@@ -66,7 +67,7 @@ impl DaemonSession {
             config.cwd.as_deref(),
             cols,
             rows,
-            None,
+            initial_command,
         )
     }
 
