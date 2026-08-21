@@ -242,6 +242,9 @@ impl DaemonServer {
 
     // Resume priority: native agent resume by session id, else plain relaunch for
     // known-agent programs. Unknown programs are never re-executed.
+    // Resume priority: native resume by session id, then the agent's
+    // --continue-style fallback, then plain re-execution. Unknown programs
+    // are never re-executed.
     fn plan_resume_from_checkpoint(
         checkpoint: &Option<SessionSnapshot>,
     ) -> (
@@ -263,20 +266,27 @@ impl DaemonServer {
                     Some(cmd),
                 );
             }
-            return (
-                None,
-                Some("no verified resume command for this agent".into()),
-                None,
-            );
         }
         if let Some(cmd) = &snap.foreground_command {
             if agent_resume::is_known_agent_program(cmd) {
+                // Prefer the agent's --continue over blind re-execution when no
+                // session id was captured (e.g. agy, whose store we can't read)
+                if let Some(fallback) = agent_resume::fallback_resume(cmd) {
+                    return (
+                        Some(ResumePlan {
+                            command_line: fallback.clone(),
+                            kind: ResumeKind::AgentResume,
+                        }),
+                        None,
+                        Some(fallback),
+                    );
+                }
                 return (
                     Some(ResumePlan {
                         command_line: cmd.clone(),
                         kind: ResumeKind::CommandRelaunch,
                     }),
-                    None,
+                    Some("no verified resume command for this agent".into()),
                     Some(cmd.clone()),
                 );
             }
@@ -1072,8 +1082,10 @@ mod tests {
                 assert_eq!(
                     res.resume,
                     Some(ResumePlan {
+                        // User-typed resume flags pass through unchanged, but
+                        // classify as AgentResume since they resume by id
                         command_line: "claude --resume abc123".into(),
-                        kind: ResumeKind::CommandRelaunch,
+                        kind: ResumeKind::AgentResume,
                     })
                 );
                 // Empty snapshot cwd must not override the request's (absent) cwd
