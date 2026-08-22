@@ -50,7 +50,10 @@ vi.mock("@xterm/xterm", () => {
     rows = 24;
     unicode = { activeVersion: "6" };
     modes = { mouseTrackingMode: "none", applicationCursorKeysMode: false };
-    buffer = { active: { type: "normal" } };
+    buffer = {
+      active: { type: "normal" },
+      onBufferChange: vi.fn(() => ({ dispose: vi.fn() })),
+    };
     options: Record<string, any> = {};
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));

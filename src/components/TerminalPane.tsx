@@ -21,6 +21,7 @@ import { focus } from "../lib/pane-manager/layout";
 import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
+import { TerminalScrollbar } from "./TerminalScrollbar";
 import "./TerminalPane.css";
 
 // Renders the terminal view for ONE store session with WebGL acceleration,
@@ -34,6 +35,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const isSearchOpenRef = useRef(false);
   isSearchOpenRef.current = isSearchOpen;
+  const [viewportEl, setViewportEl] = useState<HTMLElement | null>(null);
+  const [isAltBuffer, setIsAltBuffer] = useState(false);
 
   const idRef = useRef(id);
   const parsedRef = useRef(0);
@@ -78,6 +81,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     idRef.current = id;
     const currentAppearance = appearanceRef.current;
+    const currentTheme = getTerminalTheme(currentAppearance.themeName);
     const term = new Terminal({
       cursorBlink: currentAppearance.cursorBlink,
       cursorStyle: currentAppearance.cursorStyle,
@@ -87,7 +91,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       scrollback: 10000,
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
-      theme: getTerminalTheme(currentAppearance.themeName),
+      theme: currentTheme,
       allowProposedApi: true,
     });
     termRef.current = term;
@@ -112,6 +116,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     term.open(containerRef.current!);
 
+    setViewportEl(containerRef.current!.querySelector<HTMLElement>(".xterm-viewport"));
+    setIsAltBuffer(term.buffer.active.type === "alternate");
+    const bufferSub = term.buffer.onBufferChange((buf) => {
+      setIsAltBuffer(buf.type === "alternate");
+    });
+    const disposeBufferSub = () => {
+      bufferSub.dispose();
+      setViewportEl(null);
+    };
+
     // Fit before anything renders so cell metrics settle at the real
     // container size; attaching the GPU renderer before replay avoids the
     // canvas-fallback glyph mismatch seen on cold-restored panes.
@@ -122,6 +136,13 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     const state = useTerminalStore.getState();
     const restoredScrollback = state.restoredScrollbacks[id];
     const cachedScrollback = state.cachedScrollbacks[id];
+
+    // Pane surface adopts the active terminal theme's background so the
+    // fit-rounding leftover below the last row is seamless (no two-tone gap).
+    containerRef.current?.style.setProperty(
+      "--session-term-bg",
+      typeof currentTheme.background === "string" ? currentTheme.background : "",
+    );
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -158,6 +179,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     const unsubs: (() => void)[] = [];
     let disposed = false;
+    unsubs.push(disposeBufferSub);
 
     // Font-metrics race fix: panes mounting during startup measure their cell
     // grid before the custom mono font has loaded, so glyphs render slightly
@@ -347,6 +369,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     term.options.lineHeight = appearance.lineHeight;
     term.options.cursorStyle = appearance.cursorStyle;
     term.options.cursorBlink = appearance.cursorBlink;
+    containerRef.current?.style.setProperty(
+      "--session-term-bg",
+      typeof theme.background === "string" ? theme.background : "",
+    );
     fitAddonRef.current?.fit();
   }, [appearance]);
 
@@ -407,6 +433,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         ref={containerRef}
         className={`terminal-pane${appearance.dimInactivePanes && !isFocused ? " dimmed" : ""}`}
       />
+      {viewportEl && (
+        <TerminalScrollbar viewport={viewportEl} forceHidden={isAltBuffer} />
+      )}
     </div>
   );
 }
