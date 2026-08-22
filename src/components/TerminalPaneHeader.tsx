@@ -14,67 +14,69 @@ export interface TerminalPaneHeaderProps {
   onClear?: () => void;
 }
 
-/* Bespoke Vector Icons (16x16) */
+/* Bespoke Solid Vector Icons (16x16) */
 function IconMore() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <circle cx="3" cy="8" r="1.4" />
-      <circle cx="8" cy="8" r="1.4" />
-      <circle cx="13" cy="8" r="1.4" />
+      <circle cx="3.5" cy="8" r="1.5" />
+      <circle cx="8" cy="8" r="1.5" />
+      <circle cx="12.5" cy="8" r="1.5" />
     </svg>
   );
 }
 
 function IconGlobe() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6.2" />
-      <line x1="1.8" y1="8" x2="14.2" y2="8" />
-      <path d="M8 1.8a9.2 9.2 0 0 0 0 12.4 9.2 9.2 0 0 0 0-12.4z" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6" />
+      <line x1="2" y1="8" x2="14" y2="8" />
+      <path d="M8 2a9.4 9.4 0 0 0 0 12 9.4 9.4 0 0 0 0-12z" />
     </svg>
   );
 }
 
 function IconMaximize() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <rect x="3" y="3" width="10" height="10" rx="2" />
     </svg>
   );
 }
 
+/* Restore glyph: back frame + front panel masked by header color so it
+   reads correctly in both system themes. */
 function IconMinimize() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="5" width="9" height="9" rx="1.5" />
-      <path d="M5 2h7a2 2 0 0 1 2 2v7" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M5.5 2.5h6a2 2 0 0 1 2 2v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="2.5" y="5.5" width="8" height="8" rx="1.8" fill="var(--bg-terminal)" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
 
 function IconSplitRight() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="12" height="12" rx="2" />
-      <line x1="8" y1="2" x2="8" y2="14" strokeWidth="1.25" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+      <rect x="2" y="2.75" width="12" height="10.5" rx="2" strokeWidth="1.5" />
+      <rect x="8.5" y="4.25" width="4" height="7.5" rx="1" fill="currentColor" stroke="none" />
     </svg>
   );
 }
 
 function IconSplitDown() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="12" height="12" rx="2" />
-      <line x1="2" y1="8" x2="14" y2="8" strokeWidth="1.25" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+      <rect x="2" y="2.75" width="12" height="10.5" rx="2" strokeWidth="1.5" />
+      <rect x="4.25" y="8.5" width="7.5" height="4" rx="1" fill="currentColor" stroke="none" />
     </svg>
   );
 }
 
 function IconClose() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round">
-      <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
-      <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+      <line x1="4" y1="4" x2="12" y2="12" />
+      <line x1="12" y1="4" x2="4" y2="12" />
     </svg>
   );
 }
@@ -395,12 +397,12 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
 
         <button
           className="terminal-pane-header-btn"
-          title={isMaximized ? "Restore Pane" : "Maximize Pane"}
-          aria-label={isMaximized ? "Restore Pane" : "Maximize Pane"}
-          onClick={() => toggleMaximizePane(id)}
+          title="Split Down"
+          aria-label="Split Down"
+          onClick={() => void splitPane("v", path)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {isMaximized ? <IconMinimize /> : <IconMaximize />}
+          <IconSplitDown />
         </button>
 
         <button
@@ -415,12 +417,12 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
 
         <button
           className="terminal-pane-header-btn"
-          title="Split Down"
-          aria-label="Split Down"
-          onClick={() => void splitPane("v", path)}
+          title={isMaximized ? "Restore Pane" : "Maximize Pane"}
+          aria-label={isMaximized ? "Restore Pane" : "Maximize Pane"}
+          onClick={() => toggleMaximizePane(id)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <IconSplitDown />
+          {isMaximized ? <IconMinimize /> : <IconMaximize />}
         </button>
 
         <button

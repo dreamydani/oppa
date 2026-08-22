@@ -1,12 +1,13 @@
-/* Terminal Pane Header - 80% Minimalist + 20% Clay Fusion */
+/* Terminal Pane Header — colors follow the system theme tokens (never the
+   independent xterm terminal themes). */
 
 .terminal-pane-header {
   height: 34px;
   min-height: 34px;
   max-height: 34px;
-  background-color: #111115;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background-color: var(--bg-terminal);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--tint-hover);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -23,7 +24,7 @@
 }
 
 .pane-leaf.focused .terminal-pane-header {
-  border-bottom-color: rgba(255, 255, 255, 0.12);
+  border-bottom-color: var(--border-strong);
 }
 
 .terminal-pane-header-left {
@@ -38,7 +39,7 @@
 
 .terminal-pane-header-title,
 .terminal-pane-title {
-  color: #a1a1aa;
+  color: var(--text-muted);
   font-weight: 500;
   font-size: 12px;
   letter-spacing: -0.01em;
@@ -55,13 +56,13 @@
 
 .pane-leaf.focused .terminal-pane-title,
 .pane-leaf.focused .terminal-pane-header-title {
-  color: #fafafa;
+  color: var(--text-primary);
 }
 
 .terminal-pane-header-title:hover,
 .terminal-pane-title:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: #fafafa;
+  background-color: var(--tint-hover);
+  color: var(--text-primary);
 }
 
 .pane-header-drag-zone {
@@ -77,10 +78,10 @@
 }
 
 .terminal-pane-header-rename-input {
-  background-color: #0e0e12;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: var(--bg-overlay-input);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
-  color: #fafafa;
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 11.5px;
   font-weight: 500;
@@ -89,12 +90,12 @@
   width: 130px;
   height: 24px;
   box-sizing: border-box;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
   transition: border-color 0.12s ease;
 }
 
 .terminal-pane-header-rename-input:focus {
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: var(--accent-blue);
 }
 
 .terminal-pane-header-right {
@@ -108,7 +109,7 @@
 .terminal-pane-header-btn {
   background: transparent;
   border: 1px solid transparent;
-  color: #71717a;
+  color: var(--text-muted);
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -121,27 +122,24 @@
 }
 
 .terminal-pane-header-btn:hover {
-  background-color: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #fafafa;
-  transform: translateY(-0.5px);
+  background-color: var(--tint-hover);
+  color: var(--text-primary);
 }
 
 .terminal-pane-header-btn:active {
-  transform: scale(0.95);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  transform: scale(0.94);
+  background-color: var(--tint-active);
 }
 
 .terminal-pane-header-btn.active {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #fafafa;
+  background-color: var(--tint-active);
+  color: var(--text-primary);
 }
 
 .terminal-pane-header-btn.close-btn:hover {
-  background-color: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background-color: rgba(224, 82, 82, 0.15);
+  background-color: color-mix(in srgb, var(--destructive) 16%, transparent);
+  color: var(--destructive);
 }
 
 .terminal-pane-header-menu {
@@ -149,10 +147,10 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
-  background-color: #18181f;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background-color: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.45);
   min-width: 145px;
   padding: 4px;
   z-index: 50;
@@ -164,7 +162,7 @@
   width: 100%;
   padding: 6px 10px;
   font-size: 11px;
-  color: #ededec;
+  color: var(--text-primary);
   background: transparent;
   border: none;
   border-radius: 4px;
@@ -174,8 +172,7 @@
 }
 
 .terminal-pane-header-menu-item:hover {
-  background-color: rgba(255, 255, 255, 0.06);
-  color: #f4f4f5;
+  background-color: var(--tint-active);
 }
 
 /* Restored Session Badge */
@@ -183,13 +180,13 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background-color: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--tint-hover);
+  border: 1px solid var(--border);
   border-radius: 9999px;
   padding: 1px 7px;
   font-size: 11px;
   font-weight: 500;
-  color: #a1a1aa;
+  color: var(--text-muted);
   cursor: pointer;
   user-select: none;
   animation: restoredBadgeFadeIn 0.2s ease-out;
@@ -198,35 +195,40 @@
 }
 
 .terminal-restored-badge:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #fafafa;
+  background-color: var(--tint-active);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 
-/* Native agent resume succeeded — green to signal live continuity */
+/* Agent resume succeeded — green to signal live continuity */
 .terminal-restored-badge--resumed {
-  background-color: rgba(52, 211, 153, 0.1);
-  border-color: rgba(52, 211, 153, 0.25);
-  color: #34d399;
+  background-color: rgba(34, 197, 94, 0.1);
+  background-color: color-mix(in srgb, var(--status-running) 12%, transparent);
+  border-color: rgba(34, 197, 94, 0.3);
+  border-color: color-mix(in srgb, var(--status-running) 30%, transparent);
+  color: var(--status-running);
 }
 
 .terminal-restored-badge--resumed .restored-dot {
-  background-color: #34d399;
-  box-shadow: 0 0 4px rgba(52, 211, 153, 0.4);
+  background-color: var(--status-running);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--status-running) 45%, transparent);
 }
 
 .terminal-restored-badge--resumed:hover {
-  background-color: rgba(52, 211, 153, 0.16);
-  border-color: rgba(52, 211, 153, 0.35);
-  color: #6ee7b7;
+  background-color: rgba(34, 197, 94, 0.18);
+  background-color: color-mix(in srgb, var(--status-running) 20%, transparent);
+  border-color: rgba(34, 197, 94, 0.4);
+  border-color: color-mix(in srgb, var(--status-running) 42%, transparent);
+  color: #86efac;
+  color: color-mix(in srgb, var(--status-running) 62%, white);
 }
 
 .restored-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background-color: #a1a1aa;
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
+  background-color: var(--text-muted);
+  box-shadow: 0 0 4px var(--tint-active);
   flex-shrink: 0;
 }
 
@@ -242,15 +244,15 @@
   border: none;
   padding: 1px;
   margin-left: 2px;
-  color: #71717a;
+  color: var(--text-muted);
   cursor: pointer;
   border-radius: 3px;
   transition: color 0.1s ease, background-color 0.1s ease;
 }
 
 .restored-dismiss-btn:hover {
-  color: #fafafa;
-  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  background-color: var(--tint-active);
 }
 
 @keyframes restoredBadgeFadeIn {
