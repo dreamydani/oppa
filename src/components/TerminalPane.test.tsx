@@ -302,10 +302,17 @@ describe("TerminalPane", () => {
     expect(xtermState.instances.length).toBe(1);
 
     fireResize();
+    // Unchanged grid: duplicate suppression skips the redundant notify.
+    expect(ptyResizeMock).not.toHaveBeenCalled();
+
+    term().cols = 120;
+    term().rows = 40;
     fireResize();
-    // Debounce collapses the two rapid resizes into one PTY resize call
-    vi.advanceTimersByTime(100);
+    fireResize();
+    // Coalescing collapses the rapid resizes into one PTY resize call
+    vi.advanceTimersByTime(1000);
     expect(ptyResizeMock).toHaveBeenCalledTimes(1);
+    expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
     expect(xtermState.instances.length).toBe(1);
     expect(xtermState.instances[0]!.dispose).not.toHaveBeenCalled();
   });
@@ -950,5 +957,63 @@ describe("TerminalPane", () => {
     });
     rerender(<TerminalPane id="abc" path={[0]} />);
     expect(pane?.classList.contains("dimmed")).toBe(false);
+  });
+
+  it("applies the full-bleed stretch and resizes the pty when the container resizes", async () => {
+    vi.useFakeTimers();
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    // 813x600 CSS px pane minus the 7px ruler band = the planner budget;
+    // with an 8x16 device cell the plan lands on spacing -1 / pitch 20.5/16.
+    const paneEl = container.querySelector(".terminal-pane")!;
+    Object.defineProperty(paneEl, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ width: 813, height: 600, top: 0, left: 0, right: 813, bottom: 600, x: 0, y: 0 }),
+    });
+    const t = term() as any;
+    // A real element pair so readFitBudget's getComputedStyle calls work.
+    const xtermEl = document.createElement("div");
+    paneEl.appendChild(xtermEl);
+    t.element = xtermEl;
+    t._core = {
+      _renderService: {
+        dimensions: {
+          css: { char: { width: 8, height: 16 }, cell: { width: 8, height: 19 } },
+        },
+      },
+    };
+    vi.stubGlobal("devicePixelRatio", 1);
+
+    // Grid counts as they would land after fitting with stretched metrics.
+    t.cols = 115;
+    t.rows = 30;
+
+    fireResize();
+    expect(t.options.letterSpacing).toBe(-1);
+    expect(t.options.lineHeight).toBeCloseTo(20.5 / 16, 10);
+    // Well past the debounce AND the mount settle timer so fake-clock skew
+    // from vi.waitFor polling cannot strand the pending resize.
+    vi.advanceTimersByTime(1000);
+    expect(ptyResizeMock).toHaveBeenCalledWith("abc", 115, 30);
+  });
+
+  it("routes appearance-driven refits through the same pty-resize pipeline", async () => {
+    vi.useFakeTimers();
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    act(() => {
+      useTerminalStore.getState().updateAppearanceSettings({ fontSize: 18 });
+      // Simulate the grid the refit produces with the larger font.
+      term().cols = 90;
+      term().rows = 30;
+    });
+
+    // The old behavior refit without notifying the daemon; now every fit path
+    // must reach resizeSession (after the shared 100ms debounce).
+    vi.advanceTimersByTime(1000);
+    expect(ptyResizeMock).toHaveBeenCalledTimes(1);
+    expect(ptyResizeMock).toHaveBeenCalledWith("abc", 90, 30);
   });
 });

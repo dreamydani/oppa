@@ -24,8 +24,13 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
     if (nodeRef.current?.isConnected) {
       const rect = nodeRef.current.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        const cols = Math.max(10, Math.floor(rect.width / 9));
-        const rows = Math.max(4, Math.floor(rect.height / 18));
+        // Estimate from the configured font so the daemon's first prompt lays
+        // out near the real grid; TerminalPane's fit+resize corrects exactly.
+        const { fontSize, lineHeight } = useTerminalStore.getState().settings.appearance;
+        const cellWidth = Math.max(4, Math.round(fontSize * 0.6));
+        const cellHeight = Math.max(8, Math.round(fontSize * lineHeight));
+        const cols = Math.max(10, Math.floor(rect.width / cellWidth));
+        const rows = Math.max(4, Math.floor(rect.height / cellHeight));
         geometry = { cols, rows };
       }
     }

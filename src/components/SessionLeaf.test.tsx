@@ -96,11 +96,12 @@ describe("SessionLeaf", () => {
       render(<LeafHarness />);
 
       await waitFor(() => expect(ptySpawnMock).toHaveBeenCalledTimes(1));
-      // 900 / 9 = 100 cols, 720 / 18 = 40 rows
+      // Default appearance (fontSize 14, lineHeight 1.2) estimates an
+      // 8x17 cell: 900/8 = 112 cols, 720/17 = 42 rows.
       expect(ptySpawnMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          cols: 100,
-          rows: 40,
+          cols: 112,
+          rows: 42,
         }),
       );
     } finally {
