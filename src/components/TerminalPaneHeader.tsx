@@ -49,7 +49,7 @@ function IconMinimize() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
       <path d="M5.5 2.5h6a2 2 0 0 1 2 2v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="2.5" y="5.5" width="8" height="8" rx="1.8" fill="var(--bg-terminal)" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <rect x="2.5" y="5.5" width="8" height="8" rx="1.8" className="icon-minimize-mask" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }

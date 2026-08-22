@@ -27,6 +27,21 @@
   border-bottom-color: var(--border-strong);
 }
 
+/* Light system theme: header chrome goes light even though terminal content
+   keeps its own independent dark xterm themes. */
+[data-theme="light"] .terminal-pane-header {
+  background-color: var(--bg-sidebar);
+}
+
+/* Restore-glyph mask must always match the header surface above */
+.icon-minimize-mask {
+  fill: var(--bg-terminal);
+}
+
+[data-theme="light"] .icon-minimize-mask {
+  fill: var(--bg-sidebar);
+}
+
 .terminal-pane-header-left {
   display: flex;
   align-items: center;
