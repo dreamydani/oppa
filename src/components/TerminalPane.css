@@ -96,64 +96,43 @@
 }
 
 /* ==========================================================================
-   Terminal xterm Scrollbar — native bar hidden (frees the reserved column so
-   text reaches the true right edge); replaced by a floating overlay thumb.
+   Terminal xterm Custom Scrollbar
    ========================================================================== */
-.terminal-pane .xterm-viewport::-webkit-scrollbar,
-.terminal-pane .xterm-viewport::-webkit-scrollbar-corner {
-  width: 0;
-  height: 0;
-  display: none;
+.xterm .xterm-viewport::-webkit-scrollbar,
+.xterm-viewport::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.terminal-scrollbar {
-  position: absolute;
-  top: 34px; /* below pane header */
-  right: 2px;
-  bottom: 0;
-  width: 8px;
-  z-index: 12;
+.xterm .xterm-viewport::-webkit-scrollbar-track,
+.xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb,
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 9999px;
-  opacity: 0;
-  transition: opacity 0.18s ease, background-color 0.15s ease, width 0.12s ease;
-  cursor: default;
-}
-
-[data-theme="light"] .terminal-scrollbar {
-  top: 34px;
-}
-
-.terminal-scrollbar.shown {
-  opacity: 1;
-}
-
-.terminal-scrollbar:hover {
-  width: 10px;
-  background-color: rgba(128, 128, 128, 0.14);
-}
-
-.terminal-scrollbar-thumb {
-  position: absolute;
-  left: 1px;
-  right: 1px;
-  min-height: 24px;
-  border-radius: 9999px;
-  background: var(--border-strong);
   transition: background 0.15s ease;
 }
 
-[data-theme="light"] .terminal-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover,
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
-.terminal-scrollbar:hover .terminal-scrollbar-thumb,
-.terminal-scrollbar.shown:active .terminal-scrollbar-thumb {
-  background: var(--text-faint);
+.xterm .xterm-viewport::-webkit-scrollbar-corner,
+.xterm-viewport::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-[data-theme="light"] .terminal-scrollbar:hover .terminal-scrollbar-thumb,
-[data-theme="light"] .terminal-scrollbar.shown:active .terminal-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.32);
+[data-theme="light"] .xterm .xterm-viewport::-webkit-scrollbar-thumb,
+[data-theme="light"] .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
 }
 
+[data-theme="light"] .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
 
