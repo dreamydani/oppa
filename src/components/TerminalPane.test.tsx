@@ -87,6 +87,7 @@ vi.mock("@xterm/xterm", () => {
 vi.mock("@xterm/addon-fit", () => {
   class MockFitAddon {
     fit = vi.fn();
+    proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
     constructor() {
       addonState.fitInstances.push(this);
     }

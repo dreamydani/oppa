@@ -318,19 +318,59 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       ptyWrite(idRef.current, data);
     });
 
-    // Debounce PTY resize to avoid ConPTY prompt-redraw storms during drag
+    // Debounce PTY resize to avoid ConPTY prompt-redraw storms during drag.
+    // Stable-fit guard (Orca pattern): Windows can report a one-column gutter
+    // wobble between frames, so commit a fit only after the proposed grid
+    // repeats on consecutive frames (or hits the frame cap) — otherwise
+    // split views vibrate with rapid SIGWINCH loops.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const ro = new ResizeObserver(() => {
-      fit.fit();
+    let stableRaf = 0;
+    const proposeGrid = (): { cols: number; rows: number } | null => {
+      try {
+        return fit.proposeDimensions() ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const schedulePtyResize = () => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         const { cols, rows } = term;
         resizeSession(idRef.current, cols, rows);
       }, 100);
-    });
+    };
+    const runStableFit = () => {
+      cancelAnimationFrame(stableRaf);
+      let previous = proposeGrid();
+      let frame = 0;
+      const step = () => {
+        if (disposed) return;
+        const next = proposeGrid();
+        if (!next) {
+          fit.fit();
+          schedulePtyResize();
+          return;
+        }
+        const matchesTerminal = term.cols === next.cols && term.rows === next.rows;
+        const stable =
+          matchesTerminal ||
+          ++frame >= 8 ||
+          (!!previous && next.cols === previous.cols && next.rows === previous.rows);
+        if (!stable) {
+          previous = next;
+          stableRaf = requestAnimationFrame(step);
+          return;
+        }
+        if (!matchesTerminal) fit.fit();
+        schedulePtyResize();
+      };
+      step();
+    };
+    const ro = new ResizeObserver(runStableFit);
     ro.observe(containerRef.current!);
 
     return () => {
+      cancelAnimationFrame(stableRaf);
       if (resizeTimer) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
