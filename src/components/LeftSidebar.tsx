@@ -200,7 +200,7 @@ export function LeftSidebar(): React.ReactElement | null {
                 {/* Workspace avatar badge */}
                 <div className="tab-card-avatar">
                   {tab.isWizard ? (
-                    <Sparkles size={14} className="text-amber-400" />
+                    <Sparkles size={14} />
                   ) : (
                     <TerminalIcon size={14} />
                   )}

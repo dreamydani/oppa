@@ -141,7 +141,7 @@ export function WizardStepLayout({
         </label>
         <div className="wizard-folder-input-row">
           <div className="wizard-input-wrapper with-icon">
-            <Folder size={16} className="wizard-input-icon text-muted-foreground" />
+            <Folder size={16} className="wizard-input-icon" />
             <input
               id="wizard-folder-input"
               type="text"
@@ -233,7 +233,7 @@ export function WizardStepLayout({
                 onClick={() => onSelectRecent(recent)}
               >
                 <div className="recent-card-icon-col">
-                  <Folder size={18} className="text-muted-foreground" />
+                  <Folder size={18} />
                 </div>
                 <div className="recent-card-info">
                   <div className="recent-card-name">{recent.name}</div>

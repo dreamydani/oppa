@@ -728,17 +728,6 @@ body,
   min-width: 0;
 }
 
-.tab-card-app-icon {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--accent-blue);
-}
-
-.tab-card.active .tab-card-app-icon {
-  color: var(--accent-blue);
-}
-
 .tab-card-title {
   font-size: 13px;
   font-weight: 500;
@@ -850,51 +839,6 @@ body,
   background-color: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.right-sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  border-bottom: none;
-  background-color: var(--topbar-bg, #000000);
-  height: 38px;
-  box-sizing: border-box;
-}
-
-.right-sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
-.right-sidebar-header-icon {
-  color: var(--text-muted);
-}
-
-.right-sidebar-icon-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.right-sidebar-icon-btn:hover {
-  background-color: var(--bg-card-hover);
-  color: var(--text-primary);
 }
 
 .right-sidebar-content {

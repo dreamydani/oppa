@@ -47,18 +47,18 @@ export const PERSONA_OPTIONS: PersonaOption[] = [
 function getPersonaIcon(id: string): React.ReactElement {
   switch (id) {
     case "copilot":
-      return <Sparkles size={16} className="text-secondary" />;
+      return <Sparkles size={16} />;
     case "code-assistant":
-      return <Code2 size={16} className="text-secondary" />;
+      return <Code2 size={16} />;
     case "reviewer":
-      return <CheckCircle2 size={16} className="text-secondary" />;
+      return <CheckCircle2 size={16} />;
     case "grok":
-      return <Zap size={16} className="text-secondary" />;
+      return <Zap size={16} />;
     case "gpt-5":
-      return <Bot size={16} className="text-secondary" />;
+      return <Bot size={16} />;
     case "none":
     default:
-      return <Terminal size={16} className="text-muted-foreground" />;
+      return <Terminal size={16} />;
   }
 }
 

@@ -307,7 +307,7 @@ export function WorkspaceSetupWizard({
                 onClick={handleLaunch}
                 aria-label="Launch Workspace"
               >
-                <Play size={15} className="fill-current" />
+                <Play size={15} />
                 <span>Launch Workspace</span>
               </button>
             )}
