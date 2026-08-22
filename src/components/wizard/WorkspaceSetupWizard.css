@@ -4,9 +4,9 @@
 
 :root,
 .wizard-workbench-page {
-  --wizard-bg-canvas: var(--bg-terminal, #000000);
-  --wizard-bg-surface: var(--bg-sidebar, #121214);
-  --wizard-bg-surface-elevated: var(--bg-card, #18181b);
+  --wizard-bg-canvas: var(--bg-terminal, #171717);
+  --wizard-bg-surface: var(--bg-sidebar, #242424);
+  --wizard-bg-surface-elevated: var(--card, #2c2c2c);
   --wizard-bg-surface-hover: rgba(255, 255, 255, 0.06);
   --wizard-bg-sunken: rgba(255, 255, 255, 0.025);
 
@@ -18,9 +18,9 @@
   --wizard-accent-surface: rgba(255, 255, 255, 0.08);
   --wizard-accent-border: rgba(255, 255, 255, 0.25);
 
-  --wizard-text-primary: var(--text-primary, #ededec);
-  --wizard-text-secondary: var(--text-secondary, #a1a1aa);
-  --wizard-text-muted: var(--text-muted, #71717a);
+  --wizard-text-primary: var(--text-primary, #cccccc);
+  --wizard-text-secondary: var(--text-muted, #999999);
+  --wizard-text-muted: var(--text-faint, #707070);
 
   --wizard-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.25);
   --wizard-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);

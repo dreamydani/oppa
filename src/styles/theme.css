@@ -16,37 +16,37 @@
   --radius-lg: 8px;
   --soft-edge-radius: 12px;
 
-  /* Core Canvas & Surfaces */
-  --topbar-bg: #000000;
-  --workspace-bg: #000000;
-  --background: #18181b;
-  --foreground: #ededec;
-  --card: #222225;
-  --card-foreground: #ededec;
-  --sidebar: #141416;
-  --sidebar-foreground: #ededec;
+  /* Core Canvas & Surfaces — neutral graphite ramp (flat #171717 field) */
+  --topbar-bg: #171717;
+  --workspace-bg: #171717;
+  --background: #171717;
+  --foreground: #cccccc;
+  --card: #2c2c2c;
+  --card-foreground: #cccccc;
+  --sidebar: #242424;
+  --sidebar-foreground: #cccccc;
   --sidebar-border: rgba(255, 255, 255, 0.07);
   --border: rgba(255, 255, 255, 0.07);
-  --muted: #27272a;
-  --muted-foreground: #9e9e9a;
-  --text-faint: #71717a;
-  --accent: #27272a;
-  --accent-foreground: #ffffff;
-  --primary: #ededec;
-  --primary-foreground: #141414;
+  --muted: #292929;
+  --muted-foreground: #999999;
+  --text-faint: #707070;
+  --accent: #333333;
+  --accent-foreground: #cccccc;
+  --primary: #cccccc;
+  --primary-foreground: #171717;
   --destructive: #e05252;
   --ring: rgba(255, 255, 255, 0.20);
 
   /* Semantic aliases (component-facing names) */
-  --bg-window: var(--background, #141414);
-  --bg-sidebar: var(--sidebar, #212120);
-  --bg-terminal: #141414;
-  --bg-card-active: var(--card, #282827);
-  --bg-card-hover: var(--muted, #2e2e2d);
+  --bg-window: var(--background, #171717);
+  --bg-sidebar: var(--sidebar, #242424);
+  --bg-terminal: #171717;
+  --bg-card-active: var(--card, #2c2c2c);
+  --bg-card-hover: var(--muted, #292929);
   --border-divider: var(--border, rgba(255, 255, 255, 0.07));
   --border-active: var(--ring, rgba(255, 255, 255, 0.20));
-  --text-primary: var(--foreground, #ededec);
-  --text-muted: var(--muted-foreground, #9e9e9a);
+  --text-primary: var(--foreground, #cccccc);
+  --text-muted: var(--muted-foreground, #999999);
 
   /* Functional Tokens */
   --accent-blue: #58a6ff;
@@ -57,8 +57,8 @@
   --status-warning: #eab308;
 
   /* Overlay Surfaces (floating bars/modals over terminal content) */
-  --bg-overlay: #161922;
-  --bg-overlay-input: #0c0d12;
+  --bg-overlay: #2c2c2c;
+  --bg-overlay-input: #171717;
   --bg-terminal-deep: #0c0c0e;
 
   /* Interaction Tints */

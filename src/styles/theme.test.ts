@@ -7,13 +7,13 @@ describe("Theme tokens", () => {
     const cssPath = path.resolve(__dirname, "theme.css");
     const content = fs.readFileSync(cssPath, "utf-8");
 
-    expect(content).toContain("--topbar-bg: #000000;");
-    expect(content).toContain("--workspace-bg: #000000;");
+    expect(content).toContain("--topbar-bg: #171717;");
+    expect(content).toContain("--workspace-bg: #171717;");
     expect(content).toContain("--soft-edge-radius: 12px;");
-    expect(content).toContain("--background: #18181b;");
-    expect(content).toContain("--sidebar: #141416;");
-    expect(content).toContain("--card: #222225;");
-    expect(content).toContain("--foreground: #ededec;");
-    expect(content).toContain("--muted-foreground: #9e9e9a;");
+    expect(content).toContain("--background: #171717;");
+    expect(content).toContain("--sidebar: #242424;");
+    expect(content).toContain("--card: #2c2c2c;");
+    expect(content).toContain("--foreground: #cccccc;");
+    expect(content).toContain("--muted-foreground: #999999;");
   });
 });

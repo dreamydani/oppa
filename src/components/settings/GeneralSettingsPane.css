@@ -156,7 +156,7 @@
   border-radius: 5px;
   border: none;
   background: transparent;
-  color: #8e8e93;
+  color: #808080;
   font-size: 12px;
   font-weight: 500;
   font-family: var(--font-sans);
@@ -212,7 +212,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #8e8e93;
+  background: #808080;
   position: absolute;
   top: 2px;
   left: 2px;
