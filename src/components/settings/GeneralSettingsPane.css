@@ -33,7 +33,7 @@
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.03em;
-  color: #fafafa;
+  color: var(--text-primary);
   line-height: 1.2;
 }
 
@@ -70,7 +70,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #71717a;
+  color: var(--text-faint);
   background: rgba(255, 255, 255, 0.015);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -111,7 +111,7 @@
 
 .settings-row-desc {
   font-size: 12px;
-  color: #71717a;
+  color: var(--text-faint);
   line-height: 1.45;
 }
 
@@ -130,7 +130,7 @@
   padding: 8px 12px;
   background: rgba(0, 0, 0, 0.35);
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tint-hover);
 }
 
 .settings-sub-label {
@@ -168,15 +168,15 @@
 }
 
 .settings-segmented-btn:hover:not(.active) {
-  color: #ededec;
+  color: var(--foreground);
   background: rgba(255, 255, 255, 0.04);
 }
 
 .settings-segmented-btn.active {
-  background: #27272a;
+  background: var(--muted);
   color: #ffffff;
   font-weight: 600;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
@@ -185,8 +185,8 @@
   width: 36px;
   height: 20px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--border);
+  border: 1px solid var(--border);
   cursor: pointer;
   position: relative;
   padding: 0;
@@ -196,7 +196,7 @@
 }
 
 .settings-switch:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-strong);
 }
 
 .settings-switch:focus-visible {
@@ -232,9 +232,9 @@
   height: 32px;
   padding: 0 10px;
   background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #ededec;
+  color: var(--foreground);
   font-size: 12.5px;
   font-family: var(--font-sans);
   letter-spacing: -0.01em;
@@ -264,6 +264,6 @@
 }
 
 .settings-select option {
-  background: #18181b;
-  color: #ededec;
+  background: var(--background);
+  color: var(--foreground);
 }

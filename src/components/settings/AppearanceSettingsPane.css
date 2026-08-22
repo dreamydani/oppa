@@ -36,7 +36,7 @@
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.02em;
-  color: #fafafa;
+  color: var(--text-primary);
   line-height: 1.25;
 }
 
@@ -135,14 +135,14 @@
 }
 
 .badge-dark {
-  background: rgba(255, 255, 255, 0.08);
-  color: #a1a1aa;
+  background: var(--border);
+  color: var(--muted-foreground);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .badge-light {
   background: rgba(255, 255, 255, 0.2);
-  color: #fafafa;
+  color: var(--text-primary);
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
@@ -168,7 +168,7 @@
   flex: 1;
   height: 100%;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--tint-active);
 }
 
 /* Slider & Stepper Controls */
@@ -185,9 +185,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #ededec;
+  background: var(--tint-hover);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -197,7 +197,7 @@
 }
 
 .settings-stepper-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-strong);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
@@ -252,7 +252,7 @@
 .settings-value-badge {
   font-family: var(--font-mono, monospace);
   font-size: 11.5px;
-  color: #a1a1aa;
+  color: var(--muted-foreground);
   min-width: 42px;
   text-align: right;
   font-variant-numeric: tabular-nums;

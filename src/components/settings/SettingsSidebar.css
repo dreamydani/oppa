@@ -27,7 +27,7 @@
   height: 34px;
   padding: 0 10px;
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tint-hover);
   border-radius: 6px;
   color: var(--text-primary, #ededec);
   font-size: 12.5px;
@@ -39,8 +39,8 @@
 }
 
 .settings-back-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--tint-hover);
+  border-color: var(--tint-active);
   color: #ffffff;
   transform: translateY(-0.5px);
 }
@@ -63,7 +63,7 @@
   font-size: 10px;
   font-family: var(--font-mono);
   background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 5px;
   color: var(--muted-foreground, #71717a);
@@ -105,9 +105,9 @@
 }
 
 .settings-nav-item.active {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--tint-hover);
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--border);
   font-weight: 600;
 }
 
@@ -140,6 +140,6 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted-foreground, #71717a);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tint-hover);
   white-space: nowrap;
 }

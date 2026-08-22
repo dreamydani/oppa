@@ -33,7 +33,7 @@
   height: 38px;
   padding: 0 36px 0 38px;
   background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--foreground, #ededec);
   font-size: 13px;
@@ -45,7 +45,7 @@
 
 .shortcuts-search-input:focus {
   border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 2px var(--tint-hover);
 }
 
 .shortcuts-search-input::placeholder {
@@ -71,7 +71,7 @@
 
 .shortcuts-search-clear:hover {
   color: var(--foreground, #ededec);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border);
 }
 
 /* Category Card */
@@ -162,7 +162,7 @@
   font-size: 11px;
   font-weight: 500;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--tint-active);
   border-bottom: 2px solid rgba(255, 255, 255, 0.16);
   border-radius: 5px;
   color: var(--foreground, #ededec);
@@ -180,7 +180,7 @@
   padding: 48px 24px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.015);
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border);
   text-align: center;
 }
 

@@ -31,7 +31,7 @@
 }
 
 .settings-content-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border);
   border-radius: 9999px;
 }
 
@@ -51,7 +51,7 @@
   justify-content: center;
   min-height: 240px;
   background: rgba(255, 255, 255, 0.015);
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border);
   border-radius: 10px;
   color: var(--muted-foreground, #71717a);
   font-size: 13.5px;
