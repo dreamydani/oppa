@@ -608,7 +608,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  background-color: #161922;
+  background-color: var(--bg-overlay);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   padding: 4px 6px;
@@ -618,7 +618,7 @@
 }
 
 .terminal-search-input {
-  background-color: #0c0d12;
+  background-color: var(--bg-overlay-input);
   color: var(--text-primary);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
@@ -631,7 +631,7 @@
 }
 
 .terminal-search-input:focus {
-  border-color: var(--accent-cyan, #38bdf8);
+  border-color: var(--accent-cyan);
 }
 
 .terminal-search-btn {
@@ -660,8 +660,9 @@
 
 .terminal-search-btn.active {
   background-color: rgba(56, 189, 248, 0.2);
-  border-color: var(--accent-cyan, #38bdf8);
-  color: var(--accent-cyan, #38bdf8);
+  background-color: color-mix(in srgb, var(--accent-cyan) 20%, transparent);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
 }
 
 .terminal-search-close:hover {
