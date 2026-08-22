@@ -1,4 +1,6 @@
 pub mod worktree_naming;
+pub mod worktree_registry;
+pub mod worktrees;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
