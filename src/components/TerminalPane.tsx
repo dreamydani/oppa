@@ -21,7 +21,6 @@ import { focus } from "../lib/pane-manager/layout";
 import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
-import { TerminalScrollbar } from "./TerminalScrollbar";
 import "./TerminalPane.css";
 
 // Renders the terminal view for ONE store session with WebGL acceleration,
@@ -35,8 +34,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const isSearchOpenRef = useRef(false);
   isSearchOpenRef.current = isSearchOpen;
-  const [viewportEl, setViewportEl] = useState<HTMLElement | null>(null);
-  const [isAltBuffer, setIsAltBuffer] = useState(false);
 
   const idRef = useRef(id);
   const parsedRef = useRef(0);
@@ -91,6 +88,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       scrollback: 10000,
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
+      // Slim VS Code-style scrollbar: xterm's DOM slider reserves this width
+      // (default 14) and overlays the canvas edge; FitAddon ignores it.
+      overviewRuler: { width: 7 },
       theme: currentTheme,
       allowProposedApi: true,
     });
@@ -115,16 +115,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     registerSerializer(id, () => serialize.serialize());
 
     term.open(containerRef.current!);
-
-    setViewportEl(containerRef.current!.querySelector<HTMLElement>(".xterm-viewport"));
-    setIsAltBuffer(term.buffer.active.type === "alternate");
-    const bufferSub = term.buffer.onBufferChange((buf) => {
-      setIsAltBuffer(buf.type === "alternate");
-    });
-    const disposeBufferSub = () => {
-      bufferSub.dispose();
-      setViewportEl(null);
-    };
 
     // Fit before anything renders so cell metrics settle at the real
     // container size; attaching the GPU renderer before replay avoids the
@@ -179,7 +169,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     const unsubs: (() => void)[] = [];
     let disposed = false;
-    unsubs.push(disposeBufferSub);
 
     // Font-metrics race fix: panes mounting during startup measure their cell
     // grid before the custom mono font has loaded, so glyphs render slightly
@@ -473,9 +462,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         ref={containerRef}
         className={`terminal-pane${appearance.dimInactivePanes && !isFocused ? " dimmed" : ""}`}
       />
-      {viewportEl && (
-        <TerminalScrollbar viewport={viewportEl} forceHidden={isAltBuffer} />
-      )}
     </div>
   );
 }

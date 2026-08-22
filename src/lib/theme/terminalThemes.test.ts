@@ -68,6 +68,18 @@ describe("terminalThemes catalog", () => {
   it("falls back to OPPA Dark for unknown theme ID", () => {
     // @ts-expect-error testing invalid ID fallback
     const theme = getTerminalTheme("nonexistent_theme");
-    expect(theme).toEqual(TERMINAL_THEMES.oppa_dark);
+    expect(theme.background).toBe(TERMINAL_THEMES.oppa_dark.background);
+    expect(theme.foreground).toBe(TERMINAL_THEMES.oppa_dark.foreground);
+  });
+
+  it("injects scrollbar slider slots into every returned theme", () => {
+    const theme = getTerminalTheme("oppa_dark");
+    expect(theme.overviewRulerBorder).toBe("transparent");
+    expect(theme.scrollbarSliderBackground).toBe("rgba(180, 180, 185, 0.4)");
+    expect(theme.scrollbarSliderHoverBackground).toBe("rgba(180, 180, 185, 0.6)");
+    expect(theme.scrollbarSliderActiveBackground).toBe("rgba(180, 180, 185, 0.8)");
+    // Explicit theme values still win over the defaults.
+    const customized = getTerminalTheme("dracula");
+    expect(customized.background).toBe(TERMINAL_THEMES.dracula.background);
   });
 });

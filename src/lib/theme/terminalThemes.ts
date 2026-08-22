@@ -345,7 +345,17 @@ const THEME_METADATA: TerminalThemeInfo[] = [
 ];
 
 export function getTerminalTheme(id: TerminalThemeId): ITheme {
-  return TERMINAL_THEMES[id] ?? TERMINAL_THEMES.oppa_dark;
+  const base = TERMINAL_THEMES[id] ?? TERMINAL_THEMES.oppa_dark;
+  // xterm 6 renders its scrollbar via a VS Code-style DOM slider that reads
+  // these theme slots; defaults are raised-alpha (stock ~0.2 is nearly
+  // invisible) and spread first so explicit theme values win.
+  return {
+    overviewRulerBorder: "transparent",
+    scrollbarSliderBackground: "rgba(180, 180, 185, 0.4)",
+    scrollbarSliderHoverBackground: "rgba(180, 180, 185, 0.6)",
+    scrollbarSliderActiveBackground: "rgba(180, 180, 185, 0.8)",
+    ...base,
+  };
 }
 
 export function getAllTerminalThemes(): TerminalThemeInfo[] {
