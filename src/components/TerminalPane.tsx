@@ -129,10 +129,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     // Pane surface adopts the active terminal theme's background so the
     // fit-rounding leftover below the last row is seamless (no two-tone gap).
-    containerRef.current?.style.setProperty(
-      "--session-term-bg",
-      typeof currentTheme.background === "string" ? currentTheme.background : "",
-    );
+    const paintSessionBg = (css: string | undefined) => {
+      const value = typeof css === "string" ? css : "";
+      containerRef.current?.style.setProperty("--session-term-bg", value);
+      containerRef.current?.parentElement?.style.setProperty("--session-term-bg", value);
+    };
+    paintSessionBg(currentTheme.background);
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -272,7 +274,28 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }
     };
 
+    // Live background sync: agent CLIs (opencode, gemini, ...) repaint their
+    // own bg via OSC 11 at runtime; sample the renderer's effective color so
+    // the pane surface keeps matching and fit-remainders stay invisible.
+    let bgSyncAt = 0;
+    const syncEffectiveBackground = () => {
+      const now = Date.now();
+      if (now - bgSyncAt < 250) return;
+      bgSyncAt = now;
+      try {
+        const css = (term as unknown as {
+          _core?: { _themeService?: { colors?: { background?: { css?: string } } } };
+        })._core?._themeService?.colors?.background?.css;
+        if (typeof css === "string" && css) {
+          containerRef.current?.style.setProperty("--session-term-bg", css);
+        }
+      } catch {
+        /* internal API unavailable — static theme bg already applied */
+      }
+    };
+
     term.onWriteParsed(() => {
+      syncEffectiveBackground();
       if (parsedRef.current > 0) {
         ackSession(idRef.current, parsedRef.current);
         parsedRef.current = 0;
@@ -398,10 +421,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     term.options.lineHeight = appearance.lineHeight;
     term.options.cursorStyle = appearance.cursorStyle;
     term.options.cursorBlink = appearance.cursorBlink;
-    containerRef.current?.style.setProperty(
-      "--session-term-bg",
-      typeof theme.background === "string" ? theme.background : "",
-    );
+    const paintSessionBg = (css: string | undefined) => {
+      const value = typeof css === "string" ? css : "";
+      containerRef.current?.style.setProperty("--session-term-bg", value);
+      containerRef.current?.parentElement?.style.setProperty("--session-term-bg", value);
+    };
+    paintSessionBg(theme.background);
     fitAddonRef.current?.fit();
   }, [appearance]);
 
