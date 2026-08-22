@@ -18,6 +18,7 @@ import {
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
+import { planFullBleed } from "../lib/terminal/fullBleedFit";
 import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
@@ -155,10 +156,98 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }, resizeDebounceMs);
     };
 
-    // Single commit path for EVERY fit in this pane: fit the grid, then tell
-    // the daemon (closes the desync holes where settle/font/appearance fits
-    // never resized the PTY). Cell metrics stay native — no stretching.
+    let followUpRaf = 0;
+
+    // Pane budget measured the same way FitAddon sees it (parent content box
+    // minus xterm padding minus the reserved scrollbar/ruler band).
+    const readFitBudget = (): { widthCss: number; heightCss: number } | null => {
+      const parentEl = term.element?.parentElement;
+      if (!parentEl) return null;
+      const rect = parentEl.getBoundingClientRect();
+      let widthCss = rect.width;
+      let heightCss = rect.height;
+      if (!(widthCss > 0) || !(heightCss > 0)) {
+        const style = window.getComputedStyle(parentEl);
+        widthCss = parseFloat(style.getPropertyValue("width"));
+        heightCss = parseFloat(style.getPropertyValue("height"));
+      }
+      if (!(widthCss > 0) || !(heightCss > 0)) return null;
+
+      const xtermStyle = term.element ? window.getComputedStyle(term.element) : null;
+      const padHor = xtermStyle
+        ? (parseInt(xtermStyle.paddingLeft) || 0) + (parseInt(xtermStyle.paddingRight) || 0)
+        : 0;
+      const padVer = xtermStyle
+        ? (parseInt(xtermStyle.paddingTop) || 0) + (parseInt(xtermStyle.paddingBottom) || 0)
+        : 0;
+      const rulerWidth =
+        term.options.scrollback === 0 ? 0 : term.options.overviewRuler?.width || 14;
+      return {
+        widthCss: Math.max(0, widthCss - padHor - rulerWidth),
+        heightCss: Math.max(0, heightCss - padVer),
+      };
+    };
+
+    // Stretch-to-fill: nudge letterSpacing/lineHeight so cols*cellW and
+    // rows*cellH consume the pane exactly — no right/bottom rounding gap.
+    // Anchored to the CONFIGURED lineHeight so repeated plans never ratchet.
+    const applyFullBleed = (): boolean => {
+      try {
+        const dpr = window.devicePixelRatio || 1;
+        const cssDims = (
+          term as unknown as {
+            _core?: {
+              _renderService?: {
+                dimensions?: {
+                  css?: {
+                    char?: { width?: number; height?: number };
+                    cell?: { width?: number; height?: number };
+                  };
+                };
+              };
+            };
+          }
+        )._core?._renderService?.dimensions?.css;
+        if (!cssDims?.char?.width || !cssDims?.char?.height) return false;
+        const budget = readFitBudget();
+        if (!budget) return false;
+        const plan = planFullBleed({
+          availableWidthCss: budget.widthCss,
+          availableHeightCss: budget.heightCss,
+          devicePixelRatio: dpr,
+          charWidthDevice: Math.round(cssDims.char.width * dpr),
+          charHeightDevice: Math.round(cssDims.char.height * dpr),
+          currentLetterSpacingPx:
+            typeof term.options.letterSpacing === "number" ? term.options.letterSpacing : 0,
+          currentLineHeight: appearanceRef.current.lineHeight,
+        });
+        const prevSpacing =
+          typeof term.options.letterSpacing === "number" ? term.options.letterSpacing : 0;
+        const prevLineHeight =
+          typeof term.options.lineHeight === "number" ? term.options.lineHeight : 1;
+        const changed =
+          Math.abs(prevSpacing - plan.letterSpacingPx) > 1e-6 ||
+          Math.abs(prevLineHeight - plan.lineHeight) > 1e-6;
+        if (!changed) return false;
+        term.options.letterSpacing = plan.letterSpacingPx;
+        term.options.lineHeight = plan.lineHeight;
+        // Renderer dimension recompute can trail the option write by a frame;
+        // refit once more so cols/rows land on the stretched metrics.
+        cancelAnimationFrame(followUpRaf);
+        followUpRaf = requestAnimationFrame(() => {
+          if (!disposed) commitFit();
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    // Single commit path for EVERY fit in this pane: stretch metrics first,
+    // then fit the grid, then always tell the daemon (closes the desync holes
+    // where settle/font/appearance fits never resized the PTY).
     const commitFit = () => {
+      applyFullBleed();
       try {
         fit.fit();
       } catch {}
@@ -177,28 +266,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // Pane surface adopts the active terminal theme's background so the
     // fit-rounding leftover below the last row is seamless (no two-tone gap).
     paintSessionSurface(currentTheme.background);
-
-    // Live surface sync: fullscreen TUIs repaint their own palette at runtime
-    // (OSC 11), so sample the effective terminal bg after parses and keep
-    // every wrapper layer matched — otherwise fit remainders read as gaps.
-    let lastBgSample = 0;
-    const syncLiveBackground = () => {
-      const now = Date.now();
-      if (now - lastBgSample < 250) return;
-      lastBgSample = now;
-      try {
-        const css = (
-          term as unknown as {
-            _core?: { _themeService?: { colors?: { background?: { css?: string } } } };
-          }
-        )._core?._themeService?.colors?.background?.css;
-        if (typeof css === "string" && css && css !== "transparent") {
-          paintSessionSurface(css);
-        }
-      } catch {
-        /* internal API unavailable — static theme bg already applied */
-      }
-    };
 
     // WebGL Hardware Acceleration with Canvas / DOM fallback
     try {
@@ -299,20 +366,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           // Page mode
           lines = term.rows || 24;
         } else {
-          // Pixel mode (trackpad / high-res wheel): accumulate against the
-          // LIVE row pitch so scroll feel matches the actual cell metrics.
-          const cellHeight = (() => {
-            try {
-              return (
-                (term as unknown as {
-                  _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } }
-                })._core?._renderService?.dimensions?.css?.cell?.height || 16
-              );
-            } catch {
-              return 16;
-            }
-          })();
+          // Pixel mode (trackpad / high-res wheel)
           wheelDeltaAccumulator += delta;
+          const cellHeight = 16;
           lines = Math.floor(wheelDeltaAccumulator / cellHeight);
           if (lines >= 1) {
             wheelDeltaAccumulator %= cellHeight;
@@ -341,7 +397,6 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     };
 
     term.onWriteParsed(() => {
-      syncLiveBackground();
       if (parsedRef.current > 0) {
         ackSession(idRef.current, parsedRef.current);
         parsedRef.current = 0;
@@ -409,7 +464,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           stableRaf = requestAnimationFrame(step);
           return;
         }
-        if (!matchesTerminal) fit.fit();
+        const stretched = applyFullBleed();
+        if (!matchesTerminal || stretched) fit.fit();
         schedulePtyResize();
       };
       step();
@@ -420,6 +476,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     return () => {
       cancelAnimationFrame(stableRaf);
+      cancelAnimationFrame(followUpRaf);
       if (resizeTimer) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
