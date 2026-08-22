@@ -959,39 +959,25 @@ describe("TerminalPane", () => {
     expect(pane?.classList.contains("dimmed")).toBe(false);
   });
 
-  it("applies the full-bleed stretch and resizes the pty when the container resizes", async () => {
+  it("keeps native cell metrics when the container resizes (no metric forcing)", async () => {
     vi.useFakeTimers();
     const { container } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
-    // 813x600 CSS px pane minus the 7px ruler band = the planner budget;
-    // with an 8x16 device cell the plan lands on spacing -1 / pitch 20.5/16.
     const paneEl = container.querySelector(".terminal-pane")!;
     Object.defineProperty(paneEl, "getBoundingClientRect", {
       configurable: true,
       value: () => ({ width: 813, height: 600, top: 0, left: 0, right: 813, bottom: 600, x: 0, y: 0 }),
     });
-    const t = term() as any;
-    // A real element pair so readFitBudget's getComputedStyle calls work.
-    const xtermEl = document.createElement("div");
-    paneEl.appendChild(xtermEl);
-    t.element = xtermEl;
-    t._core = {
-      _renderService: {
-        dimensions: {
-          css: { char: { width: 8, height: 16 }, cell: { width: 8, height: 19 } },
-        },
-      },
-    };
-    vi.stubGlobal("devicePixelRatio", 1);
 
-    // Grid counts as they would land after fitting with stretched metrics.
-    t.cols = 115;
-    t.rows = 30;
+    // Grid counts as they would land after the fit.
+    term().cols = 115;
+    term().rows = 30;
 
     fireResize();
-    expect(t.options.letterSpacing).toBe(-1);
-    expect(t.options.lineHeight).toBeCloseTo(20.5 / 16, 10);
+    // The terminal must stay a terminal: no letterSpacing/lineHeight forcing.
+    expect(term().options.letterSpacing).toBeUndefined();
+    expect(term().options.lineHeight).toBe(DEFAULT_APP_SETTINGS.appearance.lineHeight);
     // Well past the debounce AND the mount settle timer so fake-clock skew
     // from vi.waitFor polling cannot strand the pending resize.
     vi.advanceTimersByTime(1000);

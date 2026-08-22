@@ -116,5 +116,23 @@
   border-radius: 4px;
 }
 
+/* Terminal grids never need horizontal scrolling — the strip would paint a
+   light bar across the bottom of dark sessions. */
+.terminal-pane .xterm-scrollable-element > .scrollbar.horizontal {
+  display: none !important;
+}
+
+/* Scrollback must be discoverable: keep the vertical thumb visible whenever
+   there is scroll history instead of relying on xterm's auto-hide alone. */
+.terminal-pane .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.terminal-pane .xterm-scrollable-element > .scrollbar.vertical:hover > .slider,
+.terminal-pane .xterm-scrollable-element > .scrollbar.vertical.active > .slider {
+  opacity: 0.9;
+}
+
 
 
