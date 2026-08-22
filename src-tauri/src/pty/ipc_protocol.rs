@@ -1,7 +1,9 @@
+use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
+use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 2;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 3;
 
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,11 +36,20 @@ pub struct CreateOrAttachResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreePsEntry {
+    pub record: WorktreeRecord,
+    pub live_sessions: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum DaemonRequest {
     Hello {
         client_version: String,
         protocol_version: u32,
+        // v3; older clients omit the field entirely
+        #[serde(default)]
+        auth_token: Option<String>,
     },
     CreateOrAttach {
         session_id: String,
@@ -68,6 +79,46 @@ pub enum DaemonRequest {
     ListSessions,
     Disconnect,
     Shutdown,
+    RepoAdd { path: String },
+    RepoList,
+    WorktreeCreate {
+        repo_path: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        branch: Option<String>,
+        #[serde(default)]
+        base_ref: Option<String>,
+        #[serde(default)]
+        parent_worktree_id: Option<String>,
+        #[serde(default)]
+        workspace_dir: Option<String>,
+        #[serde(default)]
+        nest_workspaces: Option<bool>,
+    },
+    WorktreeList,
+    WorktreeShow { id: String },
+    WorktreeCurrent { cwd: String },
+    // set_parent disambiguates "clear parent" from "leave parent untouched",
+    // which a bare Option<Option<String>> cannot express over JSON.
+    WorktreeSet {
+        id: String,
+        set_parent: bool,
+        #[serde(default)]
+        parent_worktree_id: Option<String>,
+        #[serde(default)]
+        workspace_status: Option<WorktreeStatus>,
+        #[serde(default)]
+        display_name: Option<String>,
+    },
+    WorktreeRemove {
+        id: String,
+        force: bool,
+        delete_branch: bool,
+    },
+    WorktreePurge { id: String },
+    WorktreePs,
+    WorktreeLineage { id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +129,12 @@ pub enum DaemonResponse {
     SessionList(Vec<String>),
     Ok,
     Error(String),
+    RepoRecords(Vec<RepoRecord>),
+    WorktreeRecords(Vec<WorktreeListEntry>),
+    // Single-record replies (show/current/set/create); None means "not found" without erroring
+    WorktreeRecordOne(Option<WorktreeRecord>),
+    WorktreeRecordsList(Vec<WorktreeRecord>),
+    WorktreePsEntries(Vec<WorktreePsEntry>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +153,9 @@ pub enum DaemonEvent {
     Cwd {
         session_id: String,
         cwd: String,
+    },
+    WorktreeChanged {
+        id: Option<String>,
     },
 }
 
@@ -137,6 +197,7 @@ mod tests {
             DaemonRequest::Hello {
                 client_version: "0.1.0".into(),
                 protocol_version: DAEMON_PROTOCOL_VERSION,
+                auth_token: None,
             },
             DaemonRequest::CreateOrAttach {
                 session_id: "s1".into(),
@@ -241,6 +302,10 @@ mod tests {
                 session_id: "s1".into(),
                 cwd: "/Users/dev/repo".into(),
             },
+            DaemonEvent::WorktreeChanged { id: None },
+            DaemonEvent::WorktreeChanged {
+                id: Some("repo::C:/ws/feat-a".into()),
+            },
         ];
 
         for event in events {
@@ -248,6 +313,172 @@ mod tests {
             let decoded: DaemonEvent = serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(event, decoded);
         }
+    }
+
+    fn sample_repo_record(repo_id: &str) -> RepoRecord {
+        RepoRecord {
+            repo_id: repo_id.into(),
+            path: PathBuf::from("/tmp/sample-repo"),
+            default_base_ref: Some("main".into()),
+            worktree_base_path: None,
+        }
+    }
+
+    fn sample_worktree_record(id: &str) -> WorktreeRecord {
+        WorktreeRecord {
+            id: id.into(),
+            repo_id: "sample".into(),
+            name: "feat-a".into(),
+            display_name: Some("Feat A".into()),
+            branch: "feat-a".into(),
+            path: PathBuf::from("/tmp/repo-workspaces/feat-a"),
+            base_ref: "main".into(),
+            parent_worktree_id: None,
+            child_worktree_ids: Vec::new(),
+            workspace_status: crate::git::worktree_registry::WorktreeStatus::InProgress,
+            retired: false,
+            created_at_ms: 1723900000000,
+            linked_pr_url: None,
+        }
+    }
+
+    #[test]
+    fn test_serialize_v3_requests_roundtrip() {
+        let requests = vec![
+            DaemonRequest::Hello {
+                client_version: "0.2.0".into(),
+                protocol_version: DAEMON_PROTOCOL_VERSION,
+                auth_token: Some("deadbeef".into()),
+            },
+            DaemonRequest::RepoAdd { path: "/tmp/repo".into() },
+            DaemonRequest::RepoList,
+            DaemonRequest::WorktreeCreate {
+                repo_path: "/tmp/repo".into(),
+                name: Some("feat-a".into()),
+                branch: None,
+                base_ref: Some("main".into()),
+                parent_worktree_id: None,
+                workspace_dir: Some("/tmp/ws".into()),
+                nest_workspaces: Some(true),
+            },
+            DaemonRequest::WorktreeList,
+            DaemonRequest::WorktreeShow { id: "sample::/tmp/x".into() },
+            DaemonRequest::WorktreeCurrent { cwd: "/tmp/x/src".into() },
+            DaemonRequest::WorktreeSet {
+                id: "wt-1".into(),
+                set_parent: true,
+                parent_worktree_id: Some("wt-root".into()),
+                workspace_status: Some(crate::git::worktree_registry::WorktreeStatus::InProgress),
+                display_name: Some("My Feature".into()),
+            },
+            // set_parent=false must survive the roundtrip even with a stale id present
+            DaemonRequest::WorktreeSet {
+                id: "wt-1".into(),
+                set_parent: false,
+                parent_worktree_id: Some("ignored".into()),
+                workspace_status: None,
+                display_name: None,
+            },
+            DaemonRequest::WorktreeRemove {
+                id: "wt-1".into(),
+                force: true,
+                delete_branch: false,
+            },
+            DaemonRequest::WorktreePurge { id: "wt-1".into() },
+            DaemonRequest::WorktreePs,
+            DaemonRequest::WorktreeLineage { id: "wt-root".into() },
+        ];
+
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+    }
+
+    #[test]
+    fn test_serialize_v3_responses_roundtrip() {
+        let responses = vec![
+            DaemonResponse::RepoRecords(vec![sample_repo_record("sample")]),
+            DaemonResponse::RepoRecords(Vec::new()),
+            DaemonResponse::WorktreeRecords(vec![crate::git::worktrees::WorktreeListEntry {
+                record: sample_worktree_record("wt-1"),
+                missing_on_disk: false,
+            }]),
+            DaemonResponse::WorktreeRecordOne(Some(sample_worktree_record("wt-1"))),
+            DaemonResponse::WorktreeRecordOne(None),
+            DaemonResponse::WorktreeRecordsList(vec![
+                sample_worktree_record("wt-root"),
+                sample_worktree_record("wt-child"),
+            ]),
+            DaemonResponse::WorktreePsEntries(vec![WorktreePsEntry {
+                record: sample_worktree_record("wt-1"),
+                live_sessions: 2,
+            }]),
+        ];
+
+        for res in responses {
+            let json = serde_json::to_string(&res).expect("serialize response");
+            let decoded: DaemonResponse = serde_json::from_str(&json).expect("deserialize response");
+            assert_eq!(res, decoded);
+        }
+    }
+
+    #[test]
+    fn test_hello_without_auth_token_still_deserializes_old_client() {
+        let old_client_hello =
+            r#"{"type":"Hello","payload":{"client_version":"0.9.0","protocol_version":2}}"#;
+        let decoded: DaemonRequest = serde_json::from_str(old_client_hello).expect("old hello");
+        match decoded {
+            DaemonRequest::Hello {
+                client_version,
+                protocol_version,
+                auth_token,
+            } => {
+                assert_eq!(client_version, "0.9.0");
+                assert_eq!(protocol_version, 2);
+                assert_eq!(auth_token, None);
+            }
+            other => panic!("expected Hello, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_worktree_set_wire_shape_distinguishes_clear_from_untouched() {
+        let clear = serde_json::to_value(DaemonRequest::WorktreeSet {
+            id: "wt-1".into(),
+            set_parent: true,
+            parent_worktree_id: None,
+            workspace_status: None,
+            display_name: None,
+        })
+        .unwrap();
+        let payload = clear.get("payload").unwrap();
+        assert_eq!(payload["set_parent"], serde_json::json!(true));
+        assert_eq!(payload["parent_worktree_id"], serde_json::Value::Null);
+
+        let untouched = serde_json::to_value(DaemonRequest::WorktreeSet {
+            id: "wt-1".into(),
+            set_parent: false,
+            parent_worktree_id: None,
+            workspace_status: None,
+            display_name: None,
+        })
+        .unwrap();
+        assert_eq!(untouched.get("payload").unwrap()["set_parent"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_worktree_status_wire_values_survive_request_roundtrip() {
+        let json = serde_json::to_string(&DaemonRequest::WorktreeSet {
+            id: "wt-1".into(),
+            set_parent: false,
+            parent_worktree_id: None,
+            workspace_status: Some(crate::git::worktree_registry::WorktreeStatus::InProgress),
+            display_name: None,
+        })
+        .unwrap();
+        assert!(json.contains("in-progress"), "wire value expected in: {json}");
     }
 
     #[test]

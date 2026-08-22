@@ -1,22 +1,33 @@
+use crate::git::teardown::{session_cwd_inside, LiveSession};
+use crate::git::worktree_lineage::lineage_list;
+use crate::git::worktree_registry::WorktreeRegistry;
+use crate::git::worktrees::{
+    repo_add, worktree_create, worktree_current, worktree_list, worktree_purge, worktree_remove,
+    worktree_set, worktree_show, WorktreeCreateRequest,
+};
 use crate::pty::agent_resume;
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
-    CreateOrAttachResult, DaemonRequest, DaemonResponse, ResumeKind, ResumePlan,
-    DAEMON_PROTOCOL_VERSION,
+    CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, ResumeKind, ResumePlan,
+    WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
+use crate::pty::runtime_metadata;
 use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
 use parking_lot::Mutex;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::Notify;
+use tokio::sync::{broadcast, Notify};
 
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(3);
+// Bounded so a stalled client cannot grow memory; lagged receivers resync by design
+const GLOBAL_EVENT_CAPACITY: usize = 64;
+const REGISTRY_UNAVAILABLE: &str = "registry unavailable";
 
 /// Simple cancellation token for graceful shutdown of async listeners and sessions.
 #[derive(Clone, Default)]
@@ -55,6 +66,11 @@ pub struct DaemonServer {
     // Conversation ids already resumed since this daemon booted: a conversation
     // may be open in at most one pane (second claimant falls back to relaunch)
     resumed_agent_ids: Arc<Mutex<std::collections::HashSet<String>>>,
+    // Some(snapshot_dir/worktrees.json) enables the repo/worktree request surface
+    worktree_registry_path: Option<PathBuf>,
+    // Set only when the discovery file was written; None keeps the pipe unauthenticated
+    auth_token: Option<String>,
+    global_events: broadcast::Sender<DaemonEvent>,
 }
 
 impl Default for DaemonServer {
@@ -69,15 +85,29 @@ impl DaemonServer {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             snapshot_dir: None,
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            worktree_registry_path: None,
+            auth_token: None,
+            global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
     }
 
     pub fn with_snapshot_storage(app_data_dir: PathBuf) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            snapshot_dir: Some(app_data_dir),
+            snapshot_dir: Some(app_data_dir.clone()),
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            worktree_registry_path: Some(app_data_dir.join("worktrees.json")),
+            auth_token: None,
+            global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
+    }
+
+    pub fn set_auth_token(&mut self, token: Option<String>) {
+        self.auth_token = token;
+    }
+
+    pub fn subscribe_global_events(&self) -> broadcast::Receiver<DaemonEvent> {
+        self.global_events.subscribe()
     }
 
     #[allow(dead_code)]
@@ -88,9 +118,22 @@ impl DaemonServer {
     /// Dispatch a single DaemonRequest to the session registry.
     pub fn handle_request(&self, req: DaemonRequest) -> DaemonResponse {
         match req {
-            DaemonRequest::Hello { .. } => DaemonResponse::HelloOk {
-                protocol_version: DAEMON_PROTOCOL_VERSION,
-            },
+            DaemonRequest::Hello { auth_token, .. } => {
+                let supplied = auth_token.unwrap_or_default();
+                // M1: only a mismatching non-empty token rejects — pre-v3
+                // renderers (task 6 wires token sending) must keep connecting.
+                let rejected = self
+                    .auth_token
+                    .as_deref()
+                    .is_some_and(|expected| !supplied.is_empty() && supplied != expected);
+                if rejected {
+                    DaemonResponse::Error("unauthorized".into())
+                } else {
+                    DaemonResponse::HelloOk {
+                        protocol_version: DAEMON_PROTOCOL_VERSION,
+                    }
+                }
+            }
             DaemonRequest::CreateOrAttach {
                 session_id,
                 cols,
@@ -226,6 +269,8 @@ impl DaemonServer {
                     for (_, session) in self.sessions.lock().iter() {
                         let _ = storage.save_snapshot(&Self::build_checkpoint(session));
                     }
+                    // Best-effort: a stale discovery file must not outlive the daemon
+                    runtime_metadata::remove_runtime_metadata(dir);
                 }
                 let mut sessions = self.sessions.lock();
                 for (_, session) in sessions.drain() {
@@ -233,7 +278,181 @@ impl DaemonServer {
                 }
                 DaemonResponse::Ok
             }
+            DaemonRequest::RepoAdd { path } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => match repo_add(registry_path, Path::new(&path)) {
+                    Ok(record) => DaemonResponse::RepoRecords(vec![record]),
+                    Err(e) => DaemonResponse::Error(e),
+                },
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::RepoList => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let mut repos: Vec<_> =
+                        WorktreeRegistry::load(registry_path).repos.into_values().collect();
+                    repos.sort_by(|a, b| a.repo_id.cmp(&b.repo_id));
+                    DaemonResponse::RepoRecords(repos)
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeCreate {
+                repo_path,
+                name,
+                branch,
+                base_ref,
+                parent_worktree_id,
+                workspace_dir,
+                nest_workspaces,
+            } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let req = WorktreeCreateRequest {
+                        repo_path: PathBuf::from(repo_path),
+                        name,
+                        branch,
+                        base_ref,
+                        parent_worktree_id,
+                        workspace_dir_override: workspace_dir.map(PathBuf::from),
+                        nest_workspaces: nest_workspaces.unwrap_or(false),
+                    };
+                    match worktree_create(registry_path, req) {
+                        Ok((record, _warnings)) => {
+                            self.publish_global(DaemonEvent::WorktreeChanged {
+                                id: Some(record.id.clone()),
+                            });
+                            DaemonResponse::WorktreeRecordOne(Some(record))
+                        }
+                        Err(e) => DaemonResponse::Error(e),
+                    }
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeList => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => DaemonResponse::WorktreeRecords(worktree_list(registry_path)),
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeShow { id } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => match worktree_show(registry_path, &id) {
+                    Ok(record) => DaemonResponse::WorktreeRecordOne(Some(record)),
+                    Err(e) => DaemonResponse::Error(e),
+                },
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeCurrent { cwd } => match self.worktree_registry_path.as_deref()
+            {
+                Some(registry_path) => DaemonResponse::WorktreeRecordOne(worktree_current(
+                    registry_path,
+                    Path::new(&cwd),
+                )),
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeSet {
+                id,
+                set_parent,
+                parent_worktree_id,
+                workspace_status,
+                display_name,
+            } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let parent = if set_parent { Some(parent_worktree_id) } else { None };
+                    match worktree_set(registry_path, &id, parent, workspace_status, display_name) {
+                        Ok(record) => {
+                            self.publish_global(DaemonEvent::WorktreeChanged {
+                                id: Some(record.id.clone()),
+                            });
+                            DaemonResponse::WorktreeRecordOne(Some(record))
+                        }
+                        Err(e) => DaemonResponse::Error(e),
+                    }
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeRemove {
+                id,
+                force,
+                delete_branch,
+            } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let live_sessions = self.live_sessions();
+                    match worktree_remove(registry_path, &id, force, delete_branch, &live_sessions)
+                    {
+                        Ok(_warnings) => {
+                            self.publish_global(DaemonEvent::WorktreeChanged { id: Some(id) });
+                            DaemonResponse::Ok
+                        }
+                        Err(e) => DaemonResponse::Error(e),
+                    }
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreePurge { id } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => match worktree_purge(registry_path, &id) {
+                    Ok(()) => {
+                        self.publish_global(DaemonEvent::WorktreeChanged { id: Some(id) });
+                        DaemonResponse::Ok
+                    }
+                    Err(e) => DaemonResponse::Error(e),
+                },
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreePs => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let live_sessions = self.live_sessions();
+                    let mut entries: Vec<WorktreePsEntry> = WorktreeRegistry::load(registry_path)
+                        .worktrees
+                        .into_values()
+                        .filter(|record| !record.retired)
+                        .map(|record| {
+                            let live_count = live_sessions
+                                .iter()
+                                .filter(|session| {
+                                    session.worktree_id.as_deref() == Some(record.id.as_str())
+                                        || session
+                                            .cwd
+                                            .as_deref()
+                                            .map(|cwd| session_cwd_inside(cwd, &record))
+                                            .unwrap_or(false)
+                                })
+                                .count() as u32;
+                            WorktreePsEntry {
+                                record,
+                                live_sessions: live_count,
+                            }
+                        })
+                        .collect();
+                    entries.sort_by(|a, b| {
+                        a.record.created_at_ms.cmp(&b.record.created_at_ms).then(a.record.id.cmp(&b.record.id))
+                    });
+                    DaemonResponse::WorktreePsEntries(entries)
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
+            DaemonRequest::WorktreeLineage { id } => match self.worktree_registry_path.as_deref() {
+                Some(registry_path) => {
+                    let registry = WorktreeRegistry::load(registry_path);
+                    match lineage_list(&registry, &id) {
+                        Ok(records) => DaemonResponse::WorktreeRecordsList(records),
+                        Err(e) => DaemonResponse::Error(e),
+                    }
+                }
+                None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+            },
         }
+    }
+
+    fn publish_global(&self, event: DaemonEvent) {
+        let _ = self.global_events.send(event);
+    }
+
+    // Pane→worktree binding arrives in task 5; cwd containment is the only signal until then.
+    fn live_sessions(&self) -> Vec<LiveSession> {
+        self.sessions
+            .lock()
+            .iter()
+            .map(|(session_id, session)| LiveSession {
+                session_id: session_id.clone(),
+                cwd: session.cwd(),
+                worktree_id: None,
+            })
+            .collect()
     }
 
     /// Run the server listener on the designated platform socket.
@@ -246,6 +465,9 @@ impl DaemonServer {
             sessions: Arc::clone(&self.sessions),
             snapshot_dir: self.snapshot_dir.clone(),
             resumed_agent_ids: Arc::clone(&self.resumed_agent_ids),
+            worktree_registry_path: self.worktree_registry_path.clone(),
+            auth_token: self.auth_token.clone(),
+            global_events: self.global_events.clone(),
         });
         run_server_listener(server, socket_path, cancel_token).await
     }
@@ -455,6 +677,10 @@ where
 {
     let (read_half, mut write_half) = tokio::io::split(stream);
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<String>(256);
+    // Global events (worktree mutations etc.) fan out to every connected client,
+    // alongside the per-session subscriber streams wired up below.
+    let mut global_rx = server.subscribe_global_events();
+    let mut global_open = true;
 
     let writer_task = tokio::spawn(async move {
         while let Some(msg) = out_rx.recv().await {
@@ -476,6 +702,17 @@ where
         tokio::select! {
             _ = cancel_token.cancelled() => {
                 break;
+            }
+            global_res = global_rx.recv(), if global_open => {
+                match global_res {
+                    Ok(event) => {
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            let _ = out_tx.send(format!("{json}\n")).await;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => global_open = false,
+                }
             }
             read_res = reader.read_line(&mut line) => {
                 match read_res {
@@ -658,6 +895,7 @@ mod tests {
     use super::*;
     use crate::pty::ipc_protocol::DaemonEvent;
     use std::time::Duration;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_daemon_server_handle_request_lifecycle() {
@@ -667,6 +905,7 @@ mod tests {
         let resp = server.handle_request(DaemonRequest::Hello {
             client_version: "0.1.0".into(),
             protocol_version: DAEMON_PROTOCOL_VERSION,
+            auth_token: None,
         });
         assert_eq!(
             resp,
@@ -831,6 +1070,7 @@ mod tests {
         let hello_req = DaemonRequest::Hello {
             client_version: "0.1.0".into(),
             protocol_version: DAEMON_PROTOCOL_VERSION,
+            auth_token: None,
         };
         let mut hello_str = serde_json::to_string(&hello_req).unwrap();
         hello_str.push('\n');
@@ -1045,6 +1285,7 @@ mod tests {
         let hello = serde_json::to_string(&DaemonRequest::Hello {
             client_version: "0.1.0".into(),
             protocol_version: DAEMON_PROTOCOL_VERSION,
+            auth_token: None,
         })
         .unwrap()
             + "\n";
@@ -1403,5 +1644,389 @@ mod tests {
             .expect("load succeeds")
             .expect("shutdown flushed final snapshot");
         assert_eq!(snap.session_id, "flush-test");
+    }
+
+    fn hello(token: Option<&str>) -> DaemonRequest {
+        DaemonRequest::Hello {
+            client_version: "test".into(),
+            protocol_version: DAEMON_PROTOCOL_VERSION,
+            auth_token: token.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hello_auth_rejects_mismatch_but_grants_missing_and_matching() {
+        let mut server = DaemonServer::new();
+        server.set_auth_token(Some("secret".into()));
+
+        match server.handle_request(hello(Some("wrong"))) {
+            DaemonResponse::Error(e) => assert!(e.contains("unauthorized"), "got: {e}"),
+            other => panic!("expected unauthorized error, got {other:?}"),
+        }
+        // M1 grace: renderers before task 6 send no token at all
+        assert!(matches!(
+            server.handle_request(hello(None)),
+            DaemonResponse::HelloOk { .. }
+        ));
+        assert!(matches!(
+            server.handle_request(hello(Some("secret"))),
+            DaemonResponse::HelloOk { .. }
+        ));
+
+        let open_server = DaemonServer::new();
+        assert!(matches!(
+            open_server.handle_request(hello(Some("anything"))),
+            DaemonResponse::HelloOk { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_worktree_requests_error_without_registry() {
+        let server = DaemonServer::new();
+        for req in [
+            DaemonRequest::RepoAdd { path: "/tmp/x".into() },
+            DaemonRequest::RepoList,
+            DaemonRequest::WorktreeList,
+            DaemonRequest::WorktreePs,
+        ] {
+            match server.handle_request(req) {
+                DaemonResponse::Error(e) => assert!(e.contains("registry unavailable"), "got: {e}"),
+                other => panic!("expected registry-unavailable error, got {other:?}"),
+            }
+        }
+    }
+
+    fn v3_create_request(repo_path: &Path, name: &str) -> DaemonRequest {
+        DaemonRequest::WorktreeCreate {
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            name: Some(name.into()),
+            branch: None,
+            base_ref: None,
+            parent_worktree_id: None,
+            workspace_dir: None,
+            nest_workspaces: None,
+        }
+    }
+
+    fn expect_record_one(resp: DaemonResponse, what: &str) -> crate::git::worktree_registry::WorktreeRecord {
+        match resp {
+            DaemonResponse::WorktreeRecordOne(Some(record)) => record,
+            other => panic!("expected WorktreeRecordOne for {what}, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_v3_worktree_surface_create_show_set_remove_purge_end_to_end() {
+        let s = crate::git::test_support::sandbox("v3-surface");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+
+        // RepoAdd
+        let resp = server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        });
+        let repo = match resp {
+            DaemonResponse::RepoRecords(repos) => repos.into_iter().next().expect("repo record"),
+            other => panic!("expected RepoRecords, got {other:?}"),
+        };
+        assert_eq!(repo.repo_id, "repo");
+
+        // WorktreeCreate
+        let created = expect_record_one(
+            server.handle_request(v3_create_request(&s.repo, "feat-a")),
+            "create",
+        );
+        assert_eq!(created.branch, "feat-a");
+
+        // WorktreeList shows the entry with its branch and live directory
+        match server.handle_request(DaemonRequest::WorktreeList) {
+            DaemonResponse::WorktreeRecords(entries) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].record.branch, "feat-a");
+                assert!(!entries[0].missing_on_disk);
+            }
+            other => panic!("expected WorktreeRecords, got {other:?}"),
+        }
+
+        // WorktreeShow by id + WorktreeCurrent by cwd
+        let shown = expect_record_one(
+            server.handle_request(DaemonRequest::WorktreeShow { id: created.id.clone() }),
+            "show",
+        );
+        assert_eq!(shown.id, created.id);
+        match server.handle_request(DaemonRequest::WorktreeCurrent {
+            cwd: created.path.to_string_lossy().into_owned(),
+        }) {
+            DaemonResponse::WorktreeRecordOne(Some(current)) => assert_eq!(current.id, created.id),
+            other => panic!("expected current worktree, got {other:?}"),
+        }
+
+        // WorktreeSet persists the status change
+        let updated = expect_record_one(
+            server.handle_request(DaemonRequest::WorktreeSet {
+                id: created.id.clone(),
+                set_parent: false,
+                parent_worktree_id: None,
+                workspace_status: Some(crate::git::worktree_registry::WorktreeStatus::InProgress),
+                display_name: Some("Feat A".into()),
+            }),
+            "set",
+        );
+        assert_eq!(
+            updated.workspace_status,
+            crate::git::worktree_registry::WorktreeStatus::InProgress
+        );
+        assert_eq!(
+            crate::git::worktrees::worktree_show(&s.root.join("worktrees.json"), &created.id)
+                .unwrap()
+                .workspace_status,
+            crate::git::worktree_registry::WorktreeStatus::InProgress
+        );
+
+        // Remove is gated while a live session sits inside the worktree
+        let session_id = "wt-live-session";
+        let attach = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: session_id.into(),
+            cols: 80,
+            rows: 24,
+            cwd: Some(created.path.to_string_lossy().into_owned()),
+            shell: None,
+            resume_agents: false,
+        });
+        assert!(matches!(attach, DaemonResponse::SessionAttached(_)));
+        let blocked = server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: false,
+            delete_branch: false,
+        });
+        match blocked {
+            DaemonResponse::Error(e) => {
+                assert!(e.contains(session_id), "error must name the session: {e}");
+            }
+            other => panic!("expected blocked removal, got {other:?}"),
+        }
+
+        // With the session gone, removal tombstones and purge drops the record
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill { session_id: session_id.into() }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::WorktreeRemove {
+                id: created.id.clone(),
+                force: false,
+                delete_branch: false,
+            }),
+            DaemonResponse::Ok
+        );
+        let tombstone = expect_record_one(
+            server.handle_request(DaemonRequest::WorktreeShow { id: created.id.clone() }),
+            "tombstone show",
+        );
+        assert!(tombstone.retired);
+
+        assert_eq!(
+            server.handle_request(DaemonRequest::WorktreePurge { id: created.id.clone() }),
+            DaemonResponse::Ok
+        );
+        match server.handle_request(DaemonRequest::WorktreeShow { id: created.id.clone() }) {
+            DaemonResponse::Error(e) => assert!(e.contains("not found"), "got: {e}"),
+            other => panic!("expected purged record to be gone, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_successful_mutations_publish_worktree_changed_events() {
+        use crate::git::worktree_registry::WorktreeStatus;
+
+        let s = crate::git::test_support::sandbox("v3-events");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        let mut rx = server.subscribe_global_events();
+
+        let created = expect_record_one(
+            server.handle_request(v3_create_request(&s.repo, "evented")),
+            "create",
+        );
+        async fn next_changed_id(rx: &mut broadcast::Receiver<DaemonEvent>) -> Option<String> {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                    Ok(Ok(DaemonEvent::WorktreeChanged { id })) => return id,
+                    Ok(_) | Err(_) => continue,
+                }
+            }
+            None
+        }
+
+        assert_eq!(
+            next_changed_id(&mut rx).await.as_deref(),
+            Some(created.id.as_str()),
+            "create must publish WorktreeChanged"
+        );
+
+        server.handle_request(DaemonRequest::WorktreeSet {
+            id: created.id.clone(),
+            set_parent: false,
+            parent_worktree_id: None,
+            workspace_status: Some(WorktreeStatus::Completed),
+            display_name: None,
+        });
+        assert_eq!(
+            next_changed_id(&mut rx).await.as_deref(),
+            Some(created.id.as_str()),
+            "set must publish WorktreeChanged"
+        );
+
+        server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: false,
+            delete_branch: false,
+        });
+        assert_eq!(
+            next_changed_id(&mut rx).await.as_deref(),
+            Some(created.id.as_str()),
+            "remove must publish WorktreeChanged"
+        );
+
+        // Read-only requests never publish
+        let _ = server.handle_request(DaemonRequest::WorktreeList);
+        assert!(next_changed_id(&mut rx).await.is_none(), "list must stay silent");
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_removes_runtime_metadata_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        runtime_metadata::write_runtime_metadata(temp_dir.path(), "/tmp/pipe", "tok").unwrap();
+        assert!(runtime_metadata::metadata_path(temp_dir.path()).exists());
+
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+        assert_eq!(server.handle_request(DaemonRequest::Shutdown), DaemonResponse::Ok);
+        assert!(!runtime_metadata::metadata_path(temp_dir.path()).exists());
+    }
+
+    #[tokio::test]
+    async fn test_pipe_level_v3_repo_add_create_list_roundtrip_with_event_fanout() {
+        let s = crate::git::test_support::sandbox("v3-pipe");
+        let server = Arc::new(DaemonServer::with_snapshot_storage(s.root.clone()));
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-v3-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-v3-{}.sock",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        #[cfg(target_os = "windows")]
+        let client_stream = {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = ClientOptions::new().open(&socket_path) {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect named pipe")
+        };
+        #[cfg(not(target_os = "windows"))]
+        let client_stream = {
+            use tokio::net::UnixStream;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = UnixStream::connect(&socket_path).await {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect unix socket")
+        };
+
+        let (read_half, mut write_half) = tokio::io::split(client_stream);
+        let mut reader = BufReader::new(read_half);
+        let mut line = String::new();
+
+        let send = |req: &DaemonRequest| {
+            let mut json = serde_json::to_string(req).unwrap();
+            json.push('\n');
+            json
+        };
+
+        write_half.write_all(send(&hello(None)).as_bytes()).await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<DaemonResponse>(line.trim()).unwrap(),
+            DaemonResponse::HelloOk { .. }
+        ));
+
+        write_half
+            .write_all(send(&DaemonRequest::RepoAdd {
+                path: s.repo.to_string_lossy().into_owned(),
+            }).as_bytes())
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<DaemonResponse>(line.trim()).unwrap(),
+            DaemonResponse::RepoRecords(_)
+        ));
+
+        // Create over the pipe; the response frame precedes the broadcast event on this stream
+        write_half.write_all(send(&v3_create_request(&s.repo, "feat-pipe")).as_bytes()).await.unwrap();
+        let mut created_id = String::new();
+        let mut saw_event = false;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            line.clear();
+            if reader.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            if let Ok(resp) = serde_json::from_str::<DaemonResponse>(line.trim()) {
+                if let DaemonResponse::WorktreeRecordOne(Some(record)) = resp {
+                    created_id = record.id.clone();
+                    assert_eq!(record.branch, "feat-pipe");
+                    continue;
+                }
+            }
+            if let Ok(DaemonEvent::WorktreeChanged { id: Some(ref id) }) =
+                serde_json::from_str::<DaemonEvent>(line.trim())
+            {
+                if !created_id.is_empty() && *id == created_id {
+                    saw_event = true;
+                    break;
+                }
+            }
+        }
+        assert!(!created_id.is_empty(), "create response never arrived");
+        assert!(saw_event, "WorktreeChanged never fanned out to the client stream");
+
+        // List over the pipe reflects the new worktree
+        write_half.write_all(send(&DaemonRequest::WorktreeList).as_bytes()).await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        match serde_json::from_str::<DaemonResponse>(line.trim()).unwrap() {
+            DaemonResponse::WorktreeRecords(entries) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].record.branch, "feat-pipe");
+            }
+            other => panic!("expected WorktreeRecords, got {other:?}"),
+        }
+
+        cancel_token.cancel();
     }
 }

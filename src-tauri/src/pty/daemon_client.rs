@@ -1,5 +1,6 @@
 use crate::pty::ipc_protocol::{
-    CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
+    get_daemon_socket_path, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
+    DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -35,6 +36,8 @@ pub struct DaemonClient {
 impl DaemonClient {
     /// Connect to the daemon server at `socket_path` and perform the protocol handshake.
     pub fn connect(socket_path: &str) -> Result<Self, String> {
+        let (endpoint, auth_token) = Self::resolve_endpoint(socket_path);
+        let socket_path = endpoint.as_str();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -165,6 +168,8 @@ impl DaemonClient {
                                         }
                                     }
                                 }
+                                // Global worktree events get a client-side hook in task 9
+                                DaemonEvent::WorktreeChanged { .. } => {}
                             }
                             continue;
                         }
@@ -204,6 +209,7 @@ impl DaemonClient {
         let hello = DaemonRequest::Hello {
             client_version: env!("CARGO_PKG_VERSION").to_string(),
             protocol_version: DAEMON_PROTOCOL_VERSION,
+            auth_token,
         };
         match client.send_request(hello)? {
             DaemonResponse::HelloOk { protocol_version } => {
@@ -218,6 +224,22 @@ impl DaemonClient {
         }
 
         Ok(client)
+    }
+
+    /// Explicit endpoints (tests, custom pipes) never redirect; only the default
+    /// endpoint consults the daemon's discovery file for the live pipe + token.
+    fn resolve_endpoint(socket_path: &str) -> (String, Option<String>) {
+        if socket_path != get_daemon_socket_path() {
+            return (socket_path.to_string(), None);
+        }
+        match crate::pty::snapshot::resolve_app_data_dir()
+            .and_then(|dir| crate::pty::runtime_metadata::read_runtime_metadata(&dir))
+        {
+            Some(metadata) if !metadata.pipe_path.is_empty() => {
+                (metadata.pipe_path, metadata.auth_token)
+            }
+            _ => (socket_path.to_string(), None),
+        }
     }
 
     fn send_request(&self, req: DaemonRequest) -> Result<DaemonResponse, String> {

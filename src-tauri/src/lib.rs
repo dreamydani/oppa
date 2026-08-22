@@ -22,7 +22,19 @@ pub fn run_daemon() {
         let socket_path = pty::ipc_protocol::get_daemon_socket_path();
         let app_data_dir = pty::snapshot::resolve_app_data_dir();
         let server = match &app_data_dir {
-            Some(dir) => pty::daemon_server::DaemonServer::with_snapshot_storage(dir.clone()),
+            Some(dir) => {
+                let mut server =
+                    pty::daemon_server::DaemonServer::with_snapshot_storage(dir.clone());
+                // Token is only enforced when the discovery file landed; a failed
+                // write leaves the pipe open so the GUI keeps working (M1 grace).
+                let auth_token = pty::runtime_metadata::generate_auth_token();
+                match pty::runtime_metadata::write_runtime_metadata(dir, &socket_path, &auth_token)
+                {
+                    Ok(_) => server.set_auth_token(Some(auth_token)),
+                    Err(e) => eprintln!("runtime metadata write failed ({e}); pipe left unauthenticated"),
+                }
+                server
+            }
             None => pty::daemon_server::DaemonServer::new(),
         };
         // Agent hook receiver: managed hooks POST authoritative session ids here

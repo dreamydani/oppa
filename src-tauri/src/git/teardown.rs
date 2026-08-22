@@ -48,7 +48,7 @@ pub fn prove_no_live_sessions(
 }
 
 // Canonicalize when the path exists; fall back to lexical comparison after slash/case normalization.
-fn session_cwd_inside(cwd: &str, worktree: &WorktreeRecord) -> bool {
+pub(crate) fn session_cwd_inside(cwd: &str, worktree: &WorktreeRecord) -> bool {
     let resolved = match std::fs::canonicalize(cwd) {
         Ok(canonical) => normalize_path_string(&to_regular_path(canonical)),
         Err(_) => normalize_slashes(cwd),
