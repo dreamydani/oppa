@@ -1,6 +1,11 @@
+pub mod teardown;
+pub mod worktree_lineage;
 pub mod worktree_naming;
 pub mod worktree_registry;
 pub mod worktrees;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

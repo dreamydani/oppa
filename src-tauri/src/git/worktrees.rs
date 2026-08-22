@@ -1,6 +1,8 @@
 // Worktree engine: git-backed create/list/set/remove over the persisted registry; wired into commands in a later task.
 #![allow(dead_code)]
 
+use crate::git::teardown::{prove_no_live_sessions, LiveSession};
+use crate::git::worktree_lineage::validate_no_cycle;
 use crate::git::worktree_naming::{
     compute_validated_branch_name, compute_worktree_path, ensure_path_within_workspace,
     sanitize_display_name, sanitize_name,
@@ -30,7 +32,7 @@ pub struct WorktreeListEntry {
     pub missing_on_disk: bool,
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
+pub(crate) fn run_git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(cwd);
     #[cfg(windows)]
@@ -66,17 +68,17 @@ fn unix_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn normalize_slashes(text: &str) -> String {
+pub(crate) fn normalize_slashes(text: &str) -> String {
     let forward = text.replace('\\', "/");
     if cfg!(windows) { forward.to_lowercase() } else { forward }
 }
 
-fn normalize_path_string(path: &Path) -> String {
+pub(crate) fn normalize_path_string(path: &Path) -> String {
     normalize_slashes(&path.to_string_lossy())
 }
 
 // Git and most tools choke on \\?\-style verbatim paths produced by canonicalize on Windows.
-fn to_regular_path(canonical: PathBuf) -> PathBuf {
+pub(crate) fn to_regular_path(canonical: PathBuf) -> PathBuf {
     let text = canonical.as_os_str().to_string_lossy();
     if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
         return PathBuf::from(format!(r"\\{unc}"));
@@ -320,17 +322,7 @@ pub fn worktree_set(
                 if !parent_valid {
                     return Err(format!("parent worktree not found: {parent_id}"));
                 }
-                // Walk the would-be ancestor chain from the new parent back to ourselves.
-                let mut cursor = Some(parent_id.clone());
-                while let Some(current) = cursor {
-                    if current == id {
-                        return Err("setting parent would create a cycle".into());
-                    }
-                    cursor = registry
-                        .worktrees
-                        .get(&current)
-                        .and_then(|w| w.parent_worktree_id.clone());
-                }
+                validate_no_cycle(&registry, &parent_id, id)?;
                 detach_parent(&mut registry, id, &mut record)?;
                 if let Some(new_parent_record) = registry.worktrees.get_mut(&parent_id) {
                     new_parent_record.child_worktree_ids.push(id.to_string());
@@ -366,7 +358,7 @@ fn detach_parent(
 }
 
 // Component-wise containment via normalized strings with a '/' boundary so /alpha never matches /alphabet.
-fn contains_path(outer: &str, inner: &str) -> bool {
+pub(crate) fn contains_path(outer: &str, inner: &str) -> bool {
     inner == outer || (inner.starts_with(outer) && inner[outer.len()..].starts_with('/'))
 }
 
@@ -387,6 +379,7 @@ pub fn worktree_remove(
     id: &str,
     force: bool,
     delete_branch: bool,
+    live_sessions: &[LiveSession],
 ) -> Result<Vec<String>, String> {
     let mut warnings = Vec::new();
     let mut registry = WorktreeRegistry::load(registry_path);
@@ -411,6 +404,19 @@ pub fn worktree_remove(
         .any(|w| !w.retired && w.parent_worktree_id.as_deref() == Some(id));
     if has_children {
         return Err("remove children first".into());
+    }
+
+    // Gate runs before any git mutation so a blocked worktree is never half-removed.
+    if let Err(blockers) = prove_no_live_sessions(live_sessions, &record) {
+        let listed = blockers
+            .iter()
+            .map(|b| format!("session {} ({})", b.session_id, b.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!(
+            "cannot remove worktree {}: live sessions present: {listed}",
+            record.id
+        ));
     }
 
     let path_arg = record.path.to_string_lossy().into_owned();
@@ -454,56 +460,41 @@ pub fn worktree_remove(
     Ok(warnings)
 }
 
+// Purge drops the tombstone itself; M1 never deletes directories — only records.
+pub fn worktree_purge(registry_path: &Path, id: &str) -> Result<(), String> {
+    let mut registry = WorktreeRegistry::load(registry_path);
+    let record = registry
+        .worktrees
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("worktree not found: {id}"))?;
+    if !record.retired {
+        return Err("only retired worktrees can be purged".into());
+    }
+    if record.path.exists() {
+        return Err(format!(
+            "directory still exists at {}; delete it first",
+            record.path.display()
+        ));
+    }
+    if let Some(parent_id) = record.parent_worktree_id.clone() {
+        if let Some(parent) = registry.worktrees.get_mut(&parent_id) {
+            parent.child_worktree_ids.retain(|child| child != id);
+        }
+    }
+    // Best-effort git metadata cleanup; a failed prune must not block the purge.
+    if let Some(repo) = registry.repos.get(&record.repo_id) {
+        let _ = run_git(&repo.path, &["worktree", "prune"]);
+    }
+    registry.remove_worktree(id);
+    registry.save(registry_path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct Sandbox {
-        root: PathBuf,
-        repo: PathBuf,
-        registry_path: PathBuf,
-    }
-
-    impl Drop for Sandbox {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
-        }
-    }
-
-    // Nanos + pid keeps parallel tests from sharing temp roots.
-    fn sandbox(tag: &str) -> Sandbox {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("oppa-wt-{tag}-{}-{nanos}", std::process::id()));
-        let repo = root.join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-        git(&repo, &["init", "-b", "main"]);
-        git(&repo, &["config", "user.email", "test@oppa.dev"]);
-        git(&repo, &["config", "user.name", "Oppa Test"]);
-        commit_file(&repo, "README.md", "# init", "initial");
-        Sandbox {
-            root: root.clone(),
-            repo,
-            registry_path: root.join("registry.json"),
-        }
-    }
-
-    fn git(cwd: &Path, args: &[&str]) -> String {
-        let output = run_git(cwd, args).expect("git spawn");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed in {}: {}",
-            cwd.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    }
-
-    fn commit_file(repo: &Path, name: &str, content: &str, message: &str) {
-        std::fs::write(repo.join(name), content).unwrap();
-        git(repo, &["add", "-A"]);
-        git(repo, &["commit", "-m", message]);
-    }
+    use crate::git::test_support::{commit_file, git, sandbox, Sandbox};
 
     fn create_req(sandbox: &Sandbox, name: Option<&str>) -> WorktreeCreateRequest {
         WorktreeCreateRequest {
@@ -717,7 +708,7 @@ mod tests {
         let s = sandbox("remove-ok");
         let (record, warnings) =
             worktree_create(&s.registry_path, create_req(&s, Some("gone"))).unwrap();
-        let result = worktree_remove(&s.registry_path, &record.id, false, false).unwrap();
+        let result = worktree_remove(&s.registry_path, &record.id, false, false, &[]).unwrap();
         assert!(warnings.is_empty());
         assert!(!result.is_empty() || true);
 
@@ -728,7 +719,7 @@ mod tests {
         let reuse = worktree_create(&s.registry_path, create_req(&s, Some("gone")));
         assert_eq!(reuse.unwrap_err(), "worktree name already in use");
 
-        assert!(worktree_remove(&s.registry_path, &record.id, false, false).is_ok());
+        assert!(worktree_remove(&s.registry_path, &record.id, false, false, &[]).is_ok());
     }
 
     #[test]
@@ -738,7 +729,7 @@ mod tests {
             worktree_create(&s.registry_path, create_req(&s, Some("wip"))).unwrap();
         commit_file(&record.path, "wip.txt", "unfinished", "wip commit");
 
-        let warnings = worktree_remove(&s.registry_path, &record.id, false, true).unwrap();
+        let warnings = worktree_remove(&s.registry_path, &record.id, false, true, &[]).unwrap();
         assert!(
             warnings.iter().any(|w| w.contains("preserved") && w.contains("wip")),
             "warnings: {warnings:?}"
@@ -756,7 +747,7 @@ mod tests {
         let s = sandbox("remove-merged");
         let (record, _) =
             worktree_create(&s.registry_path, create_req(&s, Some("clean"))).unwrap();
-        let warnings = worktree_remove(&s.registry_path, &record.id, false, true).unwrap();
+        let warnings = worktree_remove(&s.registry_path, &record.id, false, true, &[]).unwrap();
         assert!(
             !warnings.iter().any(|w| w.contains("preserved")),
             "warnings: {warnings:?}"
@@ -778,11 +769,11 @@ mod tests {
         child_req.parent_worktree_id = Some(parent.id.clone());
         let (child, _) = worktree_create(&s.registry_path, child_req).unwrap();
 
-        let err = worktree_remove(&s.registry_path, &parent.id, false, false).unwrap_err();
+        let err = worktree_remove(&s.registry_path, &parent.id, false, false, &[]).unwrap_err();
         assert!(err.contains("remove children first"), "got: {err}");
 
-        worktree_remove(&s.registry_path, &child.id, false, false).unwrap();
-        assert!(worktree_remove(&s.registry_path, &parent.id, false, false).is_ok());
+        worktree_remove(&s.registry_path, &child.id, false, false, &[]).unwrap();
+        assert!(worktree_remove(&s.registry_path, &parent.id, false, false, &[]).is_ok());
     }
 
     #[test]
@@ -792,10 +783,109 @@ mod tests {
             worktree_create(&s.registry_path, create_req(&s, Some("dirty"))).unwrap();
         std::fs::write(record.path.join("uncommitted.txt"), "changes").unwrap();
 
-        let without_force = worktree_remove(&s.registry_path, &record.id, false, false);
+        let without_force = worktree_remove(&s.registry_path, &record.id, false, false, &[]);
         assert!(without_force.is_err());
 
-        worktree_remove(&s.registry_path, &record.id, true, false).unwrap();
+        worktree_remove(&s.registry_path, &record.id, true, false, &[]).unwrap();
         assert!(!record.path.exists());
+    }
+
+    #[test]
+    fn worktree_purge_happy_path_frees_name_and_unlinks_parent() {
+        let s = sandbox("purge-ok");
+        let (parent, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("purge-parent"))).unwrap();
+        let mut child_req = create_req(&s, Some("purge-kid"));
+        child_req.parent_worktree_id = Some(parent.id.clone());
+        let (child, _) = worktree_create(&s.registry_path, child_req).unwrap();
+
+        // delete_branch so the freed name can seed a fresh branch after purge.
+        worktree_remove(&s.registry_path, &child.id, false, true, &[]).unwrap();
+        assert_eq!(
+            worktree_create(&s.registry_path, create_req(&s, Some("purge-kid"))).unwrap_err(),
+            "worktree name already in use"
+        );
+
+        worktree_purge(&s.registry_path, &child.id).unwrap();
+        assert!(worktree_show(&s.registry_path, &child.id).is_err());
+        let parent_after = worktree_show(&s.registry_path, &parent.id).unwrap();
+        assert_eq!(parent_after.child_worktree_ids, Vec::<String>::new());
+
+        let (reused, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("purge-kid"))).unwrap();
+        assert_eq!(reused.name, "purge-kid");
+    }
+
+    #[test]
+    fn worktree_purge_rejects_live_record() {
+        let s = sandbox("purge-live");
+        let (record, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("still-here"))).unwrap();
+        let err = worktree_purge(&s.registry_path, &record.id).unwrap_err();
+        assert!(err.contains("only retired"), "got: {err}");
+    }
+
+    #[test]
+    fn worktree_purge_rejects_when_directory_still_exists() {
+        let s = sandbox("purge-dir");
+        let (record, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("dir-left"))).unwrap();
+
+        // Simulate a manual tombstone whose directory was never deleted on disk.
+        let mut registry = WorktreeRegistry::load(&s.registry_path);
+        registry
+            .worktrees
+            .get_mut(&record.id)
+            .unwrap()
+            .retired = true;
+        registry.save(&s.registry_path).unwrap();
+
+        let err = worktree_purge(&s.registry_path, &record.id).unwrap_err();
+        assert!(err.contains("directory still exists at"), "got: {err}");
+    }
+
+    #[test]
+    fn worktree_remove_blocked_by_live_session_worktree_id_match() {
+        let s = sandbox("gate-id");
+        let (record, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("gated-id"))).unwrap();
+        let live = vec![LiveSession {
+            session_id: "sess-1".into(),
+            cwd: None,
+            worktree_id: Some(record.id.clone()),
+        }];
+
+        let err = worktree_remove(&s.registry_path, &record.id, false, false, &live).unwrap_err();
+        assert!(err.contains("session sess-1 ("), "got: {err}");
+        assert!(record.path.exists(), "git remove must not run while blocked");
+        assert!(!worktree_show(&s.registry_path, &record.id).unwrap().retired);
+    }
+
+    #[test]
+    fn worktree_remove_blocked_by_live_session_cwd_under_worktree() {
+        let s = sandbox("gate-cwd");
+        let (record, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("gated-cwd"))).unwrap();
+        let live = vec![LiveSession {
+            session_id: "sess-cwd".into(),
+            cwd: Some(record.path.join("deep").to_string_lossy().into_owned()),
+            worktree_id: None,
+        }];
+
+        let err = worktree_remove(&s.registry_path, &record.id, false, false, &live).unwrap_err();
+        assert!(err.contains("session sess-cwd ("), "got: {err}");
+        assert!(record.path.exists());
+    }
+
+    #[test]
+    fn worktree_remove_proceeds_with_no_live_sessions_and_tombstones() {
+        let s = sandbox("gate-clear");
+        let (record, _) =
+            worktree_create(&s.registry_path, create_req(&s, Some("ungated"))).unwrap();
+
+        let warnings = worktree_remove(&s.registry_path, &record.id, false, false, &[]).unwrap();
+        assert!(warnings.is_empty());
+        assert!(!record.path.exists());
+        assert!(worktree_show(&s.registry_path, &record.id).unwrap().retired);
     }
 }
