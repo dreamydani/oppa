@@ -1,4 +1,11 @@
-:root {
+/* ==========================================================================
+   Design tokens & base element rules — SINGLE SOURCE OF TRUTH.
+   No other stylesheet may define a global custom property or element reset;
+   component-scoped token systems (--wizard-*) live beside their component.
+   Enforced by src/styles/tokens.test.ts.
+   ========================================================================== */
+:root,
+[data-theme="dark"] {
   /* Fonts */
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'SF Mono', Consolas, 'Cascadia Code', Menlo, monospace;
@@ -30,6 +37,17 @@
   --destructive: #e05252;
   --ring: rgba(255, 255, 255, 0.20);
 
+  /* Semantic aliases (component-facing names) */
+  --bg-window: var(--background, #141414);
+  --bg-sidebar: var(--sidebar, #212120);
+  --bg-terminal: #141414;
+  --bg-card-active: var(--card, #282827);
+  --bg-card-hover: var(--muted, #2e2e2d);
+  --border-divider: var(--border, rgba(255, 255, 255, 0.07));
+  --border-active: var(--ring, rgba(255, 255, 255, 0.20));
+  --text-primary: var(--foreground, #ededec);
+  --text-muted: var(--muted-foreground, #9e9e9a);
+
   /* Functional Tokens */
   --accent-blue: #58a6ff;
 
@@ -40,19 +58,62 @@
   --git-untracked: #a3e635;
 }
 
-*, *::before, *::after {
+[data-theme="light"] {
+  --bg-window: #fbfbfa;
+  --bg-sidebar: #f4f4f2;
+  --bg-terminal: #141414;
+  --bg-card-active: #ffffff;
+  --bg-card-hover: #ebebea;
+  --border-divider: rgba(0, 0, 0, 0.08);
+  --border-active: rgba(0, 0, 0, 0.22);
+  --text-primary: #18181b;
+  --text-muted: #71717a;
+  --accent-blue: #0969da;
+  --topbar-bg: #f4f4f2;
+  --workspace-bg: #f4f4f2;
+  --background: #fbfbfa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --sidebar: #f4f4f2;
+  --sidebar-foreground: #18181b;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --border: rgba(0, 0, 0, 0.08);
+  --muted: #ebebea;
+  --muted-foreground: #71717a;
+  --accent: #ebebea;
+  --accent-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #ffffff;
+  --destructive: #e05252;
+  --ring: rgba(0, 0, 0, 0.22);
+}
+
+/* ==========================================================================
+   Base Element Rules
+   ========================================================================== */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
   padding: 0;
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: var(--bg-window);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
 }
