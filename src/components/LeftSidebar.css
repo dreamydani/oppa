@@ -372,7 +372,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: var(--bg-card);
+  background-color: var(--bg-card-active);
   border: 1px solid var(--border-divider);
   color: var(--text-primary);
   padding: 6px 12px;

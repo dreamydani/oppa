@@ -50,6 +50,21 @@
 
   /* Functional Tokens */
   --accent-blue: #58a6ff;
+  --accent-cyan: #38bdf8;
+
+  /* Status Colors */
+  --status-running: #22c55e;
+  --status-warning: #eab308;
+
+  /* Overlay Surfaces (floating bars/modals over terminal content) */
+  --bg-overlay: #161922;
+  --bg-overlay-input: #0c0d12;
+  --bg-terminal-deep: #0c0c0e;
+
+  /* Interaction Tints */
+  --tint-hover: rgba(255, 255, 255, 0.06);
+  --tint-active: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.12);
 
   /* Git Status Colors */
   --git-added: #4ade80;
@@ -66,9 +81,15 @@
   --bg-card-hover: #ebebea;
   --border-divider: rgba(0, 0, 0, 0.08);
   --border-active: rgba(0, 0, 0, 0.22);
+  --bg-overlay: #ffffff;
+  --bg-overlay-input: #fbfbfa;
   --text-primary: #18181b;
   --text-muted: #71717a;
   --accent-blue: #0969da;
+  --accent-cyan: #0284c7;
+  --tint-hover: rgba(0, 0, 0, 0.04);
+  --tint-active: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
   --topbar-bg: #f4f4f2;
   --workspace-bg: #f4f4f2;
   --background: #fbfbfa;
