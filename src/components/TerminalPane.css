@@ -116,11 +116,5 @@
   border-radius: 4px;
 }
 
-/* Terminal grids never need horizontal scrolling — the strip would paint a
-   light bar across the bottom of dark sessions. */
-.terminal-pane .xterm-scrollable-element > .scrollbar.horizontal {
-  display: none !important;
-}
-
 
 

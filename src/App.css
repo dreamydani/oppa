@@ -590,9 +590,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  /* Follows the session's live terminal bg (set by TerminalPane) so no seam
-     shows around the canvas — right/bottom fit-remainders included. */
-  background-color: var(--session-term-bg, var(--bg-terminal, #141414));
+  background-color: var(--bg-terminal, #141414);
   border-radius: 6px;
 }
 
