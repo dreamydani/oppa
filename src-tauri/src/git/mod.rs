@@ -1,3 +1,5 @@
+pub mod worktree_naming;
+
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
