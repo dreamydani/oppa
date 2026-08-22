@@ -68,9 +68,10 @@ pub(crate) fn sanitize_name(input: &str) -> Result<String, String> {
 
 pub(crate) fn normalize_branch_prefix(raw: &str) -> String {
     raw.trim()
-        .replace("//", "/")
-        .trim_matches('/')
-        .to_string()
+        .split('/')
+        .filter(|seg| !seg.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(crate) fn branch_prefix_issue(prefix: &str) -> Option<&'static str> {
@@ -83,7 +84,7 @@ pub(crate) fn branch_prefix_issue(prefix: &str) -> Option<&'static str> {
         let cp = c as u32;
         cp < 0x20
             || c == ' '
-            || matches!(c, '~' | '^' | ':' | '?' | '*' | '[' | '\\' | ',')
+            || matches!(c, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
     });
     if bad_char
         || p.contains("..")
@@ -335,6 +336,8 @@ mod tests {
     fn normalize_empty_and_slash_only_become_empty() {
         assert_eq!(normalize_branch_prefix(""), "");
         assert_eq!(normalize_branch_prefix("///"), "");
+        assert_eq!(normalize_branch_prefix("a///b"), "a/b");
+        assert_eq!(normalize_branch_prefix("////team////x"), "team/x");
     }
 
     #[test]
@@ -342,6 +345,7 @@ mod tests {
         assert_eq!(branch_prefix_issue(""), None);
         assert_eq!(branch_prefix_issue("team"), None);
         assert_eq!(branch_prefix_issue("team.frontend/x-y"), None);
+        assert_eq!(branch_prefix_issue("comma,name"), None);
         assert_eq!(branch_prefix_issue("///"), None);
     }
 
