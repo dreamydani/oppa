@@ -46,7 +46,7 @@ pub(crate) fn run_git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
 }
 
 // Single failure formatter keeps stderr/stdout context on every propagated error.
-fn git_ok(cwd: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_ok(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let output = run_git(cwd, args)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     if output.status.success() {

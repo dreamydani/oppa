@@ -18,6 +18,12 @@ impl Drop for Sandbox {
 
 // Nanos + pid keeps parallel tests from sharing temp roots.
 pub(crate) fn sandbox(tag: &str) -> Sandbox {
+    let s = sandbox_without_commits(tag);
+    commit_file(&s.repo, "README.md", "# init", "initial");
+    s
+}
+
+pub(crate) fn sandbox_without_commits(tag: &str) -> Sandbox {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     let root = std::env::temp_dir().join(format!("oppa-wt-{tag}-{}-{nanos}", std::process::id()));
     let repo = root.join("repo");
@@ -25,7 +31,6 @@ pub(crate) fn sandbox(tag: &str) -> Sandbox {
     git(&repo, &["init", "-b", "main"]);
     git(&repo, &["config", "user.email", "test@oppa.dev"]);
     git(&repo, &["config", "user.name", "Oppa Test"]);
-    commit_file(&repo, "README.md", "# init", "initial");
     Sandbox {
         root: root.clone(),
         repo,
@@ -45,7 +50,14 @@ pub(crate) fn git(cwd: &Path, args: &[&str]) -> String {
 }
 
 pub(crate) fn commit_file(repo: &Path, name: &str, content: &str, message: &str) {
-    std::fs::write(repo.join(name), content).unwrap();
+    write_file(repo, name, content);
     git(repo, &["add", "-A"]);
     git(repo, &["commit", "-m", message]);
+}
+
+pub(crate) fn write_file(repo: &Path, name: &str, content: &str) {
+    if let Some(parent) = repo.join(name).parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(repo.join(name), content).unwrap();
 }

@@ -1,3 +1,4 @@
+pub mod source_control;
 pub mod teardown;
 pub mod worktree_lineage;
 pub mod worktree_naming;
