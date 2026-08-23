@@ -1,3 +1,5 @@
+use crate::agents::catalog::{self, build_launch_command, resolve_command, AgentProfile, PromptDelivery};
+use crate::agents::shell_line::join_argv;
 use crate::git::teardown::{session_cwd_inside, LiveSession};
 use crate::git::worktree_lineage::lineage_list;
 use crate::git::worktree_registry::WorktreeRegistry;
@@ -28,6 +30,11 @@ const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(3);
 // Bounded so a stalled client cannot grow memory; lagged receivers resync by design
 const GLOBAL_EVENT_CAPACITY: usize = 64;
 const REGISTRY_UNAVAILABLE: &str = "registry unavailable";
+// Daemon-initiated agent panes start at the classic size; GUI resize wins on attach
+const HANDOFF_COLS: u16 = 80;
+const HANDOFF_ROWS: u16 = 24;
+// Post-ready prompt delivery must outlast the shell's injection fallback window
+const PROMPT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Simple cancellation token for graceful shutdown of async listeners and sessions.
 #[derive(Clone, Default)]
@@ -333,8 +340,26 @@ impl DaemonServer {
                 parent_worktree_id,
                 workspace_dir,
                 nest_workspaces,
+                agent,
+                prompt,
+                command,
             } => match self.worktree_registry_path.as_deref() {
                 Some(registry_path) => {
+                    if agent.is_some() || command.is_some() {
+                        return self.create_worktree_with_agent(
+                            registry_path,
+                            &repo_path,
+                            name,
+                            branch,
+                            base_ref,
+                            parent_worktree_id,
+                            workspace_dir,
+                            nest_workspaces.unwrap_or(false),
+                            agent.as_deref(),
+                            prompt.as_deref(),
+                            command.as_deref(),
+                        );
+                    }
                     let req = WorktreeCreateRequest {
                         repo_path: PathBuf::from(repo_path),
                         name,
@@ -510,6 +535,177 @@ impl DaemonServer {
         }
         bindings.push(("OPPA_TAB_ID".to_string(), session_id.to_string()));
         Ok(bindings)
+    }
+
+    // Orca-parity full handoff: create the worktree, then launch the agent as an
+    // ordinary daemon session bound to it so warm reattach and ACK backpressure apply.
+    #[allow(clippy::too_many_arguments)]
+    fn create_worktree_with_agent(
+        &self,
+        registry_path: &Path,
+        repo_path: &str,
+        name: Option<String>,
+        branch: Option<String>,
+        base_ref: Option<String>,
+        parent_worktree_id: Option<String>,
+        workspace_dir: Option<String>,
+        nest_workspaces: bool,
+        agent: Option<&str>,
+        prompt: Option<&str>,
+        command: Option<&str>,
+    ) -> DaemonResponse {
+        if let Err(msg) = Self::validate_handoff(agent, prompt, command) {
+            return DaemonResponse::Error(msg);
+        }
+        let profile = match Self::resolve_handoff_profile(agent, command) {
+            Ok(profile) => profile,
+            Err(msg) => return DaemonResponse::Error(msg),
+        };
+        if let Err(msg) = Self::ensure_executable(profile) {
+            return DaemonResponse::Error(msg);
+        }
+        let req = WorktreeCreateRequest {
+            repo_path: PathBuf::from(repo_path),
+            name,
+            branch,
+            base_ref,
+            parent_worktree_id,
+            workspace_dir_override: workspace_dir.map(PathBuf::from),
+            nest_workspaces,
+        };
+        let record = match worktree_create(registry_path, req) {
+            Ok((record, _warnings)) => record,
+            Err(e) => return DaemonResponse::Error(e),
+        };
+        self.publish_global(DaemonEvent::WorktreeChanged {
+            id: Some(record.id.clone()),
+        });
+
+        let session_id = format!("agent-{}", uuid::Uuid::new_v4());
+        let mut env_bindings = match self.resolve_worktree_bindings(&None, Some(&record.id), &session_id)
+        {
+            Ok(bindings) => bindings,
+            Err(e) => return DaemonResponse::Error(e),
+        };
+        env_bindings.extend(
+            profile
+                .env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+        );
+        env_bindings.push(("OPPA_AGENT_ID".to_string(), profile.id.to_string()));
+
+        let argv_prompt = (profile.prompt_delivery == PromptDelivery::Arg)
+            .then_some(prompt)
+            .flatten();
+        let launch_argv = build_launch_command(profile, argv_prompt);
+        // The agent line rides the login shell like a typed command: ConPTY
+        // semantics stay uniform with every other pane.
+        let launch_line = join_argv(&launch_argv);
+
+        match DaemonSession::spawn(
+            session_id.clone(),
+            None,
+            Some(record.path.to_string_lossy().into_owned()),
+            HANDOFF_COLS,
+            HANDOFF_ROWS,
+            Some(&launch_line),
+            &env_bindings,
+        ) {
+            Ok(session) => {
+                if profile.prompt_delivery != PromptDelivery::Arg {
+                    if let Some(prompt) = prompt {
+                        Self::spawn_post_ready_prompt(&session, prompt.to_string());
+                    }
+                }
+                if let Some(dir) = &self.snapshot_dir {
+                    Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
+                    if Self::hook_install_allowed() {
+                        if let Some(home) = dirs::home_dir() {
+                            // Status capture is progressive enhancement: install failures must not block handoff.
+                            let _ = crate::pty::agent_hook_installer::install(dir, &home);
+                        }
+                    }
+                }
+                self.sessions.lock().insert(session_id.clone(), session);
+                DaemonResponse::AgentHandoff { record, session_id }
+            }
+            Err(e) => DaemonResponse::Error(e),
+        }
+    }
+
+    fn validate_handoff(
+        agent: Option<&str>,
+        prompt: Option<&str>,
+        command: Option<&str>,
+    ) -> Result<(), String> {
+        if agent.is_some() && command.is_some() {
+            return Err("--agent and --command are mutually exclusive".into());
+        }
+        if prompt.is_some() && agent.is_none() && command.is_none() {
+            return Err("--prompt requires --agent or --command".into());
+        }
+        Ok(())
+    }
+
+    fn resolve_handoff_profile(
+        agent: Option<&str>,
+        command: Option<&str>,
+    ) -> Result<&'static AgentProfile, String> {
+        match (agent, command) {
+            (Some(id), _) => catalog::lookup(id).ok_or_else(|| format!("unknown agent: {id}")),
+            (None, Some(cmd)) => Ok(Self::generic_profile(cmd)),
+            (None, None) => Ok(catalog::lookup("generic").expect("generic profile exists")),
+        }
+    }
+
+    // Raw commands become an ephemeral generic profile; leaking keeps &'static
+    // fields without growing the static catalog.
+    fn generic_profile(command_line: &str) -> &'static AgentProfile {
+        let mut parts = command_line.split_whitespace();
+        let program = parts.next().unwrap_or_default();
+        let args: &'static [&'static str] = Box::leak(
+            parts
+                .map(|part| Box::leak(part.to_string().into_boxed_str()) as &'static str)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
+        Box::leak(Box::new(AgentProfile {
+            id: "generic",
+            display_name: "Custom command",
+            command: Box::leak(program.to_string().into_boxed_str()),
+            default_args: args,
+            env: &[],
+            prompt_delivery: PromptDelivery::Arg,
+            prompt_arg: None,
+            prompt_argv_separator: None,
+            trust_preapproval_args: &[],
+        }))
+    }
+
+    fn ensure_executable(profile: &AgentProfile) -> Result<(), String> {
+        resolve_command(profile.command)
+            .map(|_| ())
+            .ok_or_else(|| format!("agent executable not found on PATH: {}", profile.command))
+    }
+
+    fn hook_install_allowed() -> bool {
+        std::env::var_os("OPPA_SKIP_HOOK_INSTALL").is_none()
+    }
+
+    // M1 deviation: PasteOnReady rides Stdin timing — both write once the
+    // shell reports ready (initial-command injection doubles as that signal).
+    fn spawn_post_ready_prompt(session: &Arc<DaemonSession>, prompt: String) {
+        let session = Arc::clone(session);
+        tokio::spawn(async move {
+            let deadline = Instant::now() + PROMPT_DELIVERY_TIMEOUT;
+            while Instant::now() < deadline
+                && !session.initial_command_written.load(Ordering::SeqCst)
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let _ = session.write(format!("{prompt}\r").as_bytes());
+        });
     }
 
     fn live_sessions(&self) -> Vec<LiveSession> {
@@ -1897,6 +2093,9 @@ mod tests {
             parent_worktree_id: None,
             workspace_dir: None,
             nest_workspaces: None,
+            agent: None,
+            prompt: None,
+            command: None,
         }
     }
 
@@ -2026,6 +2225,106 @@ mod tests {
             DaemonResponse::Error(e) => assert!(e.contains("not found"), "got: {e}"),
             other => panic!("expected purged record to be gone, got {other:?}"),
         }
+    }
+
+    // ---- task 12: worktree create --agent full handoff ----
+
+    #[test]
+    fn handoff_validation_rejects_conflicts_and_orphan_prompts() {
+        assert_eq!(
+            DaemonServer::validate_handoff(Some("claude"), Some("p"), None),
+            Ok(())
+        );
+        assert_eq!(
+            DaemonServer::validate_handoff(None, Some("p"), Some("x")),
+            Ok(())
+        );
+        match DaemonServer::validate_handoff(Some("claude"), None, Some("x")) {
+            Err(msg) => assert!(msg.contains("mutually exclusive"), "{msg}"),
+            Ok(()) => panic!("agent+command must be rejected"),
+        }
+        match DaemonServer::validate_handoff(None, Some("p"), None) {
+            Err(msg) => assert!(msg.contains("--prompt requires"), "{msg}"),
+            Ok(()) => panic!("prompt without target must be rejected"),
+        }
+        assert_eq!(DaemonServer::validate_handoff(None, None, None), Ok(()));
+    }
+
+    #[test]
+    fn unknown_agent_id_errors_and_generic_command_becomes_launch_profile() {
+        match DaemonServer::resolve_handoff_profile(Some("not-an-agent"), None) {
+            Err(msg) => assert!(msg.contains("unknown agent: not-an-agent"), "{msg}"),
+            Ok(_) => panic!("unknown id must fail"),
+        }
+        let profile = DaemonServer::resolve_handoff_profile(None, Some("mytool --fast")).unwrap();
+        assert_eq!(profile.command, "mytool");
+        let argv = build_launch_command(profile, Some("do it"));
+        assert_eq!(argv, vec!["mytool", "--fast", "do it"]);
+    }
+
+    #[test]
+    fn path_miss_names_the_missing_executable() {
+        let profile = DaemonServer::generic_profile("definitely-not-a-tool-xyz");
+        match DaemonServer::ensure_executable(profile) {
+            Err(msg) => assert_eq!(
+                msg,
+                "agent executable not found on PATH: definitely-not-a-tool-xyz"
+            ),
+            Ok(()) => panic!("garbage command must fail resolution"),
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_handoff_creates_worktree_spawns_bound_session_with_env() {
+        let s = crate::git::test_support::sandbox("handoff-unit");
+        std::env::set_var("OPPA_SKIP_HOOK_INSTALL", "1");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        });
+
+        let program = if cfg!(windows) { "cmd.exe /c exit" } else { "/bin/sh -c true" };
+        let req = DaemonRequest::WorktreeCreate {
+            repo_path: s.repo.to_string_lossy().into_owned(),
+            name: Some("agentized".into()),
+            branch: None,
+            base_ref: None,
+            parent_worktree_id: None,
+            workspace_dir: None,
+            nest_workspaces: None,
+            agent: None,
+            prompt: Some("hello".into()),
+            command: Some(program.into()),
+        };
+        let (record, session_id) = match server.handle_request(req) {
+            DaemonResponse::AgentHandoff { record, session_id } => (record, session_id),
+            other => panic!("expected AgentHandoff, got {other:?}"),
+        };
+        assert!(session_id.starts_with("agent-"));
+        assert_eq!(record.branch, "agentized");
+
+        // The handle IS the terminal identity: listed and attachable
+        match server.handle_request(DaemonRequest::ListSessions) {
+            DaemonResponse::SessionList(ids) => assert!(ids.contains(&session_id), "{ids:?}"),
+            other => panic!("expected SessionList, got {other:?}"),
+        }
+        let session = {
+            let sessions = server.sessions.lock();
+            sessions.get(&session_id).expect("registered").clone()
+        };
+        assert_eq!(session.worktree_id(), Some(record.id.as_str()));
+        assert!(
+            session
+                .env_bindings()
+                .iter()
+                .any(|(k, v)| k == "OPPA_AGENT_ID" && v == "generic"),
+            "pane must carry OPPA_AGENT_ID: {:?}",
+            session.env_bindings()
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill { session_id }),
+            DaemonResponse::Ok
+        );
     }
 
     #[tokio::test]

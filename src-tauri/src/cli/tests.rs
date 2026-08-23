@@ -93,10 +93,11 @@ use super::output::{
 use super::vocabulary::{normalize_verb, validate_verb, CANONICAL_COMMANDS};
 use super::{
     build_terminal_create, build_terminal_send, build_worktree_create, build_worktree_set,
-    decode_attached, decode_ok, decode_ps_entries, decode_read_screen, decode_repo_records,
-    decode_session_ids, decode_wait_result, decode_worktree_list,
+    decode_attached, decode_agent_handoff, decode_ok, decode_ps_entries, decode_read_screen,
+    decode_repo_records, decode_session_ids, decode_wait_result, decode_worktree_list,
     decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle,
-    parse_status, parse_wait_condition, CreateArgs, ParentUpdate, WAIT_GRACE_MS,
+    parse_status, parse_wait_condition, validate_create_handoff, CreateArgs, ParentUpdate,
+    WAIT_GRACE_MS,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
@@ -411,6 +412,9 @@ fn worktree_create_builder_maps_every_flag() {
         parent_worktree_id: Some("p"),
         workspace_dir: Some("/w"),
         nest_workspaces: true,
+        agent: Some("claude"),
+        prompt: Some("fix it"),
+        command: None,
     });
     match full {
         DaemonRequest::WorktreeCreate {
@@ -421,6 +425,9 @@ fn worktree_create_builder_maps_every_flag() {
             parent_worktree_id,
             workspace_dir,
             nest_workspaces,
+            agent,
+            prompt,
+            command,
         } => {
             assert_eq!(repo_path, "/r");
             assert_eq!(name.as_deref(), Some("n"));
@@ -429,6 +436,9 @@ fn worktree_create_builder_maps_every_flag() {
             assert_eq!(parent_worktree_id.as_deref(), Some("p"));
             assert_eq!(workspace_dir.as_deref(), Some("/w"));
             assert_eq!(nest_workspaces, Some(true));
+            assert_eq!(agent.as_deref(), Some("claude"));
+            assert_eq!(prompt.as_deref(), Some("fix it"));
+            assert_eq!(command, None);
         }
         other => panic!("expected WorktreeCreate, got {other:?}"),
     }
@@ -441,6 +451,9 @@ fn worktree_create_builder_maps_every_flag() {
         parent_worktree_id: None,
         workspace_dir: None,
         nest_workspaces: false,
+        agent: None,
+        prompt: None,
+        command: None,
     });
     match defaults {
         DaemonRequest::WorktreeCreate {
@@ -458,6 +471,49 @@ fn worktree_create_builder_maps_every_flag() {
             assert_eq!(nest_workspaces, Some(false));
         }
         other => panic!("expected WorktreeCreate, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_handoff_flags_enforce_mutual_exclusion_and_target_requirement() {
+    assert_eq!(validate_create_handoff(Some("claude"), Some("p"), None), Ok(()));
+    assert_eq!(validate_create_handoff(None, Some("p"), Some("x")), Ok(()));
+    assert_eq!(validate_create_handoff(Some("claude"), None, None), Ok(()));
+    assert_eq!(validate_create_handoff(None, None, None), Ok(()));
+
+    match validate_create_handoff(Some("claude"), None, Some("x")) {
+        Err(CliError::Usage(msg)) => assert!(msg.contains("mutually exclusive"), "{msg}"),
+        other => panic!("agent+command must be Usage error, got {other:?}"),
+    }
+    match validate_create_handoff(None, Some("p"), None) {
+        Err(CliError::Usage(msg)) => assert!(msg.contains("--agent or --command"), "{msg}"),
+        other => panic!("prompt without target must be Usage error, got {other:?}"),
+    }
+}
+
+#[test]
+fn agent_handoff_decoder_flattens_record_with_session_id() {
+    let handoff =
+        decode_agent_handoff(DaemonResponse::AgentHandoff {
+            record: internal_wt(WorktreeStatus::Todo),
+            session_id: "agent-abc".into(),
+        })
+        .unwrap();
+    assert_eq!(handoff.session_id, "agent-abc");
+    assert_eq!(handoff.record.id, "sample::C:/ws/feat-a");
+
+    let json = render_json(&handoff);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["session_id"], "agent-abc");
+    assert_eq!(parsed["name"], "feat-a", "record payload stays top-level");
+
+    match decode_agent_handoff(DaemonResponse::Error("boom".into())) {
+        Err(CliError::Daemon(msg)) => assert_eq!(msg, "boom"),
+        other => panic!("expected Daemon error, got {other:?}"),
+    }
+    match decode_agent_handoff(DaemonResponse::Ok) {
+        Err(CliError::Protocol(msg)) => assert!(msg.contains("unexpected agent handoff"), "{msg}"),
+        other => panic!("expected Protocol error, got {other:?}"),
     }
 }
 

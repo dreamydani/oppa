@@ -103,7 +103,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("worktree current", "oppa worktree current /some/dir"),
     (
         "worktree create",
-        "oppa worktree create feat-a --repo /path/to/repo --branch feat/a",
+        "oppa worktree create feat-a --repo /path/to/repo --branch feat/a --agent claude --prompt \"first task\"",
     ),
     ("worktree set", "oppa worktree set <id> --status in-progress"),
     ("worktree rm", "oppa worktree rm <id> --delete-branch"),

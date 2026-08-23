@@ -1,19 +1,19 @@
 use clap::Parser;
 use oppa_lib::cli::command_tree::{Cli, Command, RepoAction, TerminalAction, WorktreeAction};
 use oppa_lib::cli::output::{
-    render_agent_context, render_json, render_lineage_tree, render_ps_rows, render_repo_detail,
-    render_repo_table, render_screen_text, render_session_detail, render_session_list,
-    render_wait_result, render_worktree_list, render_worktree_show, CliActionNote, CliScreenText,
-    CliSessionDetail, CliSessionHandle, CliSplitHandles, CliWaitResult, OkPayload,
-    SWITCH_M1_NOTE,
+    render_agent_context, render_agent_handoff, render_json, render_lineage_tree, render_ps_rows,
+    render_repo_detail, render_repo_table, render_screen_text, render_session_detail,
+    render_session_list, render_wait_result, render_worktree_list, render_worktree_show,
+    CliActionNote, CliScreenText, CliSessionDetail, CliSessionHandle, CliSplitHandles,
+    CliWaitResult, OkPayload, SWITCH_M1_NOTE,
 };
 use oppa_lib::cli::{
     build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
     build_worktree_set, decode_attached, decode_ok, decode_ps_entries, decode_read_screen,
     decode_repo_records, decode_session_ids, decode_wait_result, decode_worktree_list,
-    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle, parse_status,
-    parse_wait_condition, CreateArgs, CliError, ParentUpdate, RuntimeConnection,
-    RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
+    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle,
+    parse_status, parse_wait_condition, validate_create_handoff, CreateArgs, CliError,
+    ParentUpdate, RuntimeConnection, RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
 };
 use oppa_lib::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
 use std::path::PathBuf;
@@ -148,7 +148,11 @@ fn run_worktree(action: &WorktreeAction, json: bool, timeout: Duration) -> Resul
             parent_worktree,
             workspace_dir,
             nest_workspaces,
+            agent,
+            prompt,
+            command,
         } => {
+            validate_create_handoff(agent.as_deref(), prompt.as_deref(), command.as_deref())?;
             let request = build_worktree_create(CreateArgs {
                 repo_path: repo,
                 name,
@@ -157,8 +161,17 @@ fn run_worktree(action: &WorktreeAction, json: bool, timeout: Duration) -> Resul
                 parent_worktree_id: parent_worktree.as_deref(),
                 workspace_dir: workspace_dir.as_deref(),
                 nest_workspaces: *nest_workspaces,
+                agent: agent.as_deref(),
+                prompt: prompt.as_deref(),
+                command: command.as_deref(),
             });
-            emit_single_record(send(request, timeout)?, json, name)
+            if agent.is_some() || command.is_some() {
+                let handoff =
+                    oppa_lib::cli::decode_agent_handoff(send(request, timeout)?)?;
+                emit(json, &handoff, || render_agent_handoff(&handoff))
+            } else {
+                emit_single_record(send(request, timeout)?, json, name)
+            }
         }
         WorktreeAction::Set {
             id,

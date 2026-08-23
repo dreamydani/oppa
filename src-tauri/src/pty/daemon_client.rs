@@ -489,6 +489,10 @@ impl DaemonClient {
             parent_worktree_id,
             workspace_dir,
             nest_workspaces,
+            // GUI agent-handoff surface arrives in a later milestone
+            agent: None,
+            prompt: None,
+            command: None,
         };
         match self.send_request(req)? {
             DaemonResponse::WorktreeRecordOne(Some(record)) => Ok(record),

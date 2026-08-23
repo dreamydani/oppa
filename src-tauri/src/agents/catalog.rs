@@ -24,6 +24,8 @@ pub struct AgentProfile {
     pub prompt_delivery: PromptDelivery,
     /// Flag whose value is the prompt (Arg delivery only); None => positional append
     pub prompt_arg: Option<&'static str>,
+    /// Guard inserted before a positional prompt so flag-like text stays a prompt
+    pub prompt_argv_separator: Option<&'static str>,
     pub trust_preapproval_args: &'static [&'static str],
 }
 
@@ -44,6 +46,8 @@ pub fn build_launch_command(profile: &AgentProfile, prompt: Option<&str>) -> Vec
         if let Some(prompt) = prompt {
             if let Some(flag) = profile.prompt_arg {
                 argv.push(flag.to_string());
+            } else if let Some(separator) = profile.prompt_argv_separator {
+                argv.push(separator.to_string());
             }
             argv.push(prompt.to_string());
         }
@@ -124,6 +128,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -134,6 +139,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -145,6 +151,7 @@ const PROFILES: &[AgentProfile] = &[
         // Orca flag-prompt-interactive: `--prompt-interactive <text>` keeps the session interactive
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: Some("--prompt-interactive"),
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -156,6 +163,7 @@ const PROFILES: &[AgentProfile] = &[
         // Orca treats qwen-code as stdin-after-start despite the gemini lineage
         prompt_delivery: PromptDelivery::Stdin,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -166,6 +174,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: Some("--prompt"),
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -174,11 +183,11 @@ const PROFILES: &[AgentProfile] = &[
         command: "grok",
         default_args: NO_ARGS,
         env: NO_ENV,
-        // Grok takes a positional prompt; Orca guards it with a `--` separator,
-        // which this struct cannot express yet — prompts starting with `-`
-        // or a subcommand word may need that guard added later.
+        // Grok takes a positional prompt; Orca guards it with a `--` separator
+        // so prompts that look like flags stay prompts.
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: Some("--"),
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -189,6 +198,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -199,6 +209,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Stdin,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -209,6 +220,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Stdin,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -219,6 +231,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -230,6 +243,7 @@ const PROFILES: &[AgentProfile] = &[
         // Orca flag-interactive: `-i` keeps the hosted session alive (--prompt would exit on completion)
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: Some("-i"),
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -240,6 +254,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Stdin,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -250,6 +265,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Stdin,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     AgentProfile {
@@ -260,6 +276,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: Some("--prompt-interactive"),
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
     // Placeholder for user-typed raw commands; never spawned via lookup.
@@ -271,6 +288,7 @@ const PROFILES: &[AgentProfile] = &[
         env: NO_ENV,
         prompt_delivery: PromptDelivery::Arg,
         prompt_arg: None,
+        prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
 ];
@@ -332,11 +350,33 @@ mod tests {
     }
 
     #[test]
-    fn grok_droid_take_prompt_positionally_without_prompt_arg() {
-        for id in ["grok", "droid"] {
-            let cmd = build_launch_command(lookup(id).unwrap(), Some("do it"));
-            assert_eq!(cmd, vec![lookup(id).unwrap().command, "do it"], "{id}");
-        }
+    fn grok_guards_positional_prompt_with_double_dash_separator() {
+        let cmd = build_launch_command(lookup("grok").unwrap(), Some("do it"));
+        assert_eq!(cmd, vec!["grok", "--", "do it"]);
+    }
+
+    #[test]
+    fn droid_takes_prompt_positionally_without_separator() {
+        let cmd = build_launch_command(lookup("droid").unwrap(), Some("do it"));
+        assert_eq!(cmd, vec!["droid", "do it"]);
+    }
+
+    #[test]
+    fn only_grok_declares_the_argv_separator() {
+        let with_separator: Vec<&str> = profiles()
+            .iter()
+            .filter(|p| p.prompt_argv_separator.is_some())
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(with_separator, vec!["grok"]);
+    }
+
+    #[test]
+    fn separator_is_omitted_when_no_prompt_or_flag_prompt_used() {
+        let bare = build_launch_command(lookup("grok").unwrap(), None);
+        assert_eq!(bare, vec!["grok"]);
+        let flagged = build_launch_command(lookup("gemini").unwrap(), Some("hi"));
+        assert!(!flagged.contains(&"--".to_string()));
     }
 
     #[test]
@@ -359,6 +399,7 @@ mod tests {
             env: &[],
             prompt_delivery: PromptDelivery::PasteOnReady,
             prompt_arg: None,
+            prompt_argv_separator: None,
             trust_preapproval_args: &[],
         };
         assert_eq!(build_launch_command(&profile, Some("draft")), vec!["synth"]);
@@ -374,6 +415,7 @@ mod tests {
             env: &[],
             prompt_delivery: PromptDelivery::Arg,
             prompt_arg: Some("--prompt"),
+            prompt_argv_separator: None,
             trust_preapproval_args: &["--trust"],
         };
         let cmd = build_launch_command(&profile, Some("do it"));

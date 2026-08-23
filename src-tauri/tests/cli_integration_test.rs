@@ -1,10 +1,10 @@
 use oppa_lib::cli::output::{render_json, render_lineage_tree, render_worktree_list};
 use oppa_lib::cli::{
     build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
-    build_worktree_set, decode_attached, decode_ok, decode_ps_entries, decode_read_screen,
-    decode_repo_records, decode_wait_result, decode_worktree_list, decode_worktree_many,
-    decode_worktree_one, filter_active_only, CreateArgs, CliError, ParentUpdate,
-    RuntimeConnection,
+    build_worktree_set, decode_agent_handoff, decode_attached, decode_ok, decode_ps_entries,
+    decode_read_screen, decode_repo_records, decode_session_ids, decode_wait_result,
+    decode_worktree_list, decode_worktree_many, decode_worktree_one, filter_active_only,
+    CreateArgs, CliError, ParentUpdate, RuntimeConnection,
 };
 use oppa_lib::git::worktree_registry::WorktreeStatus;
 use oppa_lib::pty::daemon_server::{CancellationToken, DaemonServer};
@@ -210,6 +210,9 @@ fn create_wt(conn: &mut RuntimeConnection, repo_path: &Path, name: &str, parent:
         parent_worktree_id: parent,
         workspace_dir: None,
         nest_workspaces: false,
+        agent: None,
+        prompt: None,
+        command: None,
     });
     decode_worktree_one(conn.request(request).expect("create roundtrip"))
         .expect("decode create")
@@ -332,6 +335,9 @@ fn tombstone_lifecycle_with_dup_name_and_blocked_remove() {
         parent_worktree_id: None,
         workspace_dir: None,
         nest_workspaces: false,
+        agent: None,
+        prompt: None,
+        command: None,
     });
     match decode_worktree_one(conn.request(dup).expect("dup roundtrip")) {
         Err(CliError::Daemon(msg)) => assert_eq!(msg, "worktree name already in use"),
@@ -747,4 +753,154 @@ fn split_inherits_cwd_over_pipe() {
     }
     cancel.cancel();
     listener.join().unwrap();
+}
+
+// ---- task 12: worktree create --agent full handoff ----
+
+fn write_fake_agent_script(dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let script = dir.join("fake-agent.cmd");
+        std::fs::write(&script, "@echo off\r\necho AGENT-GOT-PROMPT %*\r\n").unwrap();
+        script
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = dir.join("fake-agent.sh");
+        std::fs::write(&script, "#!/bin/sh\necho \"AGENT-GOT-PROMPT $*\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+}
+
+#[test]
+fn agent_handoff_spawns_fake_agent_and_delivers_prompt_in_new_worktree() {
+    // The daemon runs in-process; keep the best-effort hook installer off real agent configs.
+    std::env::set_var("OPPA_SKIP_HOOK_INSTALL", "1");
+    let (mut conn, root, listener, cancel) = start_registry_daemon("handoff");
+    let repo_dir = init_git_repo(&root, "agentrepo");
+    let repo_path_str = repo_dir.to_string_lossy().into_owned();
+
+    decode_repo_records(
+        conn.request(build_repo_add(&repo_path_str))
+            .expect("repo add"),
+    )
+    .expect("decode repo add");
+
+    let script = write_fake_agent_script(&root);
+    let resp = conn
+        .request(build_worktree_create(CreateArgs {
+            repo_path: &repo_path_str,
+            name: "agentized",
+            branch: None,
+            base_ref: None,
+            parent_worktree_id: None,
+            workspace_dir: None,
+            nest_workspaces: false,
+            agent: None,
+            prompt: Some("hello"),
+            command: Some(script.to_string_lossy().as_ref()),
+        }))
+        .expect("handoff roundtrip");
+    let handoff = decode_agent_handoff(resp).expect("decode handoff");
+    assert!(!handoff.session_id.is_empty(), "handle must be nonempty");
+
+    let idle = decode_wait_result(
+        conn.request(DaemonRequest::WaitFor {
+            session_id: handoff.session_id.clone(),
+            cond: WaitCondition::TuiIdle,
+            timeout_ms: 40_000,
+        })
+        .expect("idle wait"),
+    )
+    .expect("decode idle wait");
+    assert!(idle.satisfied, "fake agent run must reach tui-idle");
+
+    let screen = decode_read_screen(
+        conn.request(DaemonRequest::ReadScreen {
+            session_id: handoff.session_id.clone(),
+        })
+        .expect("read screen"),
+    )
+    .expect("decode screen");
+    assert!(
+        screen.text.contains("AGENT-GOT-PROMPT"),
+        "agent screen must show the run output: {:?}",
+        screen.text
+    );
+
+    let ids = decode_session_ids(conn.request(DaemonRequest::ListSessions).expect("list"))
+        .expect("decode session ids");
+    assert!(
+        ids.iter().any(|id| id == &handoff.session_id),
+        "agent terminal handle must appear in ListSessions: {ids:?}"
+    );
+
+    decode_ok(
+        conn.request(DaemonRequest::Kill {
+            session_id: handoff.session_id,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    shutdown_daemon((conn, root, listener, cancel));
+}
+
+#[test]
+fn agent_handoff_unknown_agent_and_missing_binary_are_clean_errors_without_orphans() {
+    std::env::set_var("OPPA_SKIP_HOOK_INSTALL", "1");
+    let (mut conn, root, listener, cancel) = start_registry_daemon("handoff-bad");
+    let repo_dir = init_git_repo(&root, "repo");
+    let repo_path_str = repo_dir.to_string_lossy().into_owned();
+
+    let unknown = conn
+        .request(build_worktree_create(CreateArgs {
+            repo_path: &repo_path_str,
+            name: "bad-agent",
+            branch: None,
+            base_ref: None,
+            parent_worktree_id: None,
+            workspace_dir: None,
+            nest_workspaces: false,
+            agent: Some("not-an-agent"),
+            prompt: Some("hi"),
+            command: None,
+        }))
+        .expect("unknown-agent roundtrip");
+    match decode_agent_handoff(unknown) {
+        Err(CliError::Daemon(msg)) => assert!(msg.contains("unknown agent"), "{msg}"),
+        other => panic!("expected clean unknown-agent error, got {other:?}"),
+    }
+
+    let missing_bin = conn
+        .request(build_worktree_create(CreateArgs {
+            repo_path: &repo_path_str,
+            name: "missing-bin",
+            branch: None,
+            base_ref: None,
+            parent_worktree_id: None,
+            workspace_dir: None,
+            nest_workspaces: false,
+            agent: None,
+            prompt: Some("hi"),
+            command: Some("definitely-not-a-tool-xyz"),
+        }))
+        .expect("missing-binary roundtrip");
+    match decode_agent_handoff(missing_bin) {
+        Err(CliError::Daemon(msg)) => assert!(
+            msg.contains("agent executable not found on PATH"),
+            "{msg}"
+        ),
+        other => panic!("expected clean PATH-miss error, got {other:?}"),
+    }
+
+    let entries = decode_worktree_list(conn.request(DaemonRequest::WorktreeList).unwrap())
+        .unwrap();
+    assert_eq!(
+        filter_active_only(entries).len(),
+        0,
+        "failed handoffs must not leave worktree records"
+    );
+    shutdown_daemon((conn, root, listener, cancel));
 }

@@ -125,6 +125,14 @@ pub struct CliSplitHandles {
     pub secondary: String,
 }
 
+// Flattened so JSON keeps the record payload at the top level with session_id alongside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliAgentHandoff {
+    #[serde(flatten)]
+    pub record: CliWorktreeRecord,
+    pub session_id: String,
+}
+
 pub fn render_json<T: Serialize + ?Sized>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
 }
@@ -293,6 +301,14 @@ pub fn render_ps_rows(entries: &[CliWorktreePsEntry]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+pub fn render_agent_handoff(handoff: &CliAgentHandoff) -> String {
+    format!(
+        "{}\nagent terminal: {}",
+        render_worktree_show(&handoff.record),
+        handoff.session_id
+    )
 }
 
 // BFS order from the daemon guarantees a parent precedes each child, so depths resolve in one pass.

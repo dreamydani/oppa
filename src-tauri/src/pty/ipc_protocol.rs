@@ -120,6 +120,13 @@ pub enum DaemonRequest {
         workspace_dir: Option<String>,
         #[serde(default)]
         nest_workspaces: Option<bool>,
+        // Agent handoff (v3): catalog agent id or raw command, plus first prompt
+        #[serde(default)]
+        agent: Option<String>,
+        #[serde(default)]
+        prompt: Option<String>,
+        #[serde(default)]
+        command: Option<String>,
     },
     WorktreeList,
     WorktreeShow { id: String },
@@ -171,6 +178,11 @@ pub enum DaemonResponse {
     WorktreeRecordOne(Option<WorktreeRecord>),
     WorktreeRecordsList(Vec<WorktreeRecord>),
     WorktreePsEntries(Vec<WorktreePsEntry>),
+    // session_id IS the agent terminal handle: attaching to it opens the agent pane
+    AgentHandoff {
+        record: WorktreeRecord,
+        session_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,6 +476,21 @@ mod tests {
                 parent_worktree_id: None,
                 workspace_dir: Some("/tmp/ws".into()),
                 nest_workspaces: Some(true),
+                agent: None,
+                prompt: None,
+                command: None,
+            },
+            DaemonRequest::WorktreeCreate {
+                repo_path: "/tmp/repo".into(),
+                name: Some("agentized".into()),
+                branch: None,
+                base_ref: None,
+                parent_worktree_id: None,
+                workspace_dir: None,
+                nest_workspaces: None,
+                agent: Some("claude".into()),
+                prompt: Some("fix it".into()),
+                command: None,
             },
             DaemonRequest::WorktreeList,
             DaemonRequest::WorktreeShow { id: "sample::/tmp/x".into() },
@@ -519,12 +546,47 @@ mod tests {
                 record: sample_worktree_record("wt-1"),
                 live_sessions: 2,
             }]),
+            DaemonResponse::AgentHandoff {
+                record: sample_worktree_record("wt-agent"),
+                session_id: "wt-abc-123".into(),
+            },
         ];
 
         for res in responses {
             let json = serde_json::to_string(&res).expect("serialize response");
-            let decoded: DaemonResponse = serde_json::from_str(&json).expect("deserialize response");
+            let decoded: DaemonResponse =
+                serde_json::from_str(&json).expect("deserialize response");
             assert_eq!(res, decoded);
+        }
+    }
+
+    #[test]
+    fn test_agent_handoff_wire_shape_carries_record_and_session_id() {
+        let json = serde_json::to_value(DaemonResponse::AgentHandoff {
+            record: sample_worktree_record("wt-x"),
+            session_id: "wt-sid".into(),
+        })
+        .unwrap();
+        assert_eq!(json["type"], "AgentHandoff");
+        assert_eq!(json["payload"]["session_id"], "wt-sid");
+        assert_eq!(json["payload"]["record"]["id"], "wt-x");
+    }
+
+    #[test]
+    fn test_worktree_create_without_handoff_fields_still_deserializes() {
+        let legacy = r#"{"type":"WorktreeCreate","payload":{"repo_path":"/tmp/repo","name":"feat-a"}}"#;
+        match serde_json::from_str::<DaemonRequest>(legacy).expect("legacy create") {
+            DaemonRequest::WorktreeCreate {
+                agent,
+                prompt,
+                command,
+                ..
+            } => {
+                assert_eq!(agent, None);
+                assert_eq!(prompt, None);
+                assert_eq!(command, None);
+            }
+            other => panic!("expected WorktreeCreate, got {other:?}"),
         }
     }
 

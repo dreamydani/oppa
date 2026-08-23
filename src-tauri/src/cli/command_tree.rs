@@ -75,6 +75,15 @@ pub enum WorktreeAction {
         workspace_dir: Option<String>,
         #[arg(long = "nest-workspaces")]
         nest_workspaces: bool,
+        /// Catalog agent id to launch inside the new worktree
+        #[arg(long, conflicts_with = "command")]
+        agent: Option<String>,
+        /// First prompt handed to the launched agent
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Raw launch command line instead of a catalog agent id
+        #[arg(long)]
+        command: Option<String>,
     },
     /// Update status, display name, or parent of a worktree
     Set {

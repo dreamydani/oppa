@@ -222,6 +222,9 @@ pub struct CreateArgs<'a> {
     pub parent_worktree_id: Option<&'a str>,
     pub workspace_dir: Option<&'a str>,
     pub nest_workspaces: bool,
+    pub agent: Option<&'a str>,
+    pub prompt: Option<&'a str>,
+    pub command: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +259,29 @@ pub fn build_worktree_create(args: CreateArgs) -> DaemonRequest {
         parent_worktree_id: args.parent_worktree_id.map(Into::into),
         workspace_dir: args.workspace_dir.map(Into::into),
         nest_workspaces: Some(args.nest_workspaces),
+        agent: args.agent.map(Into::into),
+        prompt: args.prompt.map(Into::into),
+        command: args.command.map(Into::into),
     }
+}
+
+// The daemon re-validates; this early check gives CLI users a clean usage error.
+pub fn validate_create_handoff(
+    agent: Option<&str>,
+    prompt: Option<&str>,
+    command: Option<&str>,
+) -> Result<(), CliError> {
+    if agent.is_some() && command.is_some() {
+        return Err(CliError::Usage(
+            "--agent and --command are mutually exclusive".into(),
+        ));
+    }
+    if prompt.is_some() && agent.is_none() && command.is_none() {
+        return Err(CliError::Usage(
+            "--prompt requires --agent or --command".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn build_worktree_set(
@@ -396,6 +421,17 @@ pub fn decode_ps_entries(resp: DaemonResponse) -> Result<Vec<CliWorktreePsEntry>
     }
 }
 
+pub fn decode_agent_handoff(resp: DaemonResponse) -> Result<output::CliAgentHandoff, CliError> {
+    match resp {
+        DaemonResponse::AgentHandoff { record, session_id } => Ok(output::CliAgentHandoff {
+            record: (&record).into(),
+            session_id,
+        }),
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg)),
+        other => Err(unexpected("agent handoff", &other)),
+    }
+}
+
 pub fn decode_ok(resp: DaemonResponse) -> Result<(), CliError> {
     match resp {
         DaemonResponse::Ok => Ok(()),
@@ -488,6 +524,7 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::WorktreeRecordOne(_) => "WorktreeRecordOne".into(),
         DaemonResponse::WorktreeRecordsList(_) => "WorktreeRecordsList".into(),
         DaemonResponse::WorktreePsEntries(_) => "WorktreePsEntries".into(),
+        DaemonResponse::AgentHandoff { .. } => "AgentHandoff".into(),
         DaemonResponse::ScreenText { .. } => "ScreenText".into(),
         DaemonResponse::WaitResult { .. } => "WaitResult".into(),
     }
