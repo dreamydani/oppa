@@ -4,6 +4,7 @@ import { useTerminalStore, setGitChangedListening } from "../../store/terminalSt
 import type { GitArea, StatusEntry } from "../../lib/pty/transport";
 import { generateCommitMessage } from "../../lib/pty/transport";
 import { DiffNotesShelf } from "./DiffNotesShelf";
+import { ReviewComposer } from "./ReviewComposer";
 
 interface GitSourceControlProps {
   refreshKey?: number;
@@ -332,6 +333,8 @@ export function GitSourceControl({ refreshKey = 0 }: GitSourceControlProps): Rea
           <RefreshCw size={13} />
         </button>
       </div>
+
+      <ReviewComposer />
 
       <div className="git-sync-row">
         <button type="button" className="git-sync-btn" disabled={syncing !== null} onClick={handleFetch}>

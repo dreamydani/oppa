@@ -1,5 +1,6 @@
 use crate::agents::catalog::PromptDelivery;
 use crate::git::commit_message::CommitMessage;
+use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
@@ -607,6 +608,14 @@ pub fn sc_generate_commit_message(
     cwd: String,
 ) -> Result<CommitMessage, String> {
     manager.get_client()?.sc_generate_commit_message(&cwd)
+}
+
+#[tauri::command]
+pub fn sc_generate_pr_message(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+) -> Result<PrMessage, String> {
+    manager.get_client()?.sc_generate_pr_message(&cwd)
 }
 
 #[tauri::command]

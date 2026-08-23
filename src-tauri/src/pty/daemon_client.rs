@@ -1,4 +1,5 @@
 use crate::git::commit_message::CommitMessage;
+use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
@@ -907,6 +908,16 @@ impl DaemonClient {
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!(
                 "unexpected response for GitGenerateCommitMessage: {other:?}"
+            )),
+        }
+    }
+
+    pub fn sc_generate_pr_message(&self, cwd: &str) -> Result<PrMessage, String> {
+        match self.send_request(DaemonRequest::GitGeneratePrMessage { cwd: cwd.into() })? {
+            DaemonResponse::ScPrMessage(msg) => Ok(msg),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for GitGeneratePrMessage: {other:?}"
             )),
         }
     }

@@ -1,6 +1,7 @@
 use crate::agents::catalog::{self, build_launch_command, resolve_command, AgentProfile, PromptDelivery};
 use crate::agents::shell_line::join_argv;
 use crate::git::commit_message::{sc_generate_commit_message, CommitMessage};
+use crate::git::pr_message::sc_generate_pr_message;
 use crate::git::comments_store::{
     comment_add, comment_delete, comment_update, comments_list, comments_mark_sent,
 };
@@ -652,6 +653,10 @@ impl DaemonServer {
                 || sc_generate_commit_message(Path::new(&cwd))
                     .map(|message| CommitMessage { message }),
                 DaemonResponse::ScCommitMessage,
+            ),
+            DaemonRequest::GitGeneratePrMessage { cwd } => self.sc_response(
+                || sc_generate_pr_message(Path::new(&cwd)),
+                DaemonResponse::ScPrMessage,
             ),
             DaemonRequest::DiffCommentsList { worktree_id } => self.comment_response(
                 |store| comments_list(&store, &worktree_id),

@@ -534,3 +534,12 @@ export function requestReviewStatus(cwd: string): Promise<PrStatus> {
 export async function onPrChanged(cb: (p: PrChangedPayload) => void) {
   return listen<PrChangedPayload>("pr-changed", (e) => cb(e.payload));
 }
+
+export interface PrMessage {
+  title: string;
+  body: string;
+}
+
+export function generatePrMessage(cwd: string): Promise<PrMessage> {
+  return invoke("sc_generate_pr_message", { cwd });
+}

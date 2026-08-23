@@ -1,6 +1,7 @@
 pub mod commit_message;
 pub mod comments_store;
 pub mod hosted_reviews;
+pub mod pr_message;
 pub mod source_control;
 pub mod teardown;
 pub mod worktree_lineage;

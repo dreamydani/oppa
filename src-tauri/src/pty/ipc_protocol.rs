@@ -1,5 +1,6 @@
 use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::pr_message::PrMessage;
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
     SourceControlStatus, UpstreamStatus,
@@ -212,6 +213,7 @@ pub enum DaemonRequest {
         draft: bool,
     },
     ReviewStatus { cwd: String },
+    GitGeneratePrMessage { cwd: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +263,7 @@ pub enum DaemonResponse {
     ReviewEligibility(Eligibility),
     CreateReview(CreatedReview),
     ReviewStatus(PrStatus),
+    ScPrMessage(PrMessage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

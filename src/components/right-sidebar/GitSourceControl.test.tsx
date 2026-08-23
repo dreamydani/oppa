@@ -5,6 +5,10 @@ import { useTerminalStore } from "../../store/terminalStore";
 import type { PullOutcome, SourceControlStatus } from "../../lib/pty/transport";
 import * as ptyTransport from "../../lib/pty/transport";
 
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../lib/pty/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
   scStatus: vi.fn(),
@@ -26,6 +30,34 @@ vi.mock("../../lib/pty/transport", async (importOriginal) => ({
   scFastForward: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
   scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/main", was_publish: false }),
   generateCommitMessage: vi.fn().mockResolvedValue({ message: "" }),
+  generatePrMessage: vi.fn().mockResolvedValue({ title: "feat: pr", body: "body" }),
+  requestReviewEligibility: vi.fn().mockResolvedValue({
+    eligible: true,
+    blocked_reason: null,
+    base_ref: "main",
+    owner_repo: "owner/repo",
+    existing_pr_url: null,
+  }),
+  requestCreateReview: vi.fn().mockResolvedValue({
+    pr_url: "https://github.com/owner/repo/pull/1",
+    pr_number: 1,
+    base_ref: "main",
+    owner_repo: "owner/repo",
+  }),
+  requestReviewStatus: vi.fn().mockResolvedValue({
+    number: 1,
+    title: "t",
+    url: "https://github.com/owner/repo/pull/1",
+    state: "open",
+    draft: false,
+    mergeable: "unknown",
+    base_ref_name: "main",
+    head_ref_name: "feat",
+    checks: [],
+    fetched_at_ms: 0,
+  }),
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 const scStatusMock = vi.mocked(ptyTransport.scStatus);
