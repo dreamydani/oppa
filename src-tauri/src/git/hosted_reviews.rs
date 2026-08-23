@@ -3,14 +3,18 @@
 
 use crate::agents::catalog;
 use crate::git::source_control::{sc_status, validate_ref_name, ConflictState};
-use crate::git::worktrees::run_git;
+use crate::git::worktree_registry::WorktreeRegistry;
+use crate::git::worktrees::{run_git, worktree_current};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const GH_AUTH_TIMEOUT_SECS: u64 = 10;
+const GH_CREATE_TIMEOUT_SECS: u64 = 60;
+const MAX_TITLE_CHARS: usize = 200;
+const MAX_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -49,6 +53,27 @@ pub struct Eligibility {
     pub base_ref: Option<String>,
     pub owner_repo: Option<String>,
     pub existing_pr_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateReviewInput {
+    pub title: String,
+    pub body: String,
+    pub draft: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatedReview {
+    pub pr_url: String,
+    pub pr_number: Option<u32>,
+    pub base_ref: String,
+    pub owner_repo: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GhRunError {
+    Failed { stderr: String },
+    TimedOut,
 }
 
 pub fn forge_info(cwd: &Path) -> ForgeInfo {
@@ -240,6 +265,235 @@ pub fn review_eligibility(
 // Real-gh wiring for daemon/UI callers; PR lookup arrives with the task-2 gh client.
 pub fn review_eligibility_live(cwd: &Path) -> Eligibility {
     review_eligibility(cwd, &|| gh_available(None), &|_owner_repo, _branch| None)
+}
+
+fn blocked_message(reason: &BlockedReason) -> String {
+    // Serde's kebab wire-name doubles as the human-facing reason token.
+    let kebab = serde_json::to_string(reason).unwrap_or_default();
+    format!("blocked: {}", kebab.trim_matches('"'))
+}
+
+fn current_branch(cwd: &Path) -> Option<String> {
+    let out = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !name.is_empty() && name != "HEAD").then_some(name)
+}
+
+fn extract_pr_url(stdout: &str) -> Option<String> {
+    stdout
+        .split_whitespace()
+        .filter(|token| token.contains("/pull/"))
+        .next_back()
+        .map(str::to_string)
+}
+
+fn pr_number_from_url(pr_url: &str) -> Option<u32> {
+    pr_url.rsplit('/').next()?.parse().ok()
+}
+
+// Drop guard so the body file vanishes on every exit path, success or failure.
+struct TempBodyFile {
+    path: PathBuf,
+}
+
+impl TempBodyFile {
+    fn write(body: &str) -> Result<TempBodyFile, String> {
+        // Unique suffix keeps parallel creates from colliding in the shared temp dir.
+        let path =
+            std::env::temp_dir().join(format!("oppa-pr-body-{}.md", uuid::Uuid::new_v4()));
+        std::fs::write(&path, body).map_err(|e| format!("cannot write pr body temp file: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(TempBodyFile { path })
+    }
+}
+
+impl Drop for TempBodyFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn stamp_linked_pr(registry_path: &Path, cwd: &Path, pr_url: &str) {
+    // Longest-prefix match mirrors worktree_current; no record ⇒ nothing to link.
+    let Some(record) = worktree_current(registry_path, cwd) else { return };
+    let mut registry = WorktreeRegistry::load(registry_path);
+    if let Some(worktree) = registry.worktrees.get_mut(&record.id) {
+        worktree.linked_pr_url = Some(pr_url.to_string());
+        let _ = registry.save(registry_path);
+    }
+}
+
+pub fn create_pull_request(
+    cwd: &Path,
+    registry_path: &Path,
+    input: CreateReviewInput,
+    gh_runner: &dyn Fn(&[&str]) -> Result<String, GhRunError>,
+    pr_lookup: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<CreatedReview, String> {
+    let title = input.title.trim();
+    if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+        return Err(format!("invalid title: must be 1-{MAX_TITLE_CHARS} characters"));
+    }
+    if input.body.len() > MAX_BODY_BYTES {
+        return Err(format!("invalid body: exceeds {}KB limit", MAX_BODY_BYTES / 1024));
+    }
+
+    // Auth rides the same injectable runner so tests observe every gh argv.
+    let auth_probe = || match gh_runner(&["auth", "status"]) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(BlockedReason::GhNotAuthed),
+    };
+    let eligibility = review_eligibility(cwd, &auth_probe, pr_lookup);
+    if !eligibility.eligible {
+        return Err(eligibility
+            .blocked_reason
+            .as_ref()
+            .map(blocked_message)
+            .unwrap_or_else(|| "blocked: unknown".into()));
+    }
+    let base_ref =
+        eligibility.base_ref.clone().ok_or_else(|| "eligibility missing base ref".to_string())?;
+    let owner_repo = eligibility
+        .owner_repo
+        .clone()
+        .ok_or_else(|| "eligibility missing owner/repo".to_string())?;
+    if let Some(existing) = eligibility.existing_pr_url.clone() {
+        // Duplicate safety: an open PR for this branch is returned, never recreated.
+        stamp_linked_pr(registry_path, cwd, &existing);
+        return Ok(CreatedReview {
+            pr_number: pr_number_from_url(&existing),
+            pr_url: existing,
+            base_ref,
+            owner_repo,
+        });
+    }
+    let branch = current_branch(cwd)
+        .ok_or_else(|| blocked_message(&BlockedReason::DetachedHead))?;
+
+    let body_file = TempBodyFile::write(&input.body)?;
+    let body_path_text = body_file.path.to_string_lossy().into_owned();
+    let mut argv: Vec<&str> = vec![
+        "pr",
+        "create",
+        "--repo",
+        owner_repo.as_str(),
+        "--base",
+        base_ref.as_str(),
+        "--title",
+        title,
+        "--body-file",
+        body_path_text.as_str(),
+        "--head",
+        branch.as_str(),
+    ];
+    if input.draft {
+        argv.push("--draft");
+    }
+
+    let finish = |pr_url: String| {
+        stamp_linked_pr(registry_path, cwd, &pr_url);
+        CreatedReview {
+            pr_number: pr_number_from_url(&pr_url),
+            base_ref: base_ref.clone(),
+            owner_repo: owner_repo.clone(),
+            pr_url,
+        }
+    };
+
+    match gh_runner(&argv) {
+        Ok(stdout) => {
+            if let Some(pr_url) = extract_pr_url(&stdout) {
+                return Ok(finish(pr_url));
+            }
+            // Ambiguous: the PR may exist despite unusable stdout.
+            match pr_lookup(owner_repo.as_str(), &branch) {
+                Some(pr_url) => Ok(finish(pr_url)),
+                None => Err(format!(
+                    "pr create failed: no pull request URL in output: {}",
+                    stdout.trim()
+                )),
+            }
+        }
+        // Timeout stays ambiguous: create may have landed before the kill, so probe too.
+        Err(GhRunError::TimedOut) => match pr_lookup(owner_repo.as_str(), &branch) {
+            Some(pr_url) => Ok(finish(pr_url)),
+            None => Err("pr create failed: gh timed out after 60s".into()),
+        },
+        Err(GhRunError::Failed { stderr }) => {
+            if stderr.contains("already exists") {
+                match pr_lookup(owner_repo.as_str(), &branch) {
+                    Some(pr_url) => Ok(finish(pr_url)),
+                    None => Err(format!("pr create failed: {stderr}")),
+                }
+            } else {
+                Err(format!("pr create failed: {stderr}"))
+            }
+        }
+    }
+}
+
+fn run_gh_argv(program: &Path, argv: &[String]) -> Result<String, GhRunError> {
+    use std::io::Read;
+    let mut cmd = Command::new(program);
+    cmd.args(argv)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| GhRunError::Failed { stderr: format!("gh spawn failed: {e}") })?;
+    let deadline = Instant::now() + Duration::from_secs(GH_CREATE_TIMEOUT_SECS);
+    let outcome = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(GhRunError::TimedOut);
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => break Err(GhRunError::Failed { stderr: format!("gh wait failed: {e}") }),
+        }
+    };
+    let mut stdout_text = String::new();
+    let mut stderr_text = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout_text);
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr_text);
+    }
+    match outcome {
+        Err(err) => Err(err),
+        Ok(status) if status.success() => Ok(stdout_text),
+        Ok(_) => Err(GhRunError::Failed { stderr: stderr_text.trim().to_string() }),
+    }
+}
+
+// Real-gh wiring; lookup stays a None-stub until the task-3 gh client lands.
+pub fn create_pull_request_live(
+    cwd: &Path,
+    registry_path: &Path,
+    input: CreateReviewInput,
+) -> Result<CreatedReview, String> {
+    let program = catalog::resolve_command_with_path("gh", None)
+        .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
+    let runner = |argv: &[&str]| -> Result<String, GhRunError> {
+        let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+        run_gh_argv(&program, &owned)
+    };
+    let lookup = |_owner_repo: &str, _branch: &str| -> Option<String> { None };
+    create_pull_request(cwd, registry_path, input, &runner, &lookup)
 }
 
 #[cfg(test)]
@@ -621,5 +875,405 @@ mod tests {
         let (s, _bare) = feature_ready("el-live");
         let out = review_eligibility_live(&s.repo);
         assert_eq!(out.blocked_reason, Some(BlockedReason::UnsupportedProvider));
+    }
+
+    // ---------- task 2: pr creation service ----------
+
+    use crate::git::worktree_registry::{
+        worktree_record_id, WorktreeRecord, WorktreeRegistry, WorktreeStatus,
+    };
+
+    const CREATED_URL: &str = "https://github.com/oppa-tests/review-eligibility/pull/9";
+
+    type ArgvLog = Mutex<Vec<Vec<String>>>;
+
+    fn review_input(title: &str, body: &str, draft: bool) -> CreateReviewInput {
+        CreateReviewInput { title: title.into(), body: body.into(), draft }
+    }
+
+    fn log_args(log: &ArgvLog, argv: &[&str]) {
+        log.lock().unwrap().push(argv.iter().map(|s| s.to_string()).collect());
+    }
+
+    fn create_calls(log: &ArgvLog) -> Vec<Vec<String>> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.first().map(String::as_str) == Some("pr"))
+            .cloned()
+            .collect()
+    }
+
+    fn register_worktree_at(registry_path: &Path, repo_id: &str, name: &str, path: &Path) -> String {
+        let id = worktree_record_id(repo_id, path);
+        registry_path.parent().map(std::fs::create_dir_all).unwrap_or(Ok(())).unwrap();
+        let mut registry = WorktreeRegistry::load(registry_path);
+        registry.upsert_worktree(WorktreeRecord {
+            id: id.clone(),
+            repo_id: repo_id.into(),
+            name: name.into(),
+            display_name: None,
+            branch: "feature".into(),
+            path: path.to_path_buf(),
+            base_ref: "main".into(),
+            parent_worktree_id: None,
+            child_worktree_ids: vec![],
+            workspace_status: WorktreeStatus::Todo,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: None,
+        });
+        registry.save(registry_path).unwrap();
+        id
+    }
+
+    // Echo runner: auth passes, pr create yields CREATED_URL; every argv is logged.
+    fn echo_runner(log: &ArgvLog) -> impl Fn(&[&str]) -> Result<String, GhRunError> + '_ {
+        move |argv: &[&str]| {
+            log_args(log, argv);
+            if argv.first() == Some(&"auth") {
+                Ok(String::new())
+            } else {
+                Ok(format!("{CREATED_URL}\n"))
+            }
+        }
+    }
+
+    #[test]
+    fn create_happy_path_argv_body_lifecycle_and_nested_prefix_stamp() {
+        let (s, _bare) = eligible_state("cr-happy");
+        let root_record = register_worktree_at(&s.registry_path, "r1", "root-wt", &s.repo);
+        std::fs::create_dir_all(s.repo.join("src")).unwrap();
+        let nested_record =
+            register_worktree_at(&s.registry_path, "r1", "nested-wt", &s.repo.join("src"));
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let body_seen_during_call = Mutex::new(None::<bool>);
+        let runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            log_args(&log, argv);
+            if argv.first() == Some(&"auth") {
+                return Ok(String::new());
+            }
+            let body_index = argv.iter().position(|a| *a == "--body-file").unwrap() + 1;
+            *body_seen_during_call.lock().unwrap() = Some(Path::new(argv[body_index]).exists());
+            Ok(format!("{CREATED_URL}\n"))
+        };
+        let out = create_pull_request(
+            &s.repo.join("src"),
+            &s.registry_path,
+            review_input("Title", "Body", false),
+            &runner,
+            &no_pr,
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            CreatedReview {
+                pr_url: CREATED_URL.into(),
+                pr_number: Some(9),
+                base_ref: "main".into(),
+                owner_repo: "oppa-tests/review-eligibility".into(),
+            }
+        );
+        let calls = create_calls(&log);
+        assert_eq!(calls.len(), 1);
+        let argv = &calls[0];
+        assert_eq!(argv[0], "pr");
+        assert_eq!(argv[1], "create");
+        assert_eq!(argv[2], "--repo");
+        assert_eq!(argv[3], "oppa-tests/review-eligibility");
+        assert_eq!(argv[4], "--base");
+        assert_eq!(argv[5], "main");
+        assert_eq!(argv[6], "--title");
+        assert_eq!(argv[7], "Title");
+        assert_eq!(argv[8], "--body-file");
+        assert!(argv[9].contains("oppa-pr-body-"), "{}", argv[9]);
+        assert_eq!(argv[10], "--head");
+        assert_eq!(argv[11], "feature");
+        assert_eq!(argv.len(), 12);
+        assert_eq!(*body_seen_during_call.lock().unwrap(), Some(true));
+        assert!(!PathBuf::from(&argv[9]).exists(), "temp body must be deleted after spawn");
+        let registry = WorktreeRegistry::load(&s.registry_path);
+        assert_eq!(
+            registry.worktrees[&nested_record].linked_pr_url.as_deref(),
+            Some(CREATED_URL)
+        );
+        assert_eq!(registry.worktrees[&root_record].linked_pr_url, None);
+    }
+
+    #[test]
+    fn create_draft_flag_appended_when_requested() {
+        let (s, _bare) = eligible_state("cr-draft");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", true),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap();
+        let argv = &create_calls(&log)[0];
+        assert_eq!(argv.last().map(String::as_str), Some("--draft"));
+        assert_eq!(argv[argv.len() - 2], "feature");
+    }
+
+    #[test]
+    fn create_blocked_by_dirty_rung_never_spawns_create() {
+        let (s, _bare) = eligible_state("cr-dirty");
+        write_file(&s.repo, "uncommitted.txt", "x");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let err = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap_err();
+        assert!(err.contains("blocked: dirty"), "{err}");
+        assert!(create_calls(&log).is_empty());
+    }
+
+    #[test]
+    fn create_existing_pr_short_circuits_without_create_call() {
+        let (s, _bare) = eligible_state("cr-existing");
+        let record = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        let existing = "https://github.com/oppa-tests/review-eligibility/pull/4".to_string();
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let lookup_existing =
+            |_owner_repo: &str, _branch: &str| Some("https://github.com/oppa-tests/review-eligibility/pull/4".to_string());
+        let out = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &echo_runner(&log),
+            &lookup_existing,
+        )
+        .unwrap();
+        assert_eq!(out.pr_url, existing);
+        assert_eq!(out.pr_number, Some(4));
+        assert!(create_calls(&log).is_empty());
+        let registry = WorktreeRegistry::load(&s.registry_path);
+        assert_eq!(registry.worktrees[&record].linked_pr_url.as_deref(), Some(existing.as_str()));
+    }
+
+    #[test]
+    fn create_blank_stdout_recovers_pr_via_lookup_probe() {
+        let (s, _bare) = eligible_state("cr-blank");
+        let record = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let blank_runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            log_args(&log, argv);
+            if argv.first() == Some(&"auth") {
+                Ok(String::new())
+            } else {
+                Ok("   \n".into())
+            }
+        };
+        let recovered = "https://github.com/oppa-tests/review-eligibility/pull/11".to_string();
+        let lookup_found = {
+            let recovered = recovered.clone();
+            move |_owner_repo: &str, _branch: &str| Some(recovered.clone())
+        };
+        let out = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &blank_runner,
+            &lookup_found,
+        )
+        .unwrap();
+        assert_eq!(out.pr_url, recovered);
+        assert_eq!(out.pr_number, Some(11));
+        let registry = WorktreeRegistry::load(&s.registry_path);
+        assert_eq!(registry.worktrees[&record].linked_pr_url.as_deref(), Some(recovered.as_str()));
+    }
+
+    #[test]
+    fn create_unusable_stdout_without_probe_hit_errors_with_context() {
+        let (s, _bare) = eligible_state("cr-unusable");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let noise_runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            log_args(&log, argv);
+            if argv.first() == Some(&"auth") {
+                Ok(String::new())
+            } else {
+                Ok("creating pull request...\n".into())
+            }
+        };
+        let err = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &noise_runner,
+            &no_pr,
+        )
+        .unwrap_err();
+        assert!(err.contains("pr create failed"), "{err}");
+    }
+
+    #[test]
+    fn create_already_exists_error_takes_recovery_probe_path() {
+        let (s, _bare) = eligible_state("cr-exists-hit");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let dup_runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            log_args(&log, argv);
+            if argv.first() == Some(&"auth") {
+                return Ok(String::new());
+            }
+            Err(GhRunError::Failed {
+                stderr: "a pull request for branch \"feature\" already exists".into(),
+            })
+        };
+        let found = "https://github.com/oppa-tests/review-eligibility/pull/12";
+        let lookup_found = |_owner_repo: &str, _branch: &str| Some(found.to_string());
+        let out = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &dup_runner,
+            &lookup_found,
+        )
+        .unwrap();
+        assert_eq!(out.pr_url, found);
+        assert_eq!(out.pr_number, Some(12));
+    }
+
+    #[test]
+    fn create_already_exists_without_found_pr_reports_stderr_context() {
+        let (s, _bare) = eligible_state("cr-exists-miss");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let dup_runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            log_args(&log, argv);
+            if argv.first() == Some(&"auth") {
+                return Ok(String::new());
+            }
+            Err(GhRunError::Failed {
+                stderr: "a pull request for branch \"feature\" already exists".into(),
+            })
+        };
+        let err = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &dup_runner,
+            &no_pr,
+        )
+        .unwrap_err();
+        assert!(err.contains("pr create failed") && err.contains("already exists"), "{err}");
+    }
+
+    #[test]
+    fn create_timeout_probes_then_reports_timeout_when_absent() {
+        let (s, _bare) = eligible_state("cr-timeout");
+        let started = Instant::now();
+        let slow_runner = |argv: &[&str]| -> Result<String, GhRunError> {
+            if argv.first() == Some(&"auth") {
+                return Ok(String::new());
+            }
+            Err(GhRunError::TimedOut)
+        };
+        let found = "https://github.com/oppa-tests/review-eligibility/pull/13";
+        let lookup_found = |_owner_repo: &str, _branch: &str| Some(found.to_string());
+        let out = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &slow_runner,
+            &lookup_found,
+        )
+        .unwrap();
+        assert_eq!(out.pr_url, found);
+        let err = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &slow_runner,
+            &no_pr,
+        )
+        .unwrap_err();
+        assert!(err.contains("gh timed out after 60s"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    #[test]
+    fn create_rejects_bad_titles_before_any_gh_call() {
+        let (s, _bare) = eligible_state("cr-title");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        for bad in ["".to_string(), "   ".into(), "\t\n".into(), "x".repeat(201)] {
+            let err = create_pull_request(
+                &s.repo,
+                &s.registry_path,
+                review_input(&bad, "B", false),
+                &echo_runner(&log),
+                &no_pr,
+            )
+            .unwrap_err();
+            assert!(err.contains("title"), "{err}");
+        }
+        assert!(log.lock().unwrap().is_empty());
+        let ok = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input(&"x".repeat(200), "B", false),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap();
+        assert_eq!(ok.pr_number, Some(9));
+    }
+
+    #[test]
+    fn create_rejects_oversized_body_before_any_gh_call() {
+        let (s, _bare) = eligible_state("cr-body");
+        let log: ArgvLog = Mutex::new(Vec::new());
+        let oversized = "a".repeat(64 * 1024 + 1);
+        let err = create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", &oversized, false),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap_err();
+        assert!(err.contains("body"), "{err}");
+        assert!(log.lock().unwrap().is_empty());
+        let boundary = "a".repeat(64 * 1024);
+        create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", &boundary, false),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn create_skips_stamping_silently_without_matching_worktree() {
+        let (s, _bare) = eligible_state("cr-nostamp");
+        let missing_registry = s.root.join("does-not-exist.json");
+        let throwaway_log: ArgvLog = Mutex::new(Vec::new());
+        let out = create_pull_request(
+            &s.repo,
+            &missing_registry,
+            review_input("T", "B", false),
+            &echo_runner(&throwaway_log),
+            &no_pr,
+        );
+        let _ = out;
+        assert!(!missing_registry.exists());
+        register_worktree_at(&s.registry_path, "r", "other", Path::new("Z:\\elsewhere"));
+        let log: ArgvLog = Mutex::new(Vec::new());
+        create_pull_request(
+            &s.repo,
+            &s.registry_path,
+            review_input("T", "B", false),
+            &echo_runner(&log),
+            &no_pr,
+        )
+        .unwrap();
+        let registry = WorktreeRegistry::load(&s.registry_path);
+        assert!(registry.worktrees.values().all(|w| w.linked_pr_url.is_none()));
     }
 }
