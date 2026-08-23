@@ -301,6 +301,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn session for hook test");
         sessions
@@ -385,6 +386,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn session for agy hook test");
         sessions

@@ -36,6 +36,9 @@ pub struct DaemonSession {
     // True when the ref was set by a hook payload (authoritative per pane).
     // Scan-tier refreshes must never overwrite hook-captured ids.
     pub agent_ref_from_hook: Arc<Mutex<bool>>,
+    // Worktree this pane was bound to at spawn; fixed for the session's lifetime
+    pub worktree_id: Option<String>,
+    env_bindings: Vec<(String, String)>,
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
     pub initial_command_written: Arc<AtomicBool>,
@@ -65,6 +68,7 @@ impl DaemonSession {
         cols: u16,
         rows: u16,
         initial_command: Option<&str>,
+        env_bindings: &[(String, String)],
     ) -> Result<Arc<Self>, String> {
         let config = resolve_shell_launch_config(shell, cwd);
         Self::spawn_with_args(
@@ -75,10 +79,12 @@ impl DaemonSession {
             cols,
             rows,
             initial_command,
+            env_bindings,
         )
     }
 
     /// Spawn a new PTY session with explicit program and args.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn_with_args(
         id: String,
         shell: &str,
@@ -87,6 +93,7 @@ impl DaemonSession {
         cols: u16,
         rows: u16,
         initial_command: Option<&str>,
+        env_bindings: &[(String, String)],
     ) -> Result<Arc<Self>, String> {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -121,6 +128,39 @@ impl DaemonSession {
             cmd.env("OPPA_HOOK_TOKEN", hook.1);
         }
 
+        // Session-authoritative vars always win over injected bindings
+        const AUTHORITATIVE_ENV_KEYS: &[&str] = &[
+            "TERM",
+            "COLORTERM",
+            "TERM_PROGRAM",
+            "TERM_PROGRAM_VERSION",
+            "LANG",
+            "OPPA_WORKSPACE_CWD",
+            "OPPA_PANE_KEY",
+            "OPPA_HOOK_PORT",
+            "OPPA_HOOK_TOKEN",
+        ];
+        // Later OPPA_* bindings overwrite earlier ones — worktree identity is
+        // newer truth than hook defaults; other duplicate keys keep first value.
+        let mut applied_bindings: Vec<(String, String)> = Vec::with_capacity(env_bindings.len());
+        for (key, value) in env_bindings {
+            if AUTHORITATIVE_ENV_KEYS.contains(&key.as_str()) {
+                continue;
+            }
+            match applied_bindings.iter_mut().find(|(k, _)| k == key) {
+                Some(slot) => {
+                    if key.starts_with("OPPA_") {
+                        slot.1.clone_from(value);
+                        cmd.env(key.as_str(), value.as_str());
+                    }
+                }
+                None => {
+                    applied_bindings.push((key.clone(), value.clone()));
+                    cmd.env(key.as_str(), value.as_str());
+                }
+            }
+        }
+
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -152,6 +192,11 @@ impl DaemonSession {
             foreground_command: Arc::new(Mutex::new(None)),
             agent_session_ref: Arc::new(Mutex::new(None)),
             agent_ref_from_hook: Arc::new(Mutex::new(false)),
+            worktree_id: applied_bindings
+                .iter()
+                .find(|(k, _)| k == "OPPA_WORKTREE_ID")
+                .map(|(_, v)| v.clone()),
+            env_bindings: applied_bindings,
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
             initial_command_written: Arc::new(AtomicBool::new(false)),
@@ -433,6 +478,16 @@ impl DaemonSession {
         self.cwd.lock().clone()
     }
 
+    /// Injected env vars that actually reached the child (post-dedupe).
+    pub fn env_bindings(&self) -> &[(String, String)] {
+        &self.env_bindings
+    }
+
+    /// Worktree this pane was bound to at spawn, if any.
+    pub fn worktree_id(&self) -> Option<&str> {
+        self.worktree_id.as_deref()
+    }
+
     /// Command currently running in the foreground, per OSC 133 C/D markers.
     pub fn foreground_command(&self) -> Option<String> {
         self.foreground_command.lock().clone()
@@ -481,6 +536,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn daemon session");
 
@@ -518,6 +574,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn interactive shell");
 
@@ -555,6 +612,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn interactive shell");
 
@@ -578,6 +636,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn multibyte shell");
 
@@ -616,6 +675,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn session with cwd");
 
@@ -644,6 +704,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_daemon_session_env_bindings_dedupe_and_authority() {
+        let sh = test_sh_path();
+        let bindings = vec![
+            ("OPPA_WORKTREE_ID".to_string(), "repo::C:/ws/feat-a".to_string()),
+            ("MY_CUSTOM_VAR".to_string(), "custom-1".to_string()),
+            // Non-OPPA duplicate: first value wins
+            ("MY_CUSTOM_VAR".to_string(), "custom-2".to_string()),
+            // Session-authoritative key from a binding must be skipped entirely
+            ("OPPA_PANE_KEY".to_string(), "hijack-attempt".to_string()),
+        ];
+        let session = DaemonSession::spawn_with_args(
+            "env-bindings-s".into(),
+            &sh,
+            &[
+                "-c".into(),
+                "echo wt=$OPPA_WORKTREE_ID custom=$MY_CUSTOM_VAR pane=$OPPA_PANE_KEY".into(),
+            ],
+            None,
+            80,
+            24,
+            None,
+            &bindings,
+        )
+        .expect("spawn session with env bindings");
+
+        assert_eq!(session.worktree_id(), Some("repo::C:/ws/feat-a"));
+        assert_eq!(
+            session.env_bindings(),
+            &[
+                ("OPPA_WORKTREE_ID".to_string(), "repo::C:/ws/feat-a".to_string()),
+                ("MY_CUSTOM_VAR".to_string(), "custom-1".to_string()),
+            ]
+        );
+
+        let mut rx = session.subscribe();
+        let mut collected = String::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                    collected.push_str(&data);
+                    if collected.contains("pane=") && collected.contains('\r') {
+                        break;
+                    }
+                }
+                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                _ => continue,
+            }
+        }
+
+        assert!(
+            collected.contains("wt=repo::C:/ws/feat-a"),
+            "expected worktree id injected, got: {collected}"
+        );
+        assert!(
+            collected.contains("custom=custom-1"),
+            "expected first duplicate value to win, got: {collected}"
+        );
+        assert!(
+            !collected.contains("hijack-attempt"),
+            "authoritative OPPA_PANE_KEY must survive binding injection, got: {collected}"
+        );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
     async fn test_daemon_session_foreground_command_tracking() {
         let sh = test_sh_path();
         let session = DaemonSession::spawn_with_args(
@@ -654,6 +780,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn interactive shell");
 
@@ -705,6 +832,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn agent-ref shell");
 
@@ -762,6 +890,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn hook-ref shell");
 
@@ -813,6 +942,7 @@ mod tests {
             80,
             24,
             Some("echo injected_cmd_ok"),
+            &[],
         )
         .expect("spawn with initial command");
 
@@ -854,6 +984,7 @@ mod tests {
             80,
             24,
             Some("echo marker_injected_ok"),
+            &[],
         )
         .expect("spawn with initial command");
 
@@ -902,6 +1033,7 @@ mod tests {
             80,
             24,
             None,
+            &[],
         )
         .expect("spawn interactive shell");
 

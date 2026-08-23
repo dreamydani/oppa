@@ -141,6 +141,8 @@ impl DaemonServer {
                 cwd,
                 shell,
                 resume_agents,
+                worktree_id,
+                extra_env,
             } => {
                 let mut sessions = self.sessions.lock();
                 if let Some(session) = sessions.get(&session_id) {
@@ -178,6 +180,16 @@ impl DaemonServer {
                             .map(|s| s.cwd.clone())
                             .filter(|c| !c.is_empty())
                     });
+                    let worktree_bindings = match self.resolve_worktree_bindings(
+                        &checkpoint,
+                        worktree_id.as_deref(),
+                        &session_id,
+                    ) {
+                        Ok(bindings) => bindings,
+                        Err(e) => return DaemonResponse::Error(e),
+                    };
+                    let mut env_bindings = worktree_bindings;
+                    env_bindings.extend(extra_env);
                     match DaemonSession::spawn(
                         session_id.clone(),
                         shell,
@@ -185,6 +197,7 @@ impl DaemonServer {
                         cols,
                         rows,
                         initial_command.as_deref(),
+                        &env_bindings,
                     ) {
                         Ok(session) => {
                             let pid = session.pid();
@@ -442,7 +455,45 @@ impl DaemonServer {
         let _ = self.global_events.send(event);
     }
 
-    // Pane→worktree binding arrives in task 5; cwd containment is the only signal until then.
+    // Requested id is strict (unknown id errors); a checkpoint id restores
+    // identity even if the registry no longer holds the record.
+    fn resolve_worktree_bindings(
+        &self,
+        checkpoint: &Option<SessionSnapshot>,
+        requested: Option<&str>,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        let effective = match requested {
+            Some(id) => Some((id.to_string(), true)),
+            None => checkpoint
+                .as_ref()
+                .and_then(|s| s.worktree_id.clone())
+                .map(|id| (id, false)),
+        };
+        let Some((worktree_id, strict)) = effective else {
+            return Ok(Vec::new());
+        };
+        let record = self.worktree_registry_path.as_deref().and_then(|path| {
+            WorktreeRegistry::load(path)
+                .worktrees
+                .get(&worktree_id)
+                .cloned()
+        });
+        if record.is_none() && strict && self.worktree_registry_path.is_some() {
+            return Err(format!("worktree not found: {worktree_id}"));
+        }
+        let mut bindings = vec![("OPPA_WORKTREE_ID".to_string(), worktree_id)];
+        if let Some(record) = record {
+            bindings.push(("OPPA_WORKTREE_BRANCH".to_string(), record.branch));
+            bindings.push((
+                "OPPA_WORKTREE_PATH".to_string(),
+                record.path.to_string_lossy().into_owned(),
+            ));
+        }
+        bindings.push(("OPPA_TAB_ID".to_string(), session_id.to_string()));
+        Ok(bindings)
+    }
+
     fn live_sessions(&self) -> Vec<LiveSession> {
         self.sessions
             .lock()
@@ -450,7 +501,7 @@ impl DaemonServer {
             .map(|(session_id, session)| LiveSession {
                 session_id: session_id.clone(),
                 cwd: session.cwd(),
-                worktree_id: None,
+                worktree_id: session.worktree_id.clone(),
             })
             .collect()
     }
@@ -632,6 +683,7 @@ impl DaemonServer {
                 .unwrap_or(0),
             foreground_command,
             agent_session,
+            worktree_id: session.worktree_id.clone(),
         }
     }
 
@@ -922,6 +974,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -972,6 +1026,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1094,6 +1150,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         };
         let mut create_str = serde_json::to_string(&create_req).unwrap();
         create_str.push('\n');
@@ -1187,6 +1245,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         };
         let mut reattach_str = serde_json::to_string(&reattach_req).unwrap();
         reattach_str.push('\n');
@@ -1300,6 +1360,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         })
         .unwrap()
             + "\n";
@@ -1350,6 +1412,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1368,6 +1432,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1396,6 +1462,7 @@ mod tests {
                 timestamp: 1,
                 foreground_command: Some("claude --resume abc123".into()),
                 agent_session: None,
+                worktree_id: None,
             })
             .expect("seed checkpoint");
 
@@ -1407,6 +1474,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: true,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1476,6 +1545,7 @@ mod tests {
                 timestamp: 1,
                 foreground_command: Some("claude --resume abc123".into()),
                 agent_session: None,
+                worktree_id: None,
             })
             .expect("seed checkpoint");
 
@@ -1487,6 +1557,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1525,6 +1597,7 @@ mod tests {
                         id: "same-conv-1".into(),
                         transcript_path: None,
                     }),
+                    worktree_id: None,
                 })
                 .expect("seed checkpoint");
         }
@@ -1539,6 +1612,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: true,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1558,6 +1633,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: true,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1595,6 +1672,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
@@ -1628,6 +1707,8 @@ mod tests {
             cwd: None,
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
@@ -1791,6 +1872,8 @@ mod tests {
             cwd: Some(created.path.to_string_lossy().into_owned()),
             shell: None,
             resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
         });
         assert!(matches!(attach, DaemonResponse::SessionAttached(_)));
         let blocked = server.handle_request(DaemonRequest::WorktreeRemove {
@@ -2028,5 +2111,193 @@ mod tests {
         }
 
         cancel_token.cancel();
+    }
+
+    #[tokio::test]
+    async fn test_worktree_bound_pane_blocks_removal_by_id_without_cwd() {
+        let s = crate::git::test_support::sandbox("v3-bind-id");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+
+        match server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        }) {
+            DaemonResponse::RepoRecords(repos) => assert_eq!(repos.len(), 1),
+            other => panic!("expected RepoRecords, got {other:?}"),
+        }
+        let created = expect_record_one(
+            server.handle_request(v3_create_request(&s.repo, "bound")),
+            "create",
+        );
+
+        // cwd: None — only the id-match gate can block removal
+        match server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "bound-pane".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: Some(created.id.clone()),
+            extra_env: vec![("MY_TOOL_FLAG".to_string(), "verbose".to_string())],
+        }) {
+            DaemonResponse::SessionAttached(res) => assert!(res.is_new),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        let session = server
+            .sessions()
+            .lock()
+            .get("bound-pane")
+            .cloned()
+            .expect("session live");
+        assert_eq!(session.worktree_id(), Some(created.id.as_str()));
+        assert_eq!(
+            session.env_bindings(),
+            &[
+                ("OPPA_WORKTREE_ID".to_string(), created.id.clone()),
+                ("OPPA_WORKTREE_BRANCH".to_string(), created.branch.clone()),
+                (
+                    "OPPA_WORKTREE_PATH".to_string(),
+                    created.path.to_string_lossy().into_owned()
+                ),
+                ("OPPA_TAB_ID".to_string(), "bound-pane".to_string()),
+                ("MY_TOOL_FLAG".to_string(), "verbose".to_string()),
+            ]
+        );
+
+        match server.handle_request(DaemonRequest::WorktreePs) {
+            DaemonResponse::WorktreePsEntries(entries) => {
+                let entry = entries
+                    .iter()
+                    .find(|e| e.record.id == created.id)
+                    .expect("ps entry for bound worktree");
+                assert_eq!(entry.live_sessions, 1, "id-match must count the pane");
+            }
+            other => panic!("expected WorktreePsEntries, got {other:?}"),
+        }
+
+        match server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: false,
+            delete_branch: false,
+        }) {
+            DaemonResponse::Error(e) => assert!(e.contains("bound-pane"), "got: {e}"),
+            other => panic!("expected blocked removal, got {other:?}"),
+        }
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "bound-pane".into()
+            }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::WorktreeRemove {
+                id: created.id.clone(),
+                force: false,
+                delete_branch: false,
+            }),
+            DaemonResponse::Ok
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unknown_requested_worktree_id_errors_before_spawn() {
+        let s = crate::git::test_support::sandbox("v3-bind-miss");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+
+        match server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "miss-pane".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: Some("repo::C:/ws/ghost".into()),
+            extra_env: Vec::new(),
+        }) {
+            DaemonResponse::Error(e) => {
+                assert!(e.contains("worktree not found"), "got: {e}");
+                assert!(e.contains("repo::C:/ws/ghost"), "got: {e}");
+            }
+            other => panic!("expected not-found error, got {other:?}"),
+        }
+        assert!(server.sessions().lock().is_empty(), "nothing spawned");
+    }
+
+    #[tokio::test]
+    async fn test_cold_restore_rebuilds_worktree_binding_from_checkpoint() {
+        let s = crate::git::test_support::sandbox("v3-bind-cold");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+
+        assert!(matches!(
+            server.handle_request(DaemonRequest::RepoAdd {
+                path: s.repo.to_string_lossy().into_owned(),
+            }),
+            DaemonResponse::RepoRecords(_)
+        ));
+        let created = expect_record_one(
+            server.handle_request(v3_create_request(&s.repo, "feat-cold")),
+            "create",
+        );
+
+        let storage = SnapshotStorage::new(s.root.clone());
+        storage
+            .save_snapshot(&SessionSnapshot {
+                session_id: "cold-wt".into(),
+                cwd: String::new(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                persona_id: None,
+                scrollback: "old screen".into(),
+                timestamp: 1,
+                foreground_command: None,
+                agent_session: None,
+                worktree_id: Some(created.id.clone()),
+            })
+            .expect("seed checkpoint");
+
+        // No request.worktree_id: the checkpoint restores the binding
+        match server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "cold-wt".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        }) {
+            DaemonResponse::SessionAttached(res) => assert!(res.is_new),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        let session = server
+            .sessions()
+            .lock()
+            .get("cold-wt")
+            .cloned()
+            .expect("cold-restored session live");
+        assert_eq!(session.worktree_id(), Some(created.id.as_str()));
+        let bindings = session.env_bindings();
+        assert!(bindings.contains(&("OPPA_WORKTREE_ID".to_string(), created.id.clone())));
+        assert!(bindings.contains(&("OPPA_TAB_ID".to_string(), "cold-wt".to_string())));
+        assert!(bindings.contains(&(
+            "OPPA_WORKTREE_BRANCH".to_string(),
+            created.branch.clone()
+        )));
+
+        // And the restored identity alone gates teardown
+        match server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: false,
+            delete_branch: false,
+        }) {
+            DaemonResponse::Error(e) => assert!(e.contains("cold-wt"), "got: {e}"),
+            other => panic!("expected blocked removal, got {other:?}"),
+        }
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "cold-wt".into(),
+        });
     }
 }

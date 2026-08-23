@@ -22,6 +22,9 @@ pub struct SessionSnapshot {
     pub foreground_command: Option<String>,
     #[serde(default)]
     pub agent_session: Option<AgentSessionRef>,
+    // Worktree identity survives restarts so cold restore rebinds the pane
+    #[serde(default)]
+    pub worktree_id: Option<String>,
 }
 
 /// Identity of an agent CLI session (e.g. Claude Code transcript id) captured
@@ -148,6 +151,7 @@ impl SnapshotStorage {
                 timestamp: 0,
                 foreground_command: None,
                 agent_session: None,
+                worktree_id: None,
             }));
         }
 
@@ -307,6 +311,7 @@ mod tests {
             timestamp: 1724050000000,
             foreground_command: None,
             agent_session: None,
+            worktree_id: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -349,6 +354,7 @@ mod tests {
                     "C:\\Users\\danial\\.claude\\projects\\x\\abc123.jsonl".to_string(),
                 ),
             }),
+            worktree_id: Some("repo::C:/ws/feat-a".to_string()),
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -394,6 +400,7 @@ mod tests {
         assert_eq!(loaded.scrollback, "old");
         assert_eq!(loaded.foreground_command, None);
         assert_eq!(loaded.agent_session, None);
+        assert_eq!(loaded.worktree_id, None);
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -434,6 +441,7 @@ mod tests {
             timestamp: 1724050000000,
             foreground_command: None,
             agent_session: None,
+            worktree_id: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");

@@ -59,6 +59,10 @@ pub enum DaemonRequest {
         shell: Option<String>,
         #[serde(default)]
         resume_agents: bool,
+        #[serde(default)]
+        worktree_id: Option<String>,
+        #[serde(default)]
+        extra_env: Vec<(String, String)>,
     },
     Write {
         session_id: String,
@@ -185,10 +189,59 @@ mod tests {
             cwd: Some("C:\\projects".into()),
             shell: None,
             resume_agents: true,
+            worktree_id: Some("repo::C:/ws/feat-a".into()),
+            extra_env: vec![("MY_TOOL_FLAG".into(), "verbose".into())],
         };
         let encoded = serde_json::to_string(&req).expect("serialize");
         let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn test_create_or_attach_worktree_fields_roundtrip_and_legacy_defaults() {
+        let req = DaemonRequest::CreateOrAttach {
+            session_id: "s-wt".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: Some("repo::C:/ws/feat-b".into()),
+            extra_env: vec![
+                ("OPPA_CUSTOM".into(), "1".into()),
+                ("MY_TOOL_FLAG".into(), "verbose".into()),
+            ],
+        };
+        let encoded = serde_json::to_string(&req).expect("serialize");
+        let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
+        assert_eq!(req, decoded);
+        match decoded {
+            DaemonRequest::CreateOrAttach { worktree_id, extra_env, .. } => {
+                assert_eq!(worktree_id.as_deref(), Some("repo::C:/ws/feat-b"));
+                assert_eq!(
+                    extra_env,
+                    vec![
+                        ("OPPA_CUSTOM".to_string(), "1".to_string()),
+                        ("MY_TOOL_FLAG".to_string(), "verbose".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected CreateOrAttach, got {other:?}"),
+        }
+
+        // v3 clients predating the binding fields must keep deserializing
+        let legacy = r#"{"type":"CreateOrAttach","payload":{"session_id":"legacy","cols":80,"rows":24,"cwd":null,"shell":null,"resume_agents":false}}"#;
+        match serde_json::from_str::<DaemonRequest>(legacy).expect("legacy create") {
+            DaemonRequest::CreateOrAttach {
+                worktree_id,
+                extra_env,
+                ..
+            } => {
+                assert_eq!(worktree_id, None);
+                assert!(extra_env.is_empty());
+            }
+            other => panic!("expected CreateOrAttach, got {other:?}"),
+        }
     }
 
     #[test]
@@ -206,6 +259,8 @@ mod tests {
                 cwd: None,
                 shell: Some("/bin/bash".into()),
                 resume_agents: false,
+                worktree_id: None,
+                extra_env: Vec::new(),
             },
             DaemonRequest::Write {
                 session_id: "s1".into(),

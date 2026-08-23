@@ -328,6 +328,8 @@ impl DaemonClient {
             cwd,
             shell,
             resume_agents,
+            worktree_id: None,
+            extra_env: Vec::new(),
         };
         match self.send_request(req)? {
             DaemonResponse::SessionAttached(res) => Ok(res),
