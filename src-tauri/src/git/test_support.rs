@@ -85,3 +85,22 @@ pub(crate) fn write_file(repo: &Path, name: &str, content: &str) {
     }
     std::fs::write(repo.join(name), content).unwrap();
 }
+
+// Fake gh shim for PATH injection; body syntax follows the platform shell.
+pub(crate) fn fake_gh_dir(script_body: &str) -> PathBuf {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("oppa-fake-gh-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    #[cfg(windows)]
+    {
+        std::fs::write(dir.join("gh.cmd"), script_body).unwrap();
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = dir.join("gh");
+        std::fs::write(&script, script_body).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}

@@ -627,7 +627,7 @@ fn parse_name_status_z(output: &str) -> Vec<CompareEntry> {
 }
 
 // argv-only exec still option-parses leading dashes; whitespace/control refs never resolve.
-fn validate_ref_name(name: &str) -> Result<(), String> {
+pub(crate) fn validate_ref_name(name: &str) -> Result<(), String> {
     let invalid = name.is_empty()
         || name.starts_with('-')
         || name.chars().any(|c| c.is_whitespace() || c.is_control())
