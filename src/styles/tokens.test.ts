@@ -50,6 +50,11 @@ describe("design token one-home invariant", () => {
       "--border",
       "--accent-blue",
       "--destructive",
+      "--dur-zoom-out",
+      "--dur-zoom-in",
+      "--dur-panel-open",
+      "--dur-panel-close",
+      "--ease-dolly",
     ]) {
       expect(declared.has(required), `${required} must live in theme.css`).toBe(
         true,

@@ -16,6 +16,13 @@
   --radius-lg: 8px;
   --soft-edge-radius: 12px;
 
+  /* Motion (single home for durations/easing; consumed via var()) */
+  --dur-zoom-out: 220ms;
+  --dur-zoom-in: 180ms;
+  --dur-panel-open: 240ms;
+  --dur-panel-close: 200ms;
+  --ease-dolly: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* Core Canvas & Surfaces — neutral graphite ramp (flat #171717 field) */
   --topbar-bg: #171717;
   --workspace-bg: #171717;
@@ -176,4 +183,16 @@ body {
 
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.22);
+}
+
+/* Accessibility: collapse all motion to near-instant when the OS asks.
+   0.01ms keeps transition/animation events firing so JS listeners never hang. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
