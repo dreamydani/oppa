@@ -1,19 +1,24 @@
 use clap::Parser;
-use oppa_lib::cli::command_tree::{Cli, Command, RepoAction, TerminalAction, WorktreeAction};
+use oppa_lib::cli::command_tree::{Cli, Command, GitAction, RepoAction, TerminalAction, WorktreeAction};
 use oppa_lib::cli::output::{
     render_agent_context, render_agent_handoff, render_json, render_lineage_tree, render_ps_rows,
-    render_repo_detail, render_repo_table, render_screen_text, render_session_detail,
-    render_session_list, render_wait_result, render_worktree_list, render_worktree_show,
-    CliRenameResult, CliScreenText, CliSessionDetail, CliSessionHandle, CliSplitHandles,
-    CliWaitResult, OkPayload,
+    render_repo_detail, render_repo_table, render_sc_branches, render_sc_compare, render_sc_diff,
+    render_sc_history, render_sc_pull, render_sc_push, render_sc_status, render_screen_text,
+    render_session_detail, render_session_list, render_wait_result, render_worktree_list,
+    render_worktree_show, CliRenameResult, CliScreenText, CliSessionDetail, CliSessionHandle,
+    CliSplitHandles, CliWaitResult, OkPayload,
 };
 use oppa_lib::cli::{
-    build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
-    build_worktree_set, decode_attached, decode_ok, decode_ps_entries, decode_read_screen,
-    decode_repo_records, decode_session_ids, decode_wait_result, decode_worktree_list,
-    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle,
-    parse_status, parse_wait_condition, validate_create_handoff, CreateArgs, CliError,
-    ParentUpdate, RuntimeConnection, RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
+    build_git_branches, build_git_checkout, build_git_commit, build_git_compare, build_git_discard,
+    build_git_fetch, build_git_ff, build_git_file_diff, build_git_history, build_git_pull,
+    build_git_push, build_git_stage, build_git_status, build_git_unstage, build_repo_add,
+    build_terminal_create, build_terminal_send, build_worktree_create, build_worktree_set,
+    decode_attached, decode_ok, decode_ps_entries, decode_read_screen, decode_repo_records,
+    decode_sc_branches, decode_sc_commit, decode_sc_compare, decode_sc_diff, decode_sc_history,
+    decode_sc_pull, decode_sc_push, decode_sc_status, decode_session_ids, decode_wait_result,
+    decode_worktree_list, decode_worktree_many, decode_worktree_one, filter_active_only,
+    new_session_handle, parse_status, parse_wait_condition, resolve_cwd, validate_create_handoff,
+    CreateArgs, CliError, ParentUpdate, RuntimeConnection, RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
 };
 use oppa_lib::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
 use std::path::PathBuf;
@@ -40,6 +45,7 @@ fn run(command: &Command, json: bool, timeout: Duration) -> Result<(), CliError>
         Command::Repo { action } => run_repo(action, json, timeout),
         Command::Worktree { action } => run_worktree(action, json, timeout),
         Command::Terminal { action } => run_terminal(action, json, timeout),
+        Command::Git { action } => run_git(action, json, timeout),
     }
 }
 
@@ -405,8 +411,111 @@ fn attach_existing(id: &str, timeout: Duration) -> Result<oppa_lib::pty::ipc_pro
     Ok(attached)
 }
 
-fn run_status(json: bool, timeout: Duration) -> Result<(), CliError> {
-    let report = RuntimeConnection::status_report(timeout)?;
+fn run_git(action: &GitAction, json: bool, timeout: Duration) -> Result<(), CliError> {
+    // Every verb resolves --cwd (default: process working dir) before building its request.
+    let cwd_for = |explicit: &Option<String>| resolve_cwd(explicit.as_deref());
+    fn strs(paths: &Vec<String>) -> Vec<&str> {
+        paths.iter().map(String::as_str).collect()
+    }
+    match action {
+        GitAction::Status { cwd } => {
+            let status = decode_sc_status(send(build_git_status(&cwd_for(cwd)?), timeout)?)?;
+            let text = render_sc_status(&status);
+            emit(json, &status, || text.clone())
+        }
+        GitAction::Stage { paths, cwd } => run_unit(
+            send(build_git_stage(&cwd_for(cwd)?, &strs(paths)), timeout)?,
+            json,
+            || format!("staged {} path(s)", paths.len()),
+        ),
+        GitAction::Unstage { paths, cwd } => run_unit(
+            send(build_git_unstage(&cwd_for(cwd)?, &strs(paths)), timeout)?,
+            json,
+            || format!("unstaged {} path(s)", paths.len()),
+        ),
+        GitAction::Discard {
+            paths,
+            include_untracked,
+            cwd,
+        } => run_unit(
+            send(
+                build_git_discard(&cwd_for(cwd)?, &strs(paths), *include_untracked),
+                timeout,
+            )?,
+            json,
+            || format!("discarded {} path(s)", paths.len()),
+        ),
+        GitAction::Commit { message, cwd } => {
+            let id = decode_sc_commit(send(build_git_commit(&cwd_for(cwd)?, message), timeout)?)?;
+            emit(json, &id, || format!("committed {id}"))
+        }
+        GitAction::Branches { cwd } => {
+            let branches = decode_sc_branches(send(build_git_branches(&cwd_for(cwd)?), timeout)?)?;
+            let human = render_sc_branches(&branches);
+            emit(json, &branches, move || human.clone())
+        }
+        GitAction::Checkout { branch, cwd } => {
+            decode_ok(send(build_git_checkout(&cwd_for(cwd)?, branch), timeout)?)?;
+            emit(
+                json,
+                &OkPayload { ok: true },
+                || format!("checked out {branch}"),
+            )
+        }
+        GitAction::Diff {
+            path,
+            staged,
+            against_head,
+            cwd,
+        } => {
+            let diff = decode_sc_diff(send(
+                build_git_file_diff(&cwd_for(cwd)?, path, *staged, *against_head),
+                timeout,
+            )?)?;
+            let human = render_sc_diff(&diff);
+            emit(json, &diff, move || human.clone())
+        }
+        GitAction::History { limit, cwd } => {
+            let history =
+                decode_sc_history(send(build_git_history(&cwd_for(cwd)?, *limit), timeout)?)?;
+            let human = render_sc_history(&history);
+            emit(json, &history, move || human.clone())
+        }
+        GitAction::Compare { base, cwd } => {
+            let compare = decode_sc_compare(send(build_git_compare(&cwd_for(cwd)?, base), timeout)?)?;
+            let human = render_sc_compare(&compare);
+            emit(json, &compare, move || human.clone())
+        }
+        GitAction::Fetch { cwd } => {
+            decode_ok(send(build_git_fetch(&cwd_for(cwd)?), timeout)?)?;
+            emit(json, &OkPayload { ok: true }, || "fetched".to_string())
+        }
+        GitAction::Pull { merge, cwd } => {
+            let outcome = decode_sc_pull(send(build_git_pull(&cwd_for(cwd)?, *merge), timeout)?)?;
+            let human = render_sc_pull(&outcome);
+            emit(json, &outcome, move || human.clone())
+        }
+        GitAction::Ff { cwd } => {
+            let outcome = decode_sc_pull(send(build_git_ff(&cwd_for(cwd)?), timeout)?)?;
+            let human = render_sc_pull(&outcome);
+            emit(json, &outcome, move || human.clone())
+        }
+        GitAction::Push {
+            publish,
+            force_with_lease,
+            cwd,
+        } => {
+            let outcome = decode_sc_push(send(
+                build_git_push(&cwd_for(cwd)?, *publish, *force_with_lease),
+                timeout,
+            )?)?;
+            let human = render_sc_push(&outcome);
+            emit(json, &outcome, move || human.clone())
+        }
+    }
+}
+
+fn run_status(json: bool, timeout: Duration) -> Result<(), CliError> {    let report = RuntimeConnection::status_report(timeout)?;
     if json {
         println!("{}", serde_json::to_string(&report).expect("status json"));
     } else {

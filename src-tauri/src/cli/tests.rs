@@ -891,7 +891,7 @@ fn agent_context_document_meets_machine_contract() {
         parsed["commands"].as_array().map(Vec::len),
         Some(doc.commands.len())
     );
-    assert_eq!(parsed["protocol"], serde_json::json!(3));
+    assert_eq!(parsed["protocol"], serde_json::json!(4));
     let notes = parsed["notes"].as_array().expect("notes array");
     assert!(notes.len() >= 3);
     for topic in ["exit codes", "auth", "vocabulary policy"] {
@@ -958,4 +958,444 @@ fn agent_context_terminal_send_entry_snapshot_is_stable() {
         render_json(send),
         r#"{"family":"terminal","verb":"send","summary":"Send text to a session's input","flags":[{"name":"<id>","takes_value":true},{"name":"--text","takes_value":true},{"name":"--enter","takes_value":false},{"name":"--interrupt","takes_value":false,"help":"Prefix a Ctrl-C byte before the text"},{"name":"--json","takes_value":false},{"name":"--timeout-ms","takes_value":true}],"example":"oppa terminal send <id> --text \"cargo test\" --enter"}"#
     );
+}
+
+// ---- task 6: git verb builders, decoders, renderers ----
+
+use super::{
+    build_git_branches, build_git_checkout, build_git_commit, build_git_compare, build_git_discard,
+    build_git_fetch, build_git_ff, build_git_file_diff, build_git_history, build_git_pull,
+    build_git_push, build_git_stage, build_git_status, build_git_unstage, decode_sc_branches,
+    decode_sc_commit, decode_sc_compare, decode_sc_diff, decode_sc_history, decode_sc_pull,
+    decode_sc_push, decode_sc_status,
+};
+use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::source_control::{
+    BranchCompare, CommitStats, DiffContent, DiffKind, HistoryItem, HistoryResult, LocalBranches,
+    PullOutcome, PullStatus, PushOutcome, SourceControlStatus, StatusEntry, UpstreamStatus,
+};
+use super::output::{
+    render_sc_branches, render_sc_compare, render_sc_diff, render_sc_history, render_sc_pull,
+    render_sc_push, render_sc_status,
+};
+
+#[test]
+fn vocabulary_covers_git_family() {
+    let git = CANONICAL_COMMANDS
+        .iter()
+        .find(|(f, _)| *f == "git")
+        .expect("git family registered")
+        .1;
+    assert_eq!(
+        git,
+        &[
+            "status", "stage", "unstage", "discard", "commit", "branches", "checkout", "diff",
+            "history", "compare", "fetch", "pull", "ff", "push"
+        ][..]
+    );
+    for verb in git {
+        assert_eq!(validate_verb("git", verb), Ok(()));
+    }
+    assert!(validate_verb("git", "rebase").is_err());
+}
+
+#[test]
+fn git_builders_map_every_verb_and_flag() {
+    assert_eq!(
+        build_git_status("/r"),
+        DaemonRequest::GitStatus { cwd: "/r".into() }
+    );
+    match build_git_stage("/r", &["a.txt", "b.txt"]) {
+        DaemonRequest::GitStage { cwd, paths } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
+        }
+        other => panic!("expected GitStage, got {other:?}"),
+    }
+    match build_git_unstage("/r", &["a.txt"]) {
+        DaemonRequest::GitUnstage { cwd, paths } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(paths, vec!["a.txt".to_string()]);
+        }
+        other => panic!("expected GitUnstage, got {other:?}"),
+    }
+    match build_git_discard("/r", &["u.txt"], true) {
+        DaemonRequest::GitDiscard {
+            cwd,
+            paths,
+            include_untracked,
+        } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(paths, vec!["u.txt".to_string()]);
+            assert!(include_untracked);
+        }
+        other => panic!("expected GitDiscard, got {other:?}"),
+    }
+    match build_git_commit("/r", "feat: x") {
+        DaemonRequest::GitCommit { cwd, message } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(message, "feat: x");
+        }
+        other => panic!("expected GitCommit, got {other:?}"),
+    }
+    assert_eq!(
+        build_git_branches("/r"),
+        DaemonRequest::GitLocalBranches { cwd: "/r".into() }
+    );
+    match build_git_checkout("/r", "feat-a") {
+        DaemonRequest::GitCheckout { cwd, branch } => {
+            assert_eq!((cwd.as_str(), branch.as_str()), ("/r", "feat-a"));
+        }
+        other => panic!("expected GitCheckout, got {other:?}"),
+    }
+    match build_git_file_diff("/r", "p.txt", true, false) {
+        DaemonRequest::GitFileDiff {
+            cwd,
+            path,
+            staged,
+            compare_against_head,
+        } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(path, "p.txt");
+            assert!(staged);
+            assert!(!compare_against_head);
+        }
+        other => panic!("expected GitFileDiff, got {other:?}"),
+    }
+    for (limit_in, limit_out) in [
+        (None, None),
+        (Some(0), Some(0)),
+        (Some(20), Some(20)),
+    ] {
+        match build_git_history("/r", limit_in) {
+            DaemonRequest::GitHistory { cwd, limit } => {
+                assert_eq!(cwd, "/r");
+                assert_eq!(limit, limit_out);
+            }
+            other => panic!("expected GitHistory, got {other:?}"),
+        }
+    }
+    match build_git_compare("/r", "main") {
+        DaemonRequest::GitBranchCompare { cwd, base_ref } => {
+            assert_eq!(cwd, "/r");
+            assert_eq!(base_ref, "main");
+        }
+        other => panic!("expected GitBranchCompare, got {other:?}"),
+    }
+    assert_eq!(
+        build_git_fetch("/r"),
+        DaemonRequest::GitFetch { cwd: "/r".into() }
+    );
+    // pull defaults to ff-only; --merge flips it
+    match build_git_pull("/r", false) {
+        DaemonRequest::GitPull { ff_only, .. } => assert!(ff_only),
+        other => panic!("expected GitPull, got {other:?}"),
+    }
+    match build_git_pull("/r", true) {
+        DaemonRequest::GitPull { ff_only, .. } => assert!(!ff_only),
+        other => panic!("expected GitPull merge, got {other:?}"),
+    }
+    assert_eq!(
+        build_git_ff("/r"),
+        DaemonRequest::GitFastForward { cwd: "/r".into() }
+    );
+    match build_git_push("/r", true, true) {
+        DaemonRequest::GitPush {
+            cwd,
+            publish,
+            force_with_lease,
+        } => {
+            assert_eq!(cwd, "/r");
+            assert!(publish);
+            assert!(force_with_lease);
+        }
+        other => panic!("expected GitPush, got {other:?}"),
+    }
+}
+
+fn sample_sc_status() -> SourceControlStatus {
+    SourceControlStatus {
+        entries: vec![
+            StatusEntry {
+                path: "staged.rs".into(),
+                index_status: "M".into(),
+                worktree_status: " ".into(),
+                area: crate::git::source_control::GitArea::Staged,
+                old_path: None,
+            },
+            StatusEntry {
+                path: "renamed.rs".into(),
+                index_status: "R".into(),
+                worktree_status: " ".into(),
+                area: crate::git::source_control::GitArea::Staged,
+                old_path: Some("old.rs".into()),
+            },
+            StatusEntry {
+                path: "dirty.rs".into(),
+                index_status: " ".into(),
+                worktree_status: "M".into(),
+                area: crate::git::source_control::GitArea::Unstaged,
+                old_path: None,
+            },
+            StatusEntry {
+                path: "fresh.rs".into(),
+                index_status: "?".into(),
+                worktree_status: "?".into(),
+                area: crate::git::source_control::GitArea::Untracked,
+                old_path: None,
+            },
+        ],
+        conflict_state: crate::git::source_control::ConflictState::Merge,
+        branch: "main".into(),
+        upstream: UpstreamStatus {
+            has_upstream: true,
+            ahead: 2,
+            behind: 1,
+            remote_branch: Some("origin/main".into()),
+        },
+        did_hit_limit: false,
+        status_length: 4,
+    }
+}
+
+#[test]
+fn sc_status_renderer_groups_areas_into_sections_with_summary() {
+    assert_eq!(
+        render_sc_status(&sample_sc_status()),
+        [
+            "main · staged 2 · unstaged 1 · untracked 1 · conflicts 0 · merging · ↑2 ↓1",
+            "STAGED",
+            "M  staged.rs",
+            "R  renamed.rs <- old.rs",
+            "UNSTAGED",
+            " M dirty.rs",
+            "UNTRACKED",
+            "?? fresh.rs",
+        ]
+        .join("\n")
+    );
+
+    let mut detached = sample_sc_status();
+    detached.branch = "".into();
+    detached.conflict_state = crate::git::source_control::ConflictState::None;
+    detached.upstream = UpstreamStatus {
+        has_upstream: false,
+        ahead: 0,
+        behind: 0,
+        remote_branch: None,
+    };
+    detached.entries.clear();
+    let rendered = render_sc_status(&detached);
+    assert!(
+        rendered.starts_with("(detached) · staged 0 · unstaged 0 · untracked 0 · conflicts 0 · no upstream"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn git_payload_decoders_extract_variants_map_errors_and_reject_wrong_variants() {
+    let status = decode_sc_status(DaemonResponse::ScStatus(sample_sc_status())).unwrap();
+    assert_eq!(status.branch, "main");
+
+    assert_eq!(
+        decode_sc_commit(DaemonResponse::ScCommit("abc1234".into())).unwrap(),
+        "abc1234"
+    );
+    let branches = decode_sc_branches(DaemonResponse::ScBranches(LocalBranches {
+        branches: vec!["main".into()],
+        current: Some("main".into()),
+    }))
+    .unwrap();
+    assert_eq!(branches.current.as_deref(), Some("main"));
+    let diff = decode_sc_diff(DaemonResponse::ScDiff(DiffContent {
+        kind: DiffKind::Text,
+        original_content: "a".into(),
+        modified_content: "b".into(),
+        truncated: false,
+    }))
+    .unwrap();
+    assert_eq!(diff.kind, DiffKind::Text);
+    let history = decode_sc_history(DaemonResponse::ScHistory(HistoryResult {
+        items: Vec::new(),
+        has_more: false,
+    }))
+    .unwrap();
+    assert!(!history.has_more);
+    let compare = decode_sc_compare(DaemonResponse::ScCompare(BranchCompare {
+        base_ref: "main".into(),
+        ahead: 1,
+        behind: 0,
+        changed_files: Vec::new(),
+    }))
+    .unwrap();
+    assert_eq!(compare.ahead, 1);
+    let pull = decode_sc_pull(DaemonResponse::ScPull(PullOutcome {
+        status: PullStatus::Merged,
+        new_head: Some("def5678".into()),
+    }))
+    .unwrap();
+    assert_eq!(pull.status, PullStatus::Merged);
+    let push = decode_sc_push(DaemonResponse::ScPush(PushOutcome {
+        pushed_to: "origin/main".into(),
+        was_publish: false,
+    }))
+    .unwrap();
+    assert_eq!(push.pushed_to, "origin/main");
+
+    // Daemon errors pass through bare; wrong variants are protocol errors
+    match decode_sc_status(DaemonResponse::Error("not a repo".into())) {
+        Err(CliError::Daemon(msg)) => assert_eq!(msg, "not a repo"),
+        other => panic!("expected Daemon error, got {other:?}"),
+    }
+    match decode_sc_commit(DaemonResponse::Ok) {
+        Err(CliError::Protocol(msg)) => assert!(msg.contains("unexpected git commit"), "{msg}"),
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+}
+
+#[test]
+fn git_renderers_are_deterministic_single_lines_or_blocks() {
+    assert_eq!(
+        render_sc_branches(&LocalBranches {
+            branches: vec!["main".into(), "feature".into()],
+            current: Some("feature".into()),
+        }),
+        "  main\n* feature"
+    );
+    assert_eq!(
+        render_sc_diff(&DiffContent {
+            kind: DiffKind::Binary,
+            original_content: String::new(),
+            modified_content: String::new(),
+            truncated: true,
+        }),
+        "binary (truncated)"
+    );
+    assert_eq!(
+        render_sc_diff(&DiffContent {
+            kind: DiffKind::Text,
+            original_content: "v0".into(),
+            modified_content: "v1".into(),
+            truncated: false,
+        }),
+        "--- originalv0\n+++ modifiedv1"
+    );
+
+    let item = |id: &str, subject: &str| HistoryItem {
+        id: id.into(),
+        parent_ids: Vec::new(),
+        subject: subject.into(),
+        message_body: String::new(),
+        author_name: "A".into(),
+        author_email: "a@x".into(),
+        timestamp_secs: 1,
+        stats: CommitStats {
+            files: 2,
+            insertions: 5,
+            deletions: 1,
+        },
+    };
+    assert_eq!(
+        render_sc_history(&HistoryResult {
+            items: vec![item("abcdef1234567890", "first"), item("1234567890abcdef", "second")],
+            has_more: true,
+        }),
+        "abcdef12 first (+5 -1, 2 files)\n12345678 second (+5 -1, 2 files)"
+    );
+    assert_eq!(
+        render_sc_history(&HistoryResult {
+            items: Vec::new(),
+            has_more: false,
+        }),
+        "no commits"
+    );
+
+    assert_eq!(
+        render_sc_compare(&BranchCompare {
+            base_ref: "main".into(),
+            ahead: 2,
+            behind: 3,
+            changed_files: vec![crate::git::source_control::CompareEntry {
+                path: "moved.txt".into(),
+                change_kind: "R".into(),
+                old_path: Some("extra.txt".into()),
+            }],
+        }),
+        "ahead 2 · behind 3 vs main\nR moved.txt <- extra.txt"
+    );
+    assert_eq!(
+        render_sc_compare(&BranchCompare {
+            base_ref: "main".into(),
+            ahead: 0,
+            behind: 1,
+            changed_files: Vec::new(),
+        }),
+        "ahead 0 · behind 1 vs main"
+    );
+
+    for (outcome, want) in [
+        (
+            PullOutcome { status: PullStatus::UpToDate, new_head: None },
+            "already up to date",
+        ),
+        (
+            PullOutcome { status: PullStatus::FastForward, new_head: Some("aaa".into()) },
+            "fast-forwarded to aaa",
+        ),
+        (
+            PullOutcome { status: PullStatus::Merged, new_head: Some("bbb".into()) },
+            "merged at bbb",
+        ),
+    ] {
+        assert_eq!(render_sc_pull(&outcome), want);
+    }
+
+    assert_eq!(
+        render_sc_push(&PushOutcome {
+            pushed_to: "origin/feat".into(),
+            was_publish: true,
+        }),
+        "pushed origin/feat · published"
+    );
+    assert_eq!(
+        render_sc_push(&PushOutcome {
+            pushed_to: "origin/main".into(),
+            was_publish: false,
+        }),
+        "pushed origin/main"
+    );
+}
+
+#[test]
+fn comment_wire_types_roundtrip_through_serde_for_cli_json() {
+    let comment: DiffComment = serde_json::from_value(serde_json::json!({
+        "id": "c-1",
+        "worktree_id": "wt-1",
+        "file_path": "src/lib.rs",
+        "source": "markdown",
+        "selected_text": null,
+        "start_line": null,
+        "line_number": 4,
+        "body": "note",
+        "scope": "branch",
+        "old_path": null,
+        "created_at_ms": 1723900000000u64,
+        "updated_at_ms": null,
+        "sent_at": null
+    }))
+    .unwrap();
+    let json = render_json(&comment);
+    assert!(json.contains("\"scope\":\"branch\""));
+    assert!(json.contains("\"sent_at\":null"));
+
+    let new_comment: NewDiffComment = serde_json::from_value(serde_json::json!({
+        "worktree_id": "wt-1",
+        "file_path": "src/lib.rs",
+        "source": "diff",
+        "line_number": 4,
+        "body": "note",
+        "scope": "staged"
+    }))
+    .unwrap();
+    assert_eq!(new_comment.scope, crate::git::comments_store::DiffCommentScope::Staged);
 }

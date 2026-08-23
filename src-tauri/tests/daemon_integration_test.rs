@@ -541,3 +541,134 @@ fn test_e2e_daemon_worktree_changed_event_and_client_requests() {
     cancel_token.cancel();
     let _ = server_thread.join();
 }
+
+#[test]
+fn test_e2e_daemon_v4_git_status_stage_commit_and_comment_crud_over_pipe() {
+    use oppa_lib::git::comments_store::{DiffCommentScope, DiffCommentSource, NewDiffComment};
+
+    fn write_repo_file(dir: &std::path::Path, name: &str, content: &str) {
+        std::fs::write(dir.join(name), content).expect("write repo file");
+    }
+
+    let repo_dir = tempfile::tempdir().expect("temp repo dir");
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    run_git_in(repo_dir.path(), &["init", "-b", "main"]);
+    run_git_in(repo_dir.path(), &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(repo_dir.path(), &["config", "user.name", "Oppa Test"]);
+    write_repo_file(repo_dir.path(), "README.md", "# seed");
+    run_git_in(repo_dir.path(), &["add", "."]);
+    run_git_in(repo_dir.path(), &["commit", "-m", "init"]);
+    write_repo_file(repo_dir.path(), "flow.txt", "v1");
+
+    let socket_path = generate_test_socket_path("v4git");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    // Peer listens for GitChanged while the mutator drives the full workflow.
+    let listener = DaemonClient::connect(&socket_path).expect("connect listener client");
+    let (git_tx, git_rx) = channel::<()>();
+    listener.set_git_changed_callback(Arc::new(move || {
+        let _ = git_tx.send(());
+    }));
+    let mutator = DaemonClient::connect(&socket_path).expect("connect mutator client");
+
+    let cwd = repo_dir.path().to_string_lossy().into_owned();
+    let area_of = |status: &oppa_lib::git::source_control::SourceControlStatus, want: &str| {
+        status
+            .entries
+            .iter()
+            .find(|e| e.path == want)
+            .map(|e| e.area.clone())
+    };
+    use oppa_lib::git::source_control::GitArea;
+
+    let before = mutator.sc_status(&cwd).expect("sc_status");
+    assert_eq!(area_of(&before, "flow.txt"), Some(GitArea::Untracked));
+
+    mutator
+        .sc_stage(&cwd, &["flow.txt".to_string()])
+        .expect("sc_stage");
+    assert_eq!(
+        git_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+        true,
+        "stage must fire the peer's GitChanged callback"
+    );
+
+    let staged = listener.sc_status(&cwd).expect("peer sc_status");
+    assert_eq!(area_of(&staged, "flow.txt"), Some(GitArea::Staged));
+
+    let commit_id = mutator.sc_commit(&cwd, "feat: v4 flow").expect("sc_commit");
+    assert!(!commit_id.is_empty());
+    assert_eq!(
+        git_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+        true,
+        "commit must fire the peer's GitChanged callback"
+    );
+    let clean = mutator.sc_status(&cwd).expect("clean sc_status");
+    assert!(clean.entries.is_empty());
+
+    let history = mutator.sc_history(&cwd, Some(10)).expect("sc_history");
+    assert_eq!(history.items.len(), 2);
+    assert_eq!(history.items[0].subject, "feat: v4 flow");
+
+    let branches = mutator.sc_local_branches(&cwd).expect("sc_branches");
+    assert_eq!(branches.current.as_deref(), Some("main"));
+
+    // Comment CRUD rides the same pipe and persists into the snapshot dir.
+    let comment = mutator
+        .diff_comment_add(NewDiffComment {
+            worktree_id: "wt-v4".into(),
+            file_path: "flow.txt".into(),
+            source: DiffCommentSource::Diff,
+            selected_text: None,
+            start_line: Some(1),
+            line_number: 1,
+            body: "check this".into(),
+            scope: DiffCommentScope::Unstaged,
+            old_path: None,
+        })
+        .expect("diff_comment_add");
+    assert!(!comment.id.is_empty());
+
+    let listed = listener.diff_comments_list("wt-v4").expect("comments_list");
+    assert_eq!(listed.len(), 1);
+
+    let updated = mutator
+        .diff_comment_update(&comment.id, "updated body")
+        .expect("diff_comment_update");
+    assert_eq!(updated.body, "updated body");
+
+    let stamped = mutator
+        .diff_comments_mark_sent(&[comment.id.clone()])
+        .expect("mark_sent");
+    assert_eq!(stamped.len(), 1);
+    assert!(stamped[0].sent_at.unwrap_or(0) > 0);
+
+    mutator
+        .diff_comment_delete(&comment.id)
+        .expect("diff_comment_delete");
+    assert!(
+        listener.diff_comments_list("wt-v4").unwrap().is_empty(),
+        "delete must remove the record"
+    );
+
+    listener.disconnect().expect("disconnect listener");
+    mutator.disconnect().expect("disconnect mutator");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}

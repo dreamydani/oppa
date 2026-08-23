@@ -375,8 +375,196 @@ pub fn render_wait_result(result: &CliWaitResult) -> String {
     }
 }
 
-// ---- agent-context renderers ----
+// ---- git source-control renderers (internal serde types ARE the wire contract) ----
 
+use crate::git::source_control::{
+    BranchCompare, DiffContent, DiffKind, HistoryResult, LocalBranches, PullOutcome, PullStatus,
+    PushOutcome, SourceControlStatus,
+};
+
+fn sc_area_counts(status: &SourceControlStatus) -> (usize, usize, usize, usize) {
+    let mut staged = 0;
+    let mut unstaged = 0;
+    let mut untracked = 0;
+    let mut conflicts = 0;
+    for entry in &status.entries {
+        match entry.area {
+            crate::git::source_control::GitArea::Staged => staged += 1,
+            crate::git::source_control::GitArea::Unstaged => unstaged += 1,
+            crate::git::source_control::GitArea::Untracked => untracked += 1,
+            crate::git::source_control::GitArea::Conflict => conflicts += 1,
+        }
+    }
+    (staged, unstaged, untracked, conflicts)
+}
+
+fn sc_conflict_word(state: &crate::git::source_control::ConflictState) -> Option<&'static str> {
+    use crate::git::source_control::ConflictState;
+    match state {
+        ConflictState::None => None,
+        ConflictState::Merge => Some("merging"),
+        ConflictState::Rebase => Some("rebasing"),
+        ConflictState::Revert => Some("reverting"),
+        ConflictState::CherryPick => Some("cherry-picking"),
+    }
+}
+
+pub fn render_sc_status(status: &SourceControlStatus) -> String {
+    let (staged, unstaged, untracked, conflicts) = sc_area_counts(status);
+    let mut summary = format!(
+        "{} · staged {} · unstaged {} · untracked {} · conflicts {}",
+        if status.branch.is_empty() {
+            "(detached)"
+        } else {
+            &status.branch
+        },
+        staged,
+        unstaged,
+        untracked,
+        conflicts
+    );
+    if let Some(word) = sc_conflict_word(&status.conflict_state) {
+        summary.push_str(&format!(" · {word}"));
+    }
+    if status.upstream.has_upstream {
+        summary.push_str(&format!(
+            " · ↑{} ↓{}",
+            status.upstream.ahead, status.upstream.behind
+        ));
+    } else {
+        summary.push_str(" · no upstream");
+    }
+
+    let section = |lines: &mut Vec<String>, title: &str, area| {
+        let entries: Vec<&_> = status
+            .entries
+            .iter()
+            .filter(|e| e.area == area)
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        lines.push(title.to_string());
+        for entry in entries {
+            let old = entry
+                .old_path
+                .as_deref()
+                .map(|o| format!(" <- {o}"))
+                .unwrap_or_default();
+            lines.push(format!(
+                "{}{} {}{}",
+                entry.index_status, entry.worktree_status, entry.path, old
+            ));
+        }
+    };
+
+    use crate::git::source_control::GitArea;
+    let mut lines = vec![summary];
+    section(&mut lines, "STAGED", GitArea::Staged);
+    section(&mut lines, "UNSTAGED", GitArea::Unstaged);
+    section(&mut lines, "CONFLICTS", GitArea::Conflict);
+    section(&mut lines, "UNTRACKED", GitArea::Untracked);
+    lines.join("\n")
+}
+
+pub fn render_sc_branches(branches: &LocalBranches) -> String {
+    branches
+        .branches
+        .iter()
+        .map(|name| {
+            let marker = if branches.current.as_deref() == Some(name.as_str()) {
+                "* "
+            } else {
+                "  "
+            };
+            format!("{marker}{name}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn render_sc_diff(diff: &DiffContent) -> String {
+    let truncated_note = diff.truncated.then_some(" (truncated)").unwrap_or("");
+    if diff.kind == DiffKind::Binary {
+        return format!("binary{truncated_note}");
+    }
+    format!(
+        "--- original{}{}\n+++ modified{}",
+        truncated_note, diff.original_content, diff.modified_content
+    )
+}
+
+pub fn render_sc_history(history: &HistoryResult) -> String {
+    if history.items.is_empty() {
+        return "no commits".into();
+    }
+    history
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                "{} {} (+{} -{}, {} files)",
+                &item.id[..item.id.len().min(8)],
+                item.subject,
+                item.stats.insertions,
+                item.stats.deletions,
+                item.stats.files
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn render_sc_compare(compare: &BranchCompare) -> String {
+    let mut lines = vec![format!(
+        "ahead {} · behind {} vs {}",
+        compare.ahead, compare.behind, compare.base_ref
+    )];
+    for file in &compare.changed_files {
+        let old = file
+            .old_path
+            .as_deref()
+            .map(|o| format!(" <- {o}"))
+            .unwrap_or_default();
+        lines.push(format!("{} {}{}", file.change_kind, file.path, old));
+    }
+    lines.join("\n")
+}
+
+pub fn render_sc_pull(outcome: &PullOutcome) -> String {
+    let head_suffix = outcome
+        .new_head
+        .as_deref()
+        .map(|h| h.to_string())
+        .unwrap_or_default();
+    match outcome.status {
+        PullStatus::UpToDate => "already up to date".into(),
+        PullStatus::FastForward => {
+            if head_suffix.is_empty() {
+                "fast-forwarded".into()
+            } else {
+                format!("fast-forwarded to {head_suffix}")
+            }
+        }
+        PullStatus::Merged => {
+            if head_suffix.is_empty() {
+                "merged".into()
+            } else {
+                format!("merged at {head_suffix}")
+            }
+        }
+    }
+}
+
+pub fn render_sc_push(outcome: &PushOutcome) -> String {
+    if outcome.was_publish {
+        format!("pushed {} · published", outcome.pushed_to)
+    } else {
+        format!("pushed {}", outcome.pushed_to)
+    }
+}
+
+// ---- agent-context renderers ----
 pub fn render_agent_context(doc: &AgentContextDocument) -> String {
     let mut lines = vec![format!(
         "OPPA CLI {} · protocol {}",

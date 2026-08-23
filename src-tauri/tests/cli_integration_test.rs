@@ -136,7 +136,7 @@ fn status_report_in_returns_protocol_and_sessions() {
 
     let report = RuntimeConnection::status_report_in(Some(dir.clone()), Duration::from_secs(5))
         .expect("status report");
-    assert_eq!(report.protocol_version, 3);
+    assert_eq!(report.protocol_version, 4);
     assert!(report.sessions.is_empty());
 
     cancel.cancel();

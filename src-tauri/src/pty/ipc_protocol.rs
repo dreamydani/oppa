@@ -1,9 +1,14 @@
+use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::source_control::{
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
+    SourceControlStatus, UpstreamStatus,
+};
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 3;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 4;
 
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +165,40 @@ pub enum DaemonRequest {
     WorktreePurge { id: String },
     WorktreePs,
     WorktreeLineage { id: String },
+    // v4 source-control surface: cwd-relative ops delegated to git/source_control.rs
+    GitStatus { cwd: String },
+    GitStage { cwd: String, paths: Vec<String> },
+    GitUnstage { cwd: String, paths: Vec<String> },
+    GitDiscard {
+        cwd: String,
+        paths: Vec<String>,
+        include_untracked: bool,
+    },
+    GitCommit { cwd: String, message: String },
+    GitLocalBranches { cwd: String },
+    GitCheckout { cwd: String, branch: String },
+    GitFileDiff {
+        cwd: String,
+        path: String,
+        staged: bool,
+        compare_against_head: bool,
+    },
+    GitHistory { cwd: String, limit: Option<u32> },
+    GitBranchCompare { cwd: String, base_ref: String },
+    GitFetch { cwd: String },
+    GitPull { cwd: String, ff_only: bool },
+    GitFastForward { cwd: String },
+    GitPush {
+        cwd: String,
+        publish: bool,
+        force_with_lease: bool,
+    },
+    GitUpstreamRefresh { cwd: String },
+    DiffCommentsList { worktree_id: String },
+    DiffCommentAdd { comment: NewDiffComment },
+    DiffCommentUpdate { id: String, body: String },
+    DiffCommentDelete { id: String },
+    DiffCommentsMarkSent { ids: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +231,18 @@ pub enum DaemonResponse {
         record: WorktreeRecord,
         session_id: String,
     },
+    // v4 source-control replies; payload types are the git module's serde structs verbatim
+    ScStatus(SourceControlStatus),
+    ScCommit(String),
+    ScBranches(LocalBranches),
+    ScDiff(DiffContent),
+    ScHistory(HistoryResult),
+    ScCompare(BranchCompare),
+    ScPull(PullOutcome),
+    ScPush(PushOutcome),
+    ScUpstream(UpstreamStatus),
+    CommentRecords(Vec<DiffComment>),
+    CommentRecordOne(DiffComment),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +272,8 @@ pub enum DaemonEvent {
     SessionFocusRequested {
         session_id: String,
     },
+    // Any successful source-control mutation anywhere; payload-less nudge to refresh panels
+    GitChanged,
 }
 
 // Tab bars render titles verbatim: control bytes and runaway length never belong there.
@@ -759,5 +812,201 @@ mod tests {
         } else {
             assert!(path.ends_with("oppa-daemon.sock"));
         }
+    }
+
+    // ---- v4 source-control surface ----
+
+    fn sample_status() -> SourceControlStatus {
+        serde_json::from_value(serde_json::json!({
+            "entries": [{
+                "path": "src/lib.rs",
+                "index_status": "M",
+                "worktree_status": " ",
+                "area": "staged",
+                "old_path": null
+            }],
+            "conflict_state": "merge",
+            "branch": "main",
+            "upstream": {
+                "has_upstream": true,
+                "ahead": 2,
+                "behind": 1,
+                "remote_branch": "origin/main"
+            },
+            "did_hit_limit": false,
+            "status_length": 1
+        }))
+        .unwrap()
+    }
+
+    fn sample_comment() -> DiffComment {
+        serde_json::from_value(serde_json::json!({
+            "id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+            "worktree_id": "repo::C:/ws/feat-a",
+            "file_path": "src/lib.rs",
+            "source": "diff",
+            "selected_text": null,
+            "start_line": null,
+            "line_number": 12,
+            "body": "why here?",
+            "scope": "unstaged",
+            "old_path": null,
+            "created_at_ms": 1723900000000u64,
+            "updated_at_ms": null,
+            "sent_at": null
+        }))
+        .unwrap()
+    }
+
+    fn sample_new_comment() -> NewDiffComment {
+        NewDiffComment {
+            worktree_id: "repo::C:/ws/feat-a".into(),
+            file_path: "src/lib.rs".into(),
+            source: crate::git::comments_store::DiffCommentSource::Diff,
+            selected_text: Some("let x".into()),
+            start_line: Some(10),
+            line_number: 12,
+            body: "why here?".into(),
+            scope: crate::git::comments_store::DiffCommentScope::Unstaged,
+            old_path: None,
+        }
+    }
+
+    #[test]
+    fn test_serialize_v4_git_requests_roundtrip() {
+        let requests = vec![
+            DaemonRequest::GitStatus { cwd: "/r".into() },
+            DaemonRequest::GitStage { cwd: "/r".into(), paths: vec!["a.txt".into()] },
+            DaemonRequest::GitUnstage { cwd: "/r".into(), paths: Vec::new() },
+            DaemonRequest::GitDiscard {
+                cwd: "/r".into(),
+                paths: vec!["a.txt".into()],
+                include_untracked: true,
+            },
+            DaemonRequest::GitCommit { cwd: "/r".into(), message: "feat: x".into() },
+            DaemonRequest::GitLocalBranches { cwd: "/r".into() },
+            DaemonRequest::GitCheckout { cwd: "/r".into(), branch: "main".into() },
+            DaemonRequest::GitFileDiff {
+                cwd: "/r".into(),
+                path: "a.txt".into(),
+                staged: true,
+                compare_against_head: false,
+            },
+            DaemonRequest::GitHistory { cwd: "/r".into(), limit: Some(20) },
+            DaemonRequest::GitHistory { cwd: "/r".into(), limit: None },
+            DaemonRequest::GitBranchCompare { cwd: "/r".into(), base_ref: "main".into() },
+            DaemonRequest::GitFetch { cwd: "/r".into() },
+            DaemonRequest::GitPull { cwd: "/r".into(), ff_only: true },
+            DaemonRequest::GitFastForward { cwd: "/r".into() },
+            DaemonRequest::GitPush {
+                cwd: "/r".into(),
+                publish: true,
+                force_with_lease: false,
+            },
+            DaemonRequest::GitUpstreamRefresh { cwd: "/r".into() },
+        ];
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+    }
+
+    #[test]
+    fn test_serialize_v4_comment_requests_roundtrip() {
+        let requests = vec![
+            DaemonRequest::DiffCommentsList { worktree_id: "wt-1".into() },
+            DaemonRequest::DiffCommentAdd { comment: sample_new_comment() },
+            DaemonRequest::DiffCommentUpdate { id: "c-1".into(), body: "edited".into() },
+            DaemonRequest::DiffCommentDelete { id: "c-1".into() },
+            DaemonRequest::DiffCommentsMarkSent { ids: vec!["c-1".into(), "c-2".into()] },
+        ];
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+        // Optional fields stay optional on the wire for older-style payloads
+        let legacy =
+            r#"{"type":"DiffCommentAdd","payload":{"comment":{"worktree_id":"w","file_path":"f","source":"markdown","line_number":3,"body":"b","scope":"branch"}}}"#;
+        match serde_json::from_str::<DaemonRequest>(legacy).expect("legacy add") {
+            DaemonRequest::DiffCommentAdd { comment } => {
+                assert_eq!(comment.selected_text, None);
+                assert_eq!(comment.start_line, None);
+                assert_eq!(comment.old_path, None);
+                assert_eq!(
+                    comment.source,
+                    crate::git::comments_store::DiffCommentSource::Markdown
+                );
+            }
+            other => panic!("expected DiffCommentAdd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_serialize_v4_responses_roundtrip() {
+        let responses = vec![
+            DaemonResponse::ScStatus(sample_status()),
+            DaemonResponse::ScCommit("abc1234".into()),
+            DaemonResponse::ScBranches(crate::git::source_control::LocalBranches {
+                branches: vec!["main".into(), "feature".into()],
+                current: Some("main".into()),
+            }),
+            DaemonResponse::ScDiff(crate::git::source_control::DiffContent {
+                kind: crate::git::source_control::DiffKind::Binary,
+                original_content: String::new(),
+                modified_content: String::new(),
+                truncated: false,
+            }),
+            DaemonResponse::ScHistory(HistoryResult {
+                items: Vec::new(),
+                has_more: true,
+            }),
+            DaemonResponse::ScCompare(BranchCompare {
+                base_ref: "main".into(),
+                ahead: 3,
+                behind: 0,
+                changed_files: Vec::new(),
+            }),
+            DaemonResponse::ScPull(PullOutcome {
+                status: crate::git::source_control::PullStatus::FastForward,
+                new_head: Some("def5678".into()),
+            }),
+            DaemonResponse::ScPush(PushOutcome {
+                pushed_to: "origin/main".into(),
+                was_publish: true,
+            }),
+            DaemonResponse::ScUpstream(UpstreamStatus {
+                has_upstream: false,
+                ahead: 0,
+                behind: 0,
+                remote_branch: None,
+            }),
+            DaemonResponse::CommentRecords(vec![sample_comment()]),
+            DaemonResponse::CommentRecordOne(sample_comment()),
+        ];
+        for res in responses {
+            let json = serde_json::to_string(&res).expect("serialize response");
+            let decoded: DaemonResponse =
+                serde_json::from_str(&json).expect("deserialize response");
+            assert_eq!(res, decoded);
+        }
+    }
+
+    #[test]
+    fn test_v4_wire_shapes_use_tagged_envelopes_and_git_changed_has_no_payload() {
+        let status = serde_json::to_value(DaemonResponse::ScStatus(sample_status())).unwrap();
+        assert_eq!(status["type"], "ScStatus");
+        assert_eq!(status["payload"]["branch"], "main");
+
+        let comment =
+            serde_json::to_value(DaemonResponse::CommentRecordOne(sample_comment())).unwrap();
+        assert_eq!(comment["payload"]["line_number"], 12);
+        assert_eq!(comment["payload"]["scope"], "unstaged");
+
+        let changed = serde_json::to_value(DaemonEvent::GitChanged).unwrap();
+        assert_eq!(changed, serde_json::json!({"event":"GitChanged"}));
+        let decoded: DaemonEvent = serde_json::from_str(r#"{"event":"GitChanged"}"#).unwrap();
+        assert_eq!(decoded, DaemonEvent::GitChanged);
     }
 }

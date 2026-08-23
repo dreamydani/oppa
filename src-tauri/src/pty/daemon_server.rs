@@ -1,5 +1,13 @@
 use crate::agents::catalog::{self, build_launch_command, resolve_command, AgentProfile, PromptDelivery};
 use crate::agents::shell_line::join_argv;
+use crate::git::comments_store::{
+    comment_add, comment_delete, comment_update, comments_list, comments_mark_sent,
+};
+use crate::git::source_control::{
+    sc_branch_compare, sc_checkout, sc_commit, sc_discard, sc_fast_forward, sc_fetch,
+    sc_file_diff, sc_history, sc_local_branches, sc_pull, sc_push, sc_stage, sc_status,
+    sc_unstage, sc_upstream_refresh,
+};
 use crate::git::teardown::{session_cwd_inside, LiveSession};
 use crate::git::worktree_lineage::lineage_list;
 use crate::git::worktree_registry::WorktreeRegistry;
@@ -75,6 +83,8 @@ pub struct DaemonServer {
     resumed_agent_ids: Arc<Mutex<std::collections::HashSet<String>>>,
     // Some(snapshot_dir/worktrees.json) enables the repo/worktree request surface
     worktree_registry_path: Option<PathBuf>,
+    // Some(snapshot_dir/diff-comments.json) enables the diff-comment request surface
+    comments_store_path: Option<PathBuf>,
     // Set only when the discovery file was written; None keeps the pipe unauthenticated
     auth_token: Option<String>,
     global_events: broadcast::Sender<DaemonEvent>,
@@ -93,6 +103,7 @@ impl DaemonServer {
             snapshot_dir: None,
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: None,
+            comments_store_path: None,
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
@@ -104,6 +115,7 @@ impl DaemonServer {
             snapshot_dir: Some(app_data_dir.clone()),
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: Some(app_data_dir.join("worktrees.json")),
+            comments_store_path: Some(app_data_dir.join("diff-comments.json")),
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
@@ -518,11 +530,173 @@ impl DaemonServer {
                 }
                 None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
             },
+            // ---- v4 source-control surface ----
+            DaemonRequest::GitStatus { cwd } => {
+                self.sc_response(|| sc_status(Path::new(&cwd)), DaemonResponse::ScStatus)
+            }
+            DaemonRequest::GitStage { cwd, paths } => {
+                let resp = self.sc_response(|| sc_stage(Path::new(&cwd), &paths), |_| DaemonResponse::Ok);
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitUnstage { cwd, paths } => {
+                let resp = self.sc_response(|| sc_unstage(Path::new(&cwd), &paths), |_| DaemonResponse::Ok);
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitDiscard {
+                cwd,
+                paths,
+                include_untracked,
+            } => {
+                let resp = self.sc_response(
+                    || sc_discard(Path::new(&cwd), &paths, include_untracked),
+                    |_| DaemonResponse::Ok,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitCommit { cwd, message } => {
+                let resp = self.sc_response(|| sc_commit(Path::new(&cwd), &message), DaemonResponse::ScCommit);
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitLocalBranches { cwd } => {
+                self.sc_response(|| sc_local_branches(Path::new(&cwd)), DaemonResponse::ScBranches)
+            }
+            DaemonRequest::GitCheckout { cwd, branch } => {
+                let resp = self.sc_response(
+                    || sc_checkout(Path::new(&cwd), &branch),
+                    |_| DaemonResponse::Ok,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitFileDiff {
+                cwd,
+                path,
+                staged,
+                compare_against_head,
+            } => self.sc_response(
+                || sc_file_diff(Path::new(&cwd), &path, staged, compare_against_head),
+                DaemonResponse::ScDiff,
+            ),
+            DaemonRequest::GitHistory { cwd, limit } => {
+                let limit = limit.map(|l| l as usize).unwrap_or(0);
+                self.sc_response(|| sc_history(Path::new(&cwd), limit), DaemonResponse::ScHistory)
+            }
+            DaemonRequest::GitBranchCompare { cwd, base_ref } => {
+                self.sc_response(
+                    || sc_branch_compare(Path::new(&cwd), &base_ref),
+                    DaemonResponse::ScCompare,
+                )
+            }
+            DaemonRequest::GitFetch { cwd } => {
+                self.sc_response(|| sc_fetch(Path::new(&cwd)), |_| DaemonResponse::Ok)
+            }
+            DaemonRequest::GitPull { cwd, ff_only } => {
+                let resp = self.sc_response(|| sc_pull(Path::new(&cwd), ff_only), DaemonResponse::ScPull);
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitFastForward { cwd } => {
+                let resp = self.sc_response(
+                    || sc_fast_forward(Path::new(&cwd)),
+                    DaemonResponse::ScPull,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitPush {
+                cwd,
+                publish,
+                force_with_lease,
+            } => {
+                let resp = self.sc_response(
+                    || sc_push(Path::new(&cwd), publish, force_with_lease),
+                    DaemonResponse::ScPush,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::GitUpstreamRefresh { cwd } => self.sc_response(
+                || Ok(sc_upstream_refresh(Path::new(&cwd))),
+                DaemonResponse::ScUpstream,
+            ),
+            DaemonRequest::DiffCommentsList { worktree_id } => self.comment_response(
+                |store| comments_list(&store, &worktree_id),
+                DaemonResponse::CommentRecords,
+            ),
+            DaemonRequest::DiffCommentAdd { comment } => {
+                let resp = self.comment_response(
+                    |store| comment_add(&store, comment),
+                    DaemonResponse::CommentRecordOne,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::DiffCommentUpdate { id, body } => {
+                let resp = self.comment_response(
+                    |store| comment_update(&store, &id, &body),
+                    DaemonResponse::CommentRecordOne,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::DiffCommentDelete { id } => {
+                let resp = self.comment_response(|store| comment_delete(&store, &id), |_| DaemonResponse::Ok);
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::DiffCommentsMarkSent { ids } => {
+                let resp = self.comment_response(
+                    |store| comments_mark_sent(&store, &ids),
+                    DaemonResponse::CommentRecords,
+                );
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
         }
     }
 
     fn publish_global(&self, event: DaemonEvent) {
         let _ = self.global_events.send(event);
+    }
+
+    // Shared gate + result envelope so every git.* handler stays a one-liner.
+    fn sc_response<T>(
+        &self,
+        op: impl FnOnce() -> Result<T, String>,
+        ok: impl FnOnce(T) -> DaemonResponse,
+    ) -> DaemonResponse {
+        if self.worktree_registry_path.is_none() {
+            return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
+        }
+        match op() {
+            Ok(value) => ok(value),
+            Err(e) => DaemonResponse::Error(e),
+        }
+    }
+
+    fn comment_response<T>(
+        &self,
+        op: impl FnOnce(PathBuf) -> Result<T, String>,
+        ok: impl FnOnce(T) -> DaemonResponse,
+    ) -> DaemonResponse {
+        let Some(store_path) = self.comments_store_path.clone() else {
+            return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
+        };
+        match op(store_path) {
+            Ok(value) => ok(value),
+            Err(e) => DaemonResponse::Error(e),
+        }
+    }
+
+    // Any successful source-control mutation nudges every client's panel to refresh.
+    fn publish_git_changed_if_success(&self, resp: &DaemonResponse) {
+        if !matches!(resp, DaemonResponse::Error(_)) {
+            self.publish_global(DaemonEvent::GitChanged);
+        }
     }
 
     // Requested id is strict (unknown id errors); a checkpoint id restores
@@ -758,6 +932,7 @@ impl DaemonServer {
             snapshot_dir: self.snapshot_dir.clone(),
             resumed_agent_ids: Arc::clone(&self.resumed_agent_ids),
             worktree_registry_path: self.worktree_registry_path.clone(),
+            comments_store_path: self.comments_store_path.clone(),
             auth_token: self.auth_token.clone(),
             global_events: self.global_events.clone(),
         });
@@ -3006,5 +3181,509 @@ mod tests {
         let _ = server.handle_request(DaemonRequest::Kill {
             session_id: "cold-wt".into(),
         });
+    }
+
+    // ---- v4 source-control surface ----
+
+    #[test]
+    fn test_v4_git_and_comment_requests_error_without_registry() {
+        let server = DaemonServer::new();
+        let git_requests = vec![
+            DaemonRequest::GitStatus { cwd: "/r".into() },
+            DaemonRequest::GitStage {
+                cwd: "/r".into(),
+                paths: vec![],
+            },
+            DaemonRequest::GitUnstage {
+                cwd: "/r".into(),
+                paths: vec![],
+            },
+            DaemonRequest::GitDiscard {
+                cwd: "/r".into(),
+                paths: vec![],
+                include_untracked: false,
+            },
+            DaemonRequest::GitCommit {
+                cwd: "/r".into(),
+                message: "m".into(),
+            },
+            DaemonRequest::GitLocalBranches { cwd: "/r".into() },
+            DaemonRequest::GitCheckout {
+                cwd: "/r".into(),
+                branch: "main".into(),
+            },
+            DaemonRequest::GitFileDiff {
+                cwd: "/r".into(),
+                path: "p".into(),
+                staged: false,
+                compare_against_head: false,
+            },
+            DaemonRequest::GitHistory { cwd: "/r".into(), limit: None },
+            DaemonRequest::GitBranchCompare {
+                cwd: "/r".into(),
+                base_ref: "main".into(),
+            },
+            DaemonRequest::GitFetch { cwd: "/r".into() },
+            DaemonRequest::GitPull { cwd: "/r".into(), ff_only: true },
+            DaemonRequest::GitFastForward { cwd: "/r".into() },
+            DaemonRequest::GitPush {
+                cwd: "/r".into(),
+                publish: false,
+                force_with_lease: false,
+            },
+            DaemonRequest::GitUpstreamRefresh { cwd: "/r".into() },
+            DaemonRequest::DiffCommentsList { worktree_id: "w".into() },
+        ];
+        for req in git_requests {
+            match server.handle_request(req) {
+                DaemonResponse::Error(e) => assert!(e.contains("registry unavailable"), "got: {e}"),
+                other => panic!("expected registry-unavailable error, got {other:?}"),
+            }
+        }
+    }
+
+    fn sample_new_comment(worktree_id: &str, line: u32, body: &str) -> DaemonRequest {
+        DaemonRequest::DiffCommentAdd {
+            comment: crate::git::comments_store::NewDiffComment {
+                worktree_id: worktree_id.into(),
+                file_path: "src/lib.rs".into(),
+                source: crate::git::comments_store::DiffCommentSource::Diff,
+                selected_text: None,
+                start_line: Some(line),
+                line_number: line,
+                body: body.into(),
+                scope: crate::git::comments_store::DiffCommentScope::Unstaged,
+                old_path: None,
+            },
+        }
+    }
+
+    fn expect_comment_one(resp: DaemonResponse, what: &str) -> crate::git::comments_store::DiffComment {
+        match resp {
+            DaemonResponse::CommentRecordOne(record) => record,
+            other => panic!("expected CommentRecordOne for {what}, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_v4_comment_crud_validation_marksent_and_delete_over_handlers() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+        let mut rx = server.subscribe_global_events();
+
+        // Validation rejects never touch the store nor broadcast
+        for bad in [
+            sample_new_comment("", 1, "body"),
+            sample_new_comment("wt", 0, "body"),
+            sample_new_comment("wt", 1, "  "),
+        ] {
+            match server.handle_request(bad) {
+                DaemonResponse::Error(_) => {}
+                other => panic!("expected validation error, got {other:?}"),
+            }
+        }
+
+        let added = expect_comment_one(
+            server.handle_request(sample_new_comment("wt-a", 12, "why here?")),
+            "add",
+        );
+        assert!(!added.id.is_empty());
+        assert!(added.created_at_ms > 0);
+        assert_eq!(
+            next_git_changed(&mut rx).await,
+            true,
+            "add must publish GitChanged"
+        );
+
+        let updated = expect_comment_one(
+            server.handle_request(DaemonRequest::DiffCommentUpdate {
+                id: added.id.clone(),
+                body: "edited".into(),
+            }),
+            "update",
+        );
+        assert_eq!(updated.body, "edited");
+        assert!(updated.updated_at_ms.unwrap_or(0) >= added.created_at_ms);
+
+        let stamped = match server.handle_request(DaemonRequest::DiffCommentsMarkSent {
+            ids: vec![added.id.clone()],
+        }) {
+            DaemonResponse::CommentRecords(records) => records,
+            other => panic!("expected CommentRecords from mark-sent, got {other:?}"),
+        };
+        assert_eq!(stamped.len(), 1);
+        assert!(stamped[0].sent_at.unwrap_or(0) > 0);
+
+        // List reflects the full roundtrip before deletion
+        match server.handle_request(DaemonRequest::DiffCommentsList {
+            worktree_id: "wt-a".into(),
+        }) {
+            DaemonResponse::CommentRecords(records) => {
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].body, "edited");
+                assert!(records[0].sent_at.is_some());
+            }
+            other => panic!("expected CommentRecords list, got {other:?}"),
+        }
+
+        assert_eq!(
+            server.handle_request(DaemonRequest::DiffCommentDelete { id: added.id }),
+            DaemonResponse::Ok
+        );
+        match server.handle_request(DaemonRequest::DiffCommentsList {
+            worktree_id: "wt-a".into(),
+        }) {
+            DaemonResponse::CommentRecords(records) => assert!(records.is_empty()),
+            other => panic!("expected empty list after delete, got {other:?}"),
+        }
+        // Unknown-id ops surface daemon errors, not panics
+        assert!(matches!(
+            server.handle_request(DaemonRequest::DiffCommentUpdate {
+                id: "ghost".into(),
+                body: "x".into()
+            }),
+            DaemonResponse::Error(_)
+        ));
+    }
+
+    async fn next_git_changed(rx: &mut broadcast::Receiver<DaemonEvent>) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                Ok(Ok(DaemonEvent::GitChanged)) => return true,
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn test_v4_comments_persist_across_daemon_restart_on_same_snapshot_dir() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let added = {
+            let server = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+            expect_comment_one(
+                server.handle_request(sample_new_comment("wt-persist", 3, "survives")),
+                "add",
+            )
+        };
+
+        // A fresh daemon on the same snapshot_dir reads the same diff-comments.json
+        let rebooted = DaemonServer::with_snapshot_storage(temp_dir.path().to_path_buf());
+        match rebooted.handle_request(DaemonRequest::DiffCommentsList {
+            worktree_id: "wt-persist".into(),
+        }) {
+            DaemonResponse::CommentRecords(records) => {
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].id, added.id);
+            }
+            other => panic!("expected persisted comment after restart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_v4_git_status_history_branches_flow_through_handlers() {
+        let s = crate::git::test_support::sandbox("v4-git-handlers");
+        std::fs::write(s.repo.join("flow.txt"), "v1").unwrap();
+
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        let cwd = s.repo.to_string_lossy().into_owned();
+
+        match server.handle_request(DaemonRequest::GitStatus { cwd: cwd.clone() }) {
+            DaemonResponse::ScStatus(st) => {
+                let entry = st.entries.iter().find(|e| e.path == "flow.txt").unwrap();
+                assert_eq!(
+                    entry.area,
+                    crate::git::source_control::GitArea::Untracked
+                );
+            }
+            other => panic!("expected ScStatus, got {other:?}"),
+        }
+
+        assert_eq!(
+            server.handle_request(DaemonRequest::GitStage {
+                cwd: cwd.clone(),
+                paths: vec!["flow.txt".into()],
+            }),
+            DaemonResponse::Ok
+        );
+        match server.handle_request(DaemonRequest::GitStatus { cwd: cwd.clone() }) {
+            DaemonResponse::ScStatus(st) => {
+                let entry = st.entries.iter().find(|e| e.path == "flow.txt").unwrap();
+                assert_eq!(entry.area, crate::git::source_control::GitArea::Staged);
+            }
+            other => panic!("expected staged ScStatus, got {other:?}"),
+        }
+
+        match server.handle_request(DaemonRequest::GitCommit {
+            cwd: cwd.clone(),
+            message: "feat: flow commit".into(),
+        }) {
+            DaemonResponse::ScCommit(id) => assert!(!id.is_empty()),
+            other => panic!("expected ScCommit, got {other:?}"),
+        }
+        // Nothing staged now
+        assert!(matches!(
+            server.handle_request(DaemonRequest::GitCommit {
+                cwd: cwd.clone(),
+                message: "empty".into(),
+            }),
+            DaemonResponse::Error(ref e) if e.contains("nothing to commit")
+        ));
+
+        match server.handle_request(DaemonRequest::GitHistory {
+            cwd: cwd.clone(),
+            limit: Some(10),
+        }) {
+            DaemonResponse::ScHistory(result) => {
+                assert_eq!(result.items.len(), 2);
+                assert_eq!(result.items[0].subject, "feat: flow commit");
+            }
+            other => panic!("expected ScHistory, got {other:?}"),
+        }
+
+        match server.handle_request(DaemonRequest::GitLocalBranches { cwd: cwd.clone() }) {
+            DaemonResponse::ScBranches(branches) => {
+                assert_eq!(branches.current.as_deref(), Some("main"));
+            }
+            other => panic!("expected ScBranches, got {other:?}"),
+        }
+
+        match server.handle_request(DaemonRequest::GitFileDiff {
+            cwd: cwd.clone(),
+            path: "README.md".into(),
+            staged: false,
+            compare_against_head: false,
+        }) {
+            DaemonResponse::ScDiff(diff) => {
+                assert_eq!(
+                    diff.kind,
+                    crate::git::source_control::DiffKind::Text
+                );
+            }
+            other => panic!("expected ScDiff, got {other:?}"),
+        }
+
+        match server.handle_request(DaemonRequest::GitBranchCompare {
+            cwd: cwd.clone(),
+            base_ref: "no-such-ref".into(),
+        }) {
+            DaemonResponse::Error(e) => assert!(e.contains("no-such-ref"), "{e}"),
+            other => panic!("expected compare error, got {other:?}"),
+        }
+    }
+
+    // Global broadcasts interleave with responses on every client stream, so
+    // frame readers skip non-matching frames under a per-read timeout.
+    async fn read_response_matching<R: tokio::io::AsyncBufRead + Unpin>(
+        reader: &mut R,
+        line: &mut String,
+        pred: impl Fn(&DaemonResponse) -> bool,
+    ) -> DaemonResponse {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "timed out waiting for response frame");
+            line.clear();
+            tokio::time::timeout(Duration::from_secs(2), reader.read_line(line))
+                .await
+                .expect("frame within timeout")
+                .unwrap();
+            if let Ok(resp) = serde_json::from_str::<DaemonResponse>(line.trim()) {
+                if pred(&resp) {
+                    return resp;
+                }
+            }
+        }
+    }
+
+    async fn read_event_matching<R: tokio::io::AsyncBufRead + Unpin>(
+        reader: &mut R,
+        line: &mut String,
+        pred: impl Fn(&DaemonEvent) -> bool,
+    ) -> DaemonEvent {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "timed out waiting for event frame");
+            line.clear();
+            tokio::time::timeout(Duration::from_secs(2), reader.read_line(line))
+                .await
+                .expect("frame within timeout")
+                .unwrap();
+            if let Ok(event) = serde_json::from_str::<DaemonEvent>(line.trim()) {
+                if pred(&event) {
+                    return event;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pipe_level_v4_git_status_stage_commit_with_git_changed_fanout() {        let s = crate::git::test_support::sandbox("v4-pipe-git");
+        std::fs::write(s.repo.join("pipe.txt"), "v1").unwrap();
+        let server = Arc::new(DaemonServer::with_snapshot_storage(s.root.clone()));
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-v4git-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-v4git-{}.sock",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let open_client = || async {
+            #[cfg(target_os = "windows")]
+            {
+                use tokio::net::windows::named_pipe::ClientOptions;
+                let mut client = None;
+                for _ in 0..20 {
+                    if let Ok(c) = ClientOptions::new().open(&socket_path) {
+                        client = Some(c);
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                client.expect("connect named pipe")
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                use tokio::net::UnixStream;
+                let mut client = None;
+                for _ in 0..20 {
+                    if let Ok(c) = UnixStream::connect(&socket_path).await {
+                        client = Some(c);
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                client.expect("connect unix socket")
+            }
+        };
+
+        // Peer listener observes GitChanged; mutator drives the real workflow.
+        let (listener_read, mut listener_write) = tokio::io::split(open_client().await);
+        let mut listener_reader = BufReader::new(listener_read);
+        let (mutator_read, mut mutator_write) = tokio::io::split(open_client().await);
+        let mut mutator_reader = BufReader::new(mutator_read);
+
+        let hello_json = serde_json::to_string(&hello(None)).unwrap() + "\n";
+        listener_write.write_all(hello_json.as_bytes()).await.unwrap();
+        let mut line = String::new();
+        listener_reader.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<DaemonResponse>(line.trim()).unwrap(),
+            DaemonResponse::HelloOk { .. }
+        ));
+        mutator_write.write_all(hello_json.as_bytes()).await.unwrap();
+        line.clear();
+        mutator_reader.read_line(&mut line).await.unwrap();
+
+        let send = |req: &DaemonRequest| serde_json::to_string(req).unwrap() + "\n";
+        let cwd = s.repo.to_string_lossy().into_owned();
+
+        // status → untracked entry over the wire
+        mutator_write
+            .write_all(send(&DaemonRequest::GitStatus { cwd: cwd.clone() }).as_bytes())
+            .await
+            .unwrap();
+        let area_of = |resp: &DaemonResponse, want: &str| {
+            if let DaemonResponse::ScStatus(st) = resp {
+                st.entries
+                    .iter()
+                    .find(|e| e.path == want)
+                    .map(|e| e.area.clone())
+            } else {
+                None
+            }
+        };
+        let resp = read_response_matching(&mut mutator_reader, &mut line, |r| {
+            matches!(r, DaemonResponse::ScStatus(_))
+        })
+        .await;
+        assert_eq!(
+            area_of(&resp, "pipe.txt"),
+            Some(crate::git::source_control::GitArea::Untracked)
+        );
+
+        // stage → Ok + refreshed status; the peer's stream sees GitChanged.
+        // Broadcasts interleave with responses, so reads match by frame kind.
+        mutator_write
+            .write_all(
+                send(&DaemonRequest::GitStage {
+                    cwd: cwd.clone(),
+                    paths: vec!["pipe.txt".into()],
+                })
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        mutator_write
+            .write_all(send(&DaemonRequest::GitStatus { cwd: cwd.clone() }).as_bytes())
+            .await
+            .unwrap();
+
+        read_response_matching(&mut mutator_reader, &mut line, |r| {
+            matches!(r, DaemonResponse::Ok)
+        })
+        .await;
+        let staged = read_response_matching(&mut mutator_reader, &mut line, |r| {
+            matches!(r, DaemonResponse::ScStatus(_))
+        })
+        .await;
+        assert_eq!(
+            area_of(&staged, "pipe.txt"),
+            Some(crate::git::source_control::GitArea::Staged)
+        );
+        read_event_matching(&mut listener_reader, &mut line, |e| {
+            matches!(e, DaemonEvent::GitChanged)
+        })
+        .await;
+
+        // commit closes the loop
+        mutator_write
+            .write_all(
+                send(&DaemonRequest::GitCommit {
+                    cwd: cwd.clone(),
+                    message: "feat: pipe commit".into(),
+                })
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        match read_response_matching(&mut mutator_reader, &mut line, |r| {
+            matches!(r, DaemonResponse::ScCommit(_))
+        })
+        .await
+        {
+            DaemonResponse::ScCommit(id) => assert!(!id.is_empty()),
+            other => panic!("expected ScCommit, got {other:?}"),
+        }
+        mutator_write
+            .write_all(send(&DaemonRequest::GitStatus { cwd }).as_bytes())
+            .await
+            .unwrap();
+        match read_response_matching(&mut mutator_reader, &mut line, |r| {
+            matches!(r, DaemonResponse::ScStatus(_))
+        })
+        .await
+        {
+            DaemonResponse::ScStatus(st) => {
+                assert!(st.entries.is_empty(), "commit must clear entries: {:?}", st.entries);
+            }
+            other => panic!("expected clean ScStatus, got {other:?}"),
+        }
+
+        cancel_token.cancel();
     }
 }

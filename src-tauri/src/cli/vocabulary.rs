@@ -20,6 +20,13 @@ pub const CANONICAL_COMMANDS: &[(&str, &[&str])] = &[
             "list", "show", "read", "send", "wait", "create", "close", "switch", "rename", "split",
         ],
     ),
+    (
+        "git",
+        &[
+            "status", "stage", "unstage", "discard", "commit", "branches", "checkout", "diff",
+            "history", "compare", "fetch", "pull", "ff", "push",
+        ],
+    ),
 ];
 
 // Parse-level aliasing keeps muscle memory working while the wire/help surface stays canonical.
@@ -126,6 +133,23 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("terminal switch", "oppa terminal switch <id>"),
     ("terminal rename", "oppa terminal rename <id> --to build"),
     ("terminal split", "oppa terminal split <id>"),
+    ("git status", "oppa git status --cwd /path/to/repo"),
+    ("git stage", "oppa git stage src/lib.rs --cwd /path/to/repo"),
+    ("git unstage", "oppa git unstage src/lib.rs --cwd /path/to/repo"),
+    (
+        "git discard",
+        "oppa git discard src/lib.rs --include-untracked --cwd /path/to/repo",
+    ),
+    ("git commit", "oppa git commit -m \"feat: ship it\""),
+    ("git branches", "oppa git branches --json"),
+    ("git checkout", "oppa git checkout feat-a"),
+    ("git diff", "oppa git diff --path src/lib.rs --staged"),
+    ("git history", "oppa git history -n 20"),
+    ("git compare", "oppa git compare main --json"),
+    ("git fetch", "oppa git fetch"),
+    ("git pull", "oppa git pull --merge"),
+    ("git ff", "oppa git ff"),
+    ("git push", "oppa git push --publish --force-with-lease"),
 ];
 
 fn lookup_example(key: &str) -> &'static str {

@@ -1,3 +1,4 @@
+pub mod comments_store;
 pub mod source_control;
 pub mod teardown;
 pub mod worktree_lineage;

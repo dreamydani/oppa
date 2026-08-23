@@ -24,6 +24,20 @@ import {
   onWorktreeChanged,
   onTitleChanged,
   onFocusRequested,
+  onGitChanged,
+  scStatus,
+  scStage,
+  scUnstage,
+  scDiscard,
+  scCommit,
+  scLocalBranches,
+  scCheckout,
+  scBranchCompare,
+  scFetch,
+  scHistory,
+  scPull,
+  scFastForward,
+  scPush,
 } from "../lib/pty/transport";
 import type {
   PtySpawnOptions,
@@ -32,6 +46,12 @@ import type {
   WorktreeAgentHandoff,
   RepoRecord,
   WorktreeStatus,
+  SourceControlStatus,
+  LocalBranches,
+  HistoryResult,
+  BranchCompare,
+  PullOutcome,
+  PushOutcome,
 } from "../lib/pty/transport";
 import {
   split,
@@ -468,6 +488,29 @@ export interface TerminalState {
   setLeftSidebarView: (view: "tabs" | "worktrees") => void;
   openWorktreeCreate: () => void;
   closeWorktreeCreate: () => void;
+
+  // Git slice: daemon-owned source-control state; mutations refresh status so
+  // the panel and StatusBar stay in sync with CLI/daemon-side changes too.
+  gitStatus: SourceControlStatus | null;
+  gitBranches: LocalBranches | null;
+  gitHistory: HistoryResult | null;
+  gitCompare: BranchCompare | null;
+  refreshGitStatus: (cwd?: string) => Promise<void>;
+  stage: (paths: string[], cwd?: string) => Promise<void>;
+  unstage: (paths: string[], cwd?: string) => Promise<void>;
+  discard: (paths: string[], includeUntracked?: boolean, cwd?: string) => Promise<void>;
+  commit: (message: string, cwd?: string) => Promise<string>;
+  checkout: (branch: string, cwd?: string) => Promise<void>;
+  loadBranches: (cwd?: string) => Promise<void>;
+  loadHistory: (limit?: number, cwd?: string) => Promise<void>;
+  compareBase: (baseRef: string, cwd?: string) => Promise<void>;
+  fetch: (cwd?: string) => Promise<void>;
+  pull: (ffOnly?: boolean, cwd?: string) => Promise<PullOutcome>;
+  ff: (cwd?: string) => Promise<PullOutcome>;
+  push: (
+    opts?: { publish?: boolean; forceWithLease?: boolean },
+    cwd?: string,
+  ) => Promise<PushOutcome>;
 }
 
 function isNonEmptyLayout(layout?: Layout): boolean {
@@ -2355,6 +2398,120 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   openWorktreeCreate: () => set({ isWorktreeCreateOpen: true }),
   closeWorktreeCreate: () => set({ isWorktreeCreateOpen: false }),
+
+  gitStatus: null,
+  gitBranches: null,
+  gitHistory: null,
+  gitCompare: null,
+
+  refreshGitStatus: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    try {
+      set({ gitStatus: await scStatus(dir) });
+    } catch {
+      // Non-repo or stopped daemon keeps the previous snapshot
+    }
+  },
+
+  stage: async (paths, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir || paths.length === 0) return;
+    await scStage(dir, paths);
+    await get().refreshGitStatus();
+  },
+
+  unstage: async (paths, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir || paths.length === 0) return;
+    await scUnstage(dir, paths);
+    await get().refreshGitStatus();
+  },
+
+  discard: async (paths, includeUntracked = false, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir || paths.length === 0) return;
+    await scDiscard(dir, paths, includeUntracked);
+    await get().refreshGitStatus();
+  },
+
+  commit: async (message, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) throw new Error("no active working copy to commit in");
+    const id = await scCommit(dir, message);
+    await get().refreshGitStatus();
+    return id;
+  },
+
+  checkout: async (branch, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    await scCheckout(dir, branch);
+    // Branch switch invalidates branches list and any cached compare
+    set({ gitBranches: null, gitCompare: null });
+    await get().refreshGitStatus();
+  },
+
+  loadBranches: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    try {
+      set({ gitBranches: await scLocalBranches(dir) });
+    } catch {
+      // Keep previous branches on failure
+    }
+  },
+
+  loadHistory: async (limit, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    try {
+      set({ gitHistory: await scHistory(dir, limit) });
+    } catch {
+      // Keep previous history on failure
+    }
+  },
+
+  compareBase: async (baseRef, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    try {
+      set({ gitCompare: await scBranchCompare(dir, baseRef) });
+    } catch {
+      set({ gitCompare: null });
+    }
+  },
+
+  fetch: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) return;
+    await scFetch(dir);
+    await get().refreshGitStatus();
+  },
+
+  pull: async (ffOnly = true, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) throw new Error("no active working copy to pull");
+    const outcome = await scPull(dir, ffOnly);
+    await get().refreshGitStatus();
+    return outcome;
+  },
+
+  ff: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) throw new Error("no active working copy to fast-forward");
+    const outcome = await scFastForward(dir);
+    await get().refreshGitStatus();
+    return outcome;
+  },
+
+  push: async (opts, cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir) throw new Error("no active working copy to push");
+    const outcome = await scPush(dir, opts?.publish ?? false, opts?.forceWithLease ?? false);
+    await get().refreshGitStatus();
+    return outcome;
+  },
 }));
 
 // Daemon-side mutations from any client must refresh the cards; debounced so a
@@ -2383,4 +2540,21 @@ void onFocusRequested(({ id }) => {
   state.selectTab(tab.id);
   const path = tab.focusedPath ? findLeafPath(tab.layout, id) : null;
   if (path) state.focusPane(path);
+});
+
+// Daemon-side git mutations (any client, incl. CLI) refresh the panel; task 7
+// toggles listening when the panel is closed to skip the work entirely.
+let gitChangedListening = true;
+export function setGitChangedListening(on: boolean) {
+  gitChangedListening = on;
+}
+let gitReloadTimer: ReturnType<typeof setTimeout> | null = null;
+void onGitChanged(() => {
+  if (gitReloadTimer) clearTimeout(gitReloadTimer);
+  gitReloadTimer = setTimeout(() => {
+    gitReloadTimer = null;
+    if (!gitChangedListening) return;
+    const cwd = useTerminalStore.getState().getActiveCwd();
+    if (cwd) void useTerminalStore.getState().refreshGitStatus(cwd).catch(() => {});
+  }, 300);
 });

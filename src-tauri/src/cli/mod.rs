@@ -1,4 +1,9 @@
 ﻿// CLI-facing runtime discovery + authed connect; the `oppa-cli` binary is a thin wrapper over this module.
+use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::source_control::{
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
+    SourceControlStatus,
+};
 use crate::git::worktree_registry::WorktreeStatus;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonRequest, DaemonResponse, WaitCondition,
@@ -440,6 +445,147 @@ pub fn decode_ok(resp: DaemonResponse) -> Result<(), CliError> {
     }
 }
 
+// ---- git verb builders; pure so tests never spawn a process ----
+
+// --cwd is optional on every git verb and falls back to the process working dir.
+pub fn resolve_cwd(explicit: Option<&str>) -> Result<String, CliError> {
+    match explicit {
+        Some(dir) => Ok(dir.to_string()),
+        None => std::env::current_dir()
+            .map_err(|e| CliError::Io(e.to_string()))
+            .map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+pub fn build_git_status(cwd: &str) -> DaemonRequest {
+    DaemonRequest::GitStatus { cwd: cwd.into() }
+}
+
+pub fn build_git_stage(cwd: &str, paths: &[&str]) -> DaemonRequest {
+    DaemonRequest::GitStage {
+        cwd: cwd.into(),
+        paths: paths.iter().map(|p| (*p).to_string()).collect(),
+    }
+}
+
+pub fn build_git_unstage(cwd: &str, paths: &[&str]) -> DaemonRequest {
+    DaemonRequest::GitUnstage {
+        cwd: cwd.into(),
+        paths: paths.iter().map(|p| (*p).to_string()).collect(),
+    }
+}
+
+pub fn build_git_discard(cwd: &str, paths: &[&str], include_untracked: bool) -> DaemonRequest {
+    DaemonRequest::GitDiscard {
+        cwd: cwd.into(),
+        paths: paths.iter().map(|p| (*p).to_string()).collect(),
+        include_untracked,
+    }
+}
+
+pub fn build_git_commit(cwd: &str, message: &str) -> DaemonRequest {
+    DaemonRequest::GitCommit {
+        cwd: cwd.into(),
+        message: message.into(),
+    }
+}
+
+pub fn build_git_branches(cwd: &str) -> DaemonRequest {
+    DaemonRequest::GitLocalBranches { cwd: cwd.into() }
+}
+
+pub fn build_git_checkout(cwd: &str, branch: &str) -> DaemonRequest {
+    DaemonRequest::GitCheckout {
+        cwd: cwd.into(),
+        branch: branch.into(),
+    }
+}
+
+pub fn build_git_file_diff(
+    cwd: &str,
+    path: &str,
+    staged: bool,
+    against_head: bool,
+) -> DaemonRequest {
+    DaemonRequest::GitFileDiff {
+        cwd: cwd.into(),
+        path: path.into(),
+        staged,
+        compare_against_head: against_head,
+    }
+}
+
+pub fn build_git_history(cwd: &str, limit: Option<u32>) -> DaemonRequest {
+    DaemonRequest::GitHistory {
+        cwd: cwd.into(),
+        limit,
+    }
+}
+
+pub fn build_git_compare(cwd: &str, base: &str) -> DaemonRequest {
+    DaemonRequest::GitBranchCompare {
+        cwd: cwd.into(),
+        base_ref: base.into(),
+    }
+}
+
+pub fn build_git_fetch(cwd: &str) -> DaemonRequest {
+    DaemonRequest::GitFetch { cwd: cwd.into() }
+}
+
+pub fn build_git_pull(cwd: &str, merge: bool) -> DaemonRequest {
+    // ff-only is the daemon default; --merge opts into a merge commit
+    DaemonRequest::GitPull {
+        cwd: cwd.into(),
+        ff_only: !merge,
+    }
+}
+
+pub fn build_git_ff(cwd: &str) -> DaemonRequest {
+    DaemonRequest::GitFastForward { cwd: cwd.into() }
+}
+
+pub fn build_git_push(cwd: &str, publish: bool, force_with_lease: bool) -> DaemonRequest {
+    DaemonRequest::GitPush {
+        cwd: cwd.into(),
+        publish,
+        force_with_lease,
+    }
+}
+
+// Shared error/variant plumbing for the typed payload decoders below.
+fn decode_with<T>(
+    resp: DaemonResponse,
+    context: &str,
+    extract: impl FnOnce(&DaemonResponse) -> Option<T>,
+) -> Result<T, CliError> {
+    match &resp {
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg.clone())),
+        other => extract(&resp).ok_or_else(|| unexpected(context, other)),
+    }
+}
+
+macro_rules! sc_payload_decoder {
+    ($name:ident, $variant:path, $ty:ty, $context:expr) => {
+        pub fn $name(resp: DaemonResponse) -> Result<$ty, CliError> {
+            decode_with(resp, $context, |r| if let $variant(value) = r {
+                Some(value.clone())
+            } else {
+                None
+            })
+        }
+    };
+}
+
+sc_payload_decoder!(decode_sc_status, DaemonResponse::ScStatus, SourceControlStatus, "git status");
+sc_payload_decoder!(decode_sc_commit, DaemonResponse::ScCommit, String, "git commit");
+sc_payload_decoder!(decode_sc_branches, DaemonResponse::ScBranches, LocalBranches, "git branches");
+sc_payload_decoder!(decode_sc_diff, DaemonResponse::ScDiff, DiffContent, "git diff");
+sc_payload_decoder!(decode_sc_history, DaemonResponse::ScHistory, HistoryResult, "git history");
+sc_payload_decoder!(decode_sc_compare, DaemonResponse::ScCompare, BranchCompare, "git compare");
+sc_payload_decoder!(decode_sc_pull, DaemonResponse::ScPull, PullOutcome, "git pull");
+sc_payload_decoder!(decode_sc_push, DaemonResponse::ScPush, PushOutcome, "git push");
+
 pub fn decode_session_ids(resp: DaemonResponse) -> Result<Vec<String>, CliError> {
     match resp {
         DaemonResponse::SessionList(ids) => Ok(ids),
@@ -527,6 +673,17 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::AgentHandoff { .. } => "AgentHandoff".into(),
         DaemonResponse::ScreenText { .. } => "ScreenText".into(),
         DaemonResponse::WaitResult { .. } => "WaitResult".into(),
+        DaemonResponse::ScStatus(_) => "ScStatus".into(),
+        DaemonResponse::ScCommit(_) => "ScCommit".into(),
+        DaemonResponse::ScBranches(_) => "ScBranches".into(),
+        DaemonResponse::ScDiff(_) => "ScDiff".into(),
+        DaemonResponse::ScHistory(_) => "ScHistory".into(),
+        DaemonResponse::ScCompare(_) => "ScCompare".into(),
+        DaemonResponse::ScPull(_) => "ScPull".into(),
+        DaemonResponse::ScPush(_) => "ScPush".into(),
+        DaemonResponse::ScUpstream(_) => "ScUpstream".into(),
+        DaemonResponse::CommentRecords(_) => "CommentRecords".into(),
+        DaemonResponse::CommentRecordOne(_) => "CommentRecordOne".into(),
     }
 }
 

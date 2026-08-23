@@ -21,6 +21,7 @@ vi.mock("../../lib/pty/transport", () => ({
   onPtyExit: vi.fn(),
   onPtyCwd: vi.fn(),
   onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),

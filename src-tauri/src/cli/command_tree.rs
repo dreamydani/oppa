@@ -37,6 +37,11 @@ pub enum Command {
         #[command(subcommand)]
         action: TerminalAction,
     },
+    /// Source-control operations against a working copy directory
+    Git {
+        #[command(subcommand)]
+        action: GitAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -168,6 +173,108 @@ pub enum TerminalAction {
     },
     /// Second session sharing the source's cwd and worktree; prints both handles
     Split { id: String },
+}
+
+// Every verb takes --cwd so the daemon resolves ops against that directory;
+// execution defaults it to the process working directory when omitted.
+#[derive(Subcommand)]
+pub enum GitAction {
+    /// Show status entries by area with a branch/upstream summary
+    Status {
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Stage paths
+    Stage {
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Unstage paths (back to unstaged/untracked)
+    Unstage {
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Discard changes in tracked paths (--include-untracked also deletes untracked)
+    Discard {
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long = "include-untracked")]
+        include_untracked: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Commit staged changes
+    Commit {
+        #[arg(short = 'm', long)]
+        message: String,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// List local branches, marking the current one
+    Branches {
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Check out a branch
+    Checkout {
+        branch: String,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Show a file's original/modified content pair
+    Diff {
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        staged: bool,
+        #[arg(long = "against-head")]
+        against_head: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Recent commits newest-first with per-commit stats
+    History {
+        #[arg(short = 'n', long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Ahead/behind and changed files versus a base ref
+    Compare {
+        base: String,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Fetch all remotes
+    Fetch {
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Pull upstream (ff-only unless --merge)
+    Pull {
+        #[arg(long)]
+        merge: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Fast-forward the current branch to upstream
+    Ff {
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Push to upstream (--publish sets upstream on first push)
+    Push {
+        #[arg(long)]
+        publish: bool,
+        #[arg(long = "force-with-lease")]
+        force_with_lease: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
 }
 
 pub fn build_root_command() -> clap::Command {

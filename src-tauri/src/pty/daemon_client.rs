@@ -1,3 +1,8 @@
+use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::source_control::{
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
+    SourceControlStatus, UpstreamStatus,
+};
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::ipc_protocol::{
@@ -19,6 +24,7 @@ pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
 pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
+pub type OnGitChanged = Arc<dyn Fn() + Send + Sync>;
 
 /// Agent handoff result: created worktree plus the live agent session a pane
 /// can bind to (session_id doubles as the agent terminal handle).
@@ -48,6 +54,7 @@ pub struct DaemonClient {
     worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>>,
     title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>>,
     focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>>,
+    git_changed_cb: Arc<Mutex<Option<OnGitChanged>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -74,6 +81,7 @@ impl DaemonClient {
         let worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>> = Arc::new(Mutex::new(None));
         let title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>> = Arc::new(Mutex::new(None));
         let focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>> = Arc::new(Mutex::new(None));
+        let git_changed_cb: Arc<Mutex<Option<OnGitChanged>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -144,6 +152,7 @@ impl DaemonClient {
         let worktree_changed_cb_clone = Arc::clone(&worktree_changed_cb);
         let title_changed_cb_clone = Arc::clone(&title_changed_cb);
         let focus_requested_cb_clone = Arc::clone(&focus_requested_cb);
+        let git_changed_cb_clone = Arc::clone(&git_changed_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -209,6 +218,11 @@ impl DaemonClient {
                                         cb(&session_id);
                                     }
                                 }
+                                DaemonEvent::GitChanged => {
+                                    if let Some(cb) = git_changed_cb_clone.lock().as_ref() {
+                                        cb();
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -246,6 +260,7 @@ impl DaemonClient {
             worktree_changed_cb,
             title_changed_cb,
             focus_requested_cb,
+            git_changed_cb,
             _runtime: rt,
         };
 
@@ -320,6 +335,11 @@ impl DaemonClient {
     /// Register a global hook fired whenever any client requests session focus.
     pub fn set_focus_requested_callback(&self, cb: OnFocusRequested) {
         *self.focus_requested_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever any client mutates source-control state.
+    pub fn set_git_changed_callback(&self, cb: OnGitChanged) {
+        *self.git_changed_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.
@@ -676,6 +696,244 @@ impl DaemonClient {
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!(
                 "unexpected response for WorktreeLineage: {other:?}"
+            )),
+        }
+    }
+
+    // ---- v4 source-control passthroughs; payloads are the git module's serde structs ----
+
+    pub fn sc_status(&self, cwd: &str) -> Result<SourceControlStatus, String> {
+        match self.send_request(DaemonRequest::GitStatus { cwd: cwd.into() })? {
+            DaemonResponse::ScStatus(status) => Ok(status),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitStatus: {other:?}")),
+        }
+    }
+
+    fn sc_void(&self, req: DaemonRequest, what: &str) -> Result<(), String> {
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for {what}: {other:?}")),
+        }
+    }
+
+    pub fn sc_stage(&self, cwd: &str, paths: &[String]) -> Result<(), String> {
+        self.sc_void(
+            DaemonRequest::GitStage {
+                cwd: cwd.into(),
+                paths: paths.to_vec(),
+            },
+            "GitStage",
+        )
+    }
+
+    pub fn sc_unstage(&self, cwd: &str, paths: &[String]) -> Result<(), String> {
+        self.sc_void(
+            DaemonRequest::GitUnstage {
+                cwd: cwd.into(),
+                paths: paths.to_vec(),
+            },
+            "GitUnstage",
+        )
+    }
+
+    pub fn sc_discard(
+        &self,
+        cwd: &str,
+        paths: &[String],
+        include_untracked: bool,
+    ) -> Result<(), String> {
+        self.sc_void(
+            DaemonRequest::GitDiscard {
+                cwd: cwd.into(),
+                paths: paths.to_vec(),
+                include_untracked,
+            },
+            "GitDiscard",
+        )
+    }
+
+    pub fn sc_commit(&self, cwd: &str, message: &str) -> Result<String, String> {
+        let req = DaemonRequest::GitCommit {
+            cwd: cwd.into(),
+            message: message.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScCommit(id) => Ok(id),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitCommit: {other:?}")),
+        }
+    }
+
+    pub fn sc_local_branches(&self, cwd: &str) -> Result<LocalBranches, String> {
+        match self.send_request(DaemonRequest::GitLocalBranches { cwd: cwd.into() })? {
+            DaemonResponse::ScBranches(branches) => Ok(branches),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for GitLocalBranches: {other:?}"
+            )),
+        }
+    }
+
+    pub fn sc_checkout(&self, cwd: &str, branch: &str) -> Result<(), String> {
+        self.sc_void(
+            DaemonRequest::GitCheckout {
+                cwd: cwd.into(),
+                branch: branch.into(),
+            },
+            "GitCheckout",
+        )
+    }
+
+    pub fn sc_file_diff(
+        &self,
+        cwd: &str,
+        path: &str,
+        staged: bool,
+        compare_against_head: bool,
+    ) -> Result<DiffContent, String> {
+        let req = DaemonRequest::GitFileDiff {
+            cwd: cwd.into(),
+            path: path.into(),
+            staged,
+            compare_against_head,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScDiff(diff) => Ok(diff),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitFileDiff: {other:?}")),
+        }
+    }
+
+    pub fn sc_history(&self, cwd: &str, limit: Option<u32>) -> Result<HistoryResult, String> {
+        let req = DaemonRequest::GitHistory {
+            cwd: cwd.into(),
+            limit,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScHistory(result) => Ok(result),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitHistory: {other:?}")),
+        }
+    }
+
+    pub fn sc_branch_compare(&self, cwd: &str, base_ref: &str) -> Result<BranchCompare, String> {
+        let req = DaemonRequest::GitBranchCompare {
+            cwd: cwd.into(),
+            base_ref: base_ref.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScCompare(compare) => Ok(compare),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for GitBranchCompare: {other:?}"
+            )),
+        }
+    }
+
+    pub fn sc_fetch(&self, cwd: &str) -> Result<(), String> {
+        self.sc_void(DaemonRequest::GitFetch { cwd: cwd.into() }, "GitFetch")
+    }
+
+    pub fn sc_pull(&self, cwd: &str, ff_only: bool) -> Result<PullOutcome, String> {
+        let req = DaemonRequest::GitPull {
+            cwd: cwd.into(),
+            ff_only,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScPull(outcome) => Ok(outcome),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitPull: {other:?}")),
+        }
+    }
+
+    pub fn sc_fast_forward(&self, cwd: &str) -> Result<PullOutcome, String> {
+        match self.send_request(DaemonRequest::GitFastForward { cwd: cwd.into() })? {
+            DaemonResponse::ScPull(outcome) => Ok(outcome),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitFastForward: {other:?}")),
+        }
+    }
+
+    pub fn sc_push(
+        &self,
+        cwd: &str,
+        publish: bool,
+        force_with_lease: bool,
+    ) -> Result<PushOutcome, String> {
+        let req = DaemonRequest::GitPush {
+            cwd: cwd.into(),
+            publish,
+            force_with_lease,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScPush(outcome) => Ok(outcome),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for GitPush: {other:?}")),
+        }
+    }
+
+    pub fn sc_upstream_refresh(&self, cwd: &str) -> Result<UpstreamStatus, String> {
+        match self.send_request(DaemonRequest::GitUpstreamRefresh { cwd: cwd.into() })? {
+            DaemonResponse::ScUpstream(upstream) => Ok(upstream),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for GitUpstreamRefresh: {other:?}"
+            )),
+        }
+    }
+
+    pub fn diff_comments_list(&self, worktree_id: &str) -> Result<Vec<DiffComment>, String> {
+        let req = DaemonRequest::DiffCommentsList {
+            worktree_id: worktree_id.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::CommentRecords(records) => Ok(records),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for DiffCommentsList: {other:?}"
+            )),
+        }
+    }
+
+    pub fn diff_comment_add(&self, comment: NewDiffComment) -> Result<DiffComment, String> {
+        match self.send_request(DaemonRequest::DiffCommentAdd { comment })? {
+            DaemonResponse::CommentRecordOne(record) => Ok(record),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for DiffCommentAdd: {other:?}")),
+        }
+    }
+
+    pub fn diff_comment_update(&self, id: &str, body: &str) -> Result<DiffComment, String> {
+        let req = DaemonRequest::DiffCommentUpdate {
+            id: id.into(),
+            body: body.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::CommentRecordOne(record) => Ok(record),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for DiffCommentUpdate: {other:?}"
+            )),
+        }
+    }
+
+    pub fn diff_comment_delete(&self, id: &str) -> Result<(), String> {
+        self.sc_void(
+            DaemonRequest::DiffCommentDelete { id: id.into() },
+            "DiffCommentDelete",
+        )
+    }
+
+    pub fn diff_comments_mark_sent(&self, ids: &[String]) -> Result<Vec<DiffComment>, String> {
+        match self.send_request(DaemonRequest::DiffCommentsMarkSent {
+            ids: ids.to_vec(),
+        })? {
+            DaemonResponse::CommentRecords(records) => Ok(records),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for DiffCommentsMarkSent: {other:?}"
             )),
         }
     }

@@ -125,6 +125,26 @@ pub fn run() {
             pty::commands::worktree_purge,
             pty::commands::worktree_ps,
             pty::commands::worktree_lineage,
+            pty::commands::sc_status,
+            pty::commands::sc_stage,
+            pty::commands::sc_unstage,
+            pty::commands::sc_discard,
+            pty::commands::sc_commit,
+            pty::commands::sc_local_branches,
+            pty::commands::sc_checkout,
+            pty::commands::sc_file_diff,
+            pty::commands::sc_history,
+            pty::commands::sc_branch_compare,
+            pty::commands::sc_fetch,
+            pty::commands::sc_pull,
+            pty::commands::sc_fast_forward,
+            pty::commands::sc_push,
+            pty::commands::sc_upstream_refresh,
+            pty::commands::diff_comments_list,
+            pty::commands::diff_comment_add,
+            pty::commands::diff_comment_update,
+            pty::commands::diff_comment_delete,
+            pty::commands::diff_comments_mark_sent,
             layout::save_layout,
             layout::load_layout,
             settings::save_settings,
@@ -170,6 +190,9 @@ pub fn run() {
                     manager.set_focus_requested_callback(
                         pty::commands::session_focus_requested_forwarder(&app_handle),
                     );
+                    manager.set_git_changed_callback(pty::commands::git_changed_forwarder(
+                        &app_handle,
+                    ));
                     let _ = manager.get_client();
                 }
             });

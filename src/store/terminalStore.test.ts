@@ -33,6 +33,32 @@ vi.mock("../lib/pty/transport", () => ({
   ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
+  scStatus: vi.fn().mockResolvedValue({
+    entries: [],
+    conflict_state: "none",
+    branch: "main",
+    upstream: { has_upstream: false, ahead: 0, behind: 0, remote_branch: null },
+    did_hit_limit: false,
+    status_length: 0,
+  }),
+  scStage: vi.fn().mockResolvedValue(undefined),
+  scUnstage: vi.fn().mockResolvedValue(undefined),
+  scDiscard: vi.fn().mockResolvedValue(undefined),
+  scCommit: vi.fn().mockResolvedValue("abc1234"),
+  scLocalBranches: vi.fn().mockResolvedValue({ branches: ["main"], current: "main" }),
+  scCheckout: vi.fn().mockResolvedValue(undefined),
+  scBranchCompare: vi.fn().mockResolvedValue({
+    base_ref: "main",
+    ahead: 0,
+    behind: 0,
+    changed_files: [],
+  }),
+  scFetch: vi.fn().mockResolvedValue(undefined),
+  scHistory: vi.fn().mockResolvedValue({ items: [], has_more: false }),
+  scPull: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
+  scFastForward: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
+  scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/main", was_publish: false }),
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("../lib/workspace/transport", () => ({

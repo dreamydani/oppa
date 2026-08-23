@@ -21,6 +21,7 @@ vi.mock("./lib/pty/transport", () => ({
   deleteScrollback: vi.fn().mockResolvedValue(undefined),
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
   onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),

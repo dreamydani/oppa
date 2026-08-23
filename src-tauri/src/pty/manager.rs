@@ -1,5 +1,6 @@
 use crate::pty::daemon_client::{
-    DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnTitleChanged, OnWorktreeChanged,
+    DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnGitChanged, OnTitleChanged,
+    OnWorktreeChanged,
 };
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
@@ -13,6 +14,7 @@ pub struct PtyManager {
     worktree_changed_cb: Mutex<Option<OnWorktreeChanged>>,
     title_changed_cb: Mutex<Option<OnTitleChanged>>,
     focus_requested_cb: Mutex<Option<OnFocusRequested>>,
+    git_changed_cb: Mutex<Option<OnGitChanged>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -30,6 +32,7 @@ impl PtyManager {
             worktree_changed_cb: Mutex::new(None),
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
+            git_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -42,6 +45,7 @@ impl PtyManager {
             worktree_changed_cb: Mutex::new(None),
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
+            git_changed_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -63,6 +67,7 @@ impl PtyManager {
             worktree_changed_cb: Mutex::new(None),
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
+            git_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -89,6 +94,14 @@ impl PtyManager {
         *self.focus_requested_cb.lock() = Some(Arc::clone(&cb));
         if let Some(client) = self.client.lock().as_ref() {
             client.set_focus_requested_callback(cb);
+        }
+    }
+
+    /// Install the git-changed forwarder; re-applied on every reconnect.
+    pub fn set_git_changed_callback(&self, cb: OnGitChanged) {
+        *self.git_changed_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_git_changed_callback(cb);
         }
     }
 
@@ -130,6 +143,9 @@ impl PtyManager {
         }
         if let Some(cb) = self.focus_requested_cb.lock().as_ref() {
             client.set_focus_requested_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.git_changed_cb.lock().as_ref() {
+            client.set_git_changed_callback(Arc::clone(cb));
         }
         Ok(client)
     }
