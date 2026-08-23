@@ -1,3 +1,7 @@
+use oppa_lib::git::hosted_reviews::{GhClient, PrStatus};
+use oppa_lib::git::worktree_registry::{
+    worktree_record_id, WorktreeRecord, WorktreeRegistry, WorktreeStatus,
+};
 use oppa_lib::pty::daemon_client::DaemonClient;
 use oppa_lib::pty::daemon_server::{CancellationToken, DaemonServer};
 use std::sync::mpsc::channel;
@@ -751,4 +755,103 @@ fn test_e2e_daemon_v4_git_generate_commit_message_over_pipe_uses_fake_agent() {
     cancel_token.cancel();
     let _ = server_thread.join();
     drop(guard);
+}
+
+// PrChanged must fan out over the live pipe (not just the broadcast) using an
+// injected mock GhClient so no real gh process is spawned during the test.
+#[test]
+fn test_pr_changed_event_roundtrips_over_pipe_with_mock_client() {
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    let registry_path = app_data_dir.path().join("worktrees.json");
+    let wt_path = app_data_dir.path().to_path_buf();
+    std::fs::create_dir_all(&wt_path).unwrap();
+    let pr_url = "https://github.com/owner/repo/pull/7".to_string();
+    let id = worktree_record_id("repo", &wt_path);
+
+    {
+        let mut registry = WorktreeRegistry::load(&registry_path);
+        registry.upsert_worktree(WorktreeRecord {
+            id: id.clone(),
+            repo_id: "repo".into(),
+            name: "wt".into(),
+            display_name: None,
+            branch: "feature".into(),
+            path: wt_path.clone(),
+            base_ref: "main".into(),
+            parent_worktree_id: None,
+            child_worktree_ids: vec![],
+            workspace_status: WorktreeStatus::Todo,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: Some(pr_url.clone()),
+        });
+        registry.save(&registry_path).unwrap();
+    }
+
+    struct MockPr {
+        url: String,
+    }
+    impl GhClient for MockPr {
+        fn status(&self, _cwd: &std::path::Path, _url: &str) -> Result<PrStatus, String> {
+            Ok(PrStatus {
+                number: 7,
+                title: "t".into(),
+                url: self.url.clone(),
+                state: "open".into(),
+                draft: false,
+                mergeable: "unknown".into(),
+                base_ref_name: "main".into(),
+                head_ref_name: "feature".into(),
+                checks: vec![],
+                fetched_at_ms: 0,
+            })
+        }
+    }
+
+    let socket_path = generate_test_socket_path("prchanged");
+    let server = Arc::new(
+        DaemonServer::with_snapshot_storage(app_data_dir.path().to_path_buf())
+            .with_pr_client(Arc::new(MockPr { url: pr_url.clone() })),
+    );
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client");
+    let (pr_tx, pr_rx) = channel::<Option<String>>();
+    client.set_pr_changed_callback(Arc::new(move |wid| {
+        let _ = pr_tx.send(wid.map(str::to_string));
+    }));
+    std::thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(server.run_pr_poll_pass(), 1, "mock client must fetch the linked PR");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut received = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(w) = pr_rx.recv_timeout(Duration::from_millis(200)) {
+            received = Some(w);
+            break;
+        }
+    }
+    assert_eq!(
+        received,
+        Some(Some(id.clone())),
+        "PrChanged must round-trip over the pipe with a mock client"
+    );
+
+    drop(client);
+    cancel_token.cancel();
+    let _ = server_thread.join();
 }

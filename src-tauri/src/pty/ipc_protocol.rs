@@ -269,6 +269,10 @@ pub enum DaemonEvent {
     WorktreeChanged {
         id: Option<String>,
     },
+    // A linked worktree's PR status refreshed (poll tick, push burst, or manual)
+    PrChanged {
+        worktree_id: Option<String>,
+    },
     TitleChanged {
         session_id: String,
         title: String,
@@ -504,6 +508,10 @@ mod tests {
             DaemonEvent::WorktreeChanged {
                 id: Some("repo::C:/ws/feat-a".into()),
             },
+            DaemonEvent::PrChanged {
+                worktree_id: Some("repo::C:/ws/feat-a".into()),
+            },
+            DaemonEvent::PrChanged { worktree_id: None },
             DaemonEvent::TitleChanged {
                 session_id: "s1".into(),
                 title: "build".into(),
@@ -518,6 +526,23 @@ mod tests {
             let decoded: DaemonEvent = serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(event, decoded);
         }
+    }
+
+    #[test]
+    fn test_pr_changed_event_wire_shape() {
+        let event =
+            DaemonEvent::PrChanged { worktree_id: Some("repo::C:/ws/feat-x".into()) };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "event": "PrChanged",
+                "payload": {"worktree_id": "repo::C:/ws/feat-x"}
+            })
+        );
+        let bare: DaemonEvent =
+            serde_json::from_str(r#"{"event":"PrChanged","payload":{"worktree_id":null}}"#)
+                .unwrap();
+        assert_eq!(bare, DaemonEvent::PrChanged { worktree_id: None });
     }
 
     #[test]

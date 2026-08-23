@@ -72,6 +72,7 @@ pub fn run_daemon() {
             }
         }
         let cancel_token = pty::daemon_server::CancellationToken::new();
+        server.start_pr_poller();
         if let Err(e) = server.run_listener(&socket_path, cancel_token).await {
             eprintln!("Daemon listener exited: {e}");
         }

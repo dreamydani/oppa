@@ -3,13 +3,14 @@
 
 use crate::agents::catalog;
 use crate::git::source_control::{sc_status, validate_ref_name, ConflictState};
-use crate::git::worktree_registry::WorktreeRegistry;
+use crate::git::worktree_registry::{WorktreeRecord, WorktreeRegistry};
 use crate::git::worktrees::{run_git, worktree_current};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const GH_AUTH_TIMEOUT_SECS: u64 = 10;
 const GH_CREATE_TIMEOUT_SECS: u64 = 60;
@@ -436,10 +437,11 @@ pub fn create_pull_request(
     }
 }
 
-fn run_gh_argv(program: &Path, argv: &[String]) -> Result<String, GhRunError> {
+fn run_gh_argv(cwd: &Path, program: &Path, argv: &[String]) -> Result<String, GhRunError> {
     use std::io::Read;
     let mut cmd = Command::new(program);
     cmd.args(argv)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -490,10 +492,264 @@ pub fn create_pull_request_live(
         .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
     let runner = |argv: &[&str]| -> Result<String, GhRunError> {
         let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
-        run_gh_argv(&program, &owned)
+        run_gh_argv(cwd, &program, &owned)
     };
     let lookup = |_owner_repo: &str, _branch: &str| -> Option<String> { None };
     create_pull_request(cwd, registry_path, input, &runner, &lookup)
+}
+
+// ---------- task 3: pr status parsing + poller ----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckState {
+    Passing,
+    Failing,
+    Pending,
+    Skipping,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckRun {
+    pub name: String,
+    pub state: CheckState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrStatus {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    // Lowercased gh wire value: open | closed | merged
+    pub state: String,
+    pub draft: bool,
+    pub mergeable: String,
+    pub base_ref_name: String,
+    pub head_ref_name: String,
+    pub checks: Vec<CheckRun>,
+    pub fetched_at_ms: u64,
+}
+
+const PR_STATUS_JSON_FIELDS: &str =
+    "number,title,url,state,isDraft,mergeable,baseRefName,headRefName,statusCheckRollup";
+
+pub(crate) fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn map_check_token(token: &str) -> Option<CheckState> {
+    match token.to_ascii_uppercase().as_str() {
+        "SUCCESS" | "PASS" => Some(CheckState::Passing),
+        "FAILURE" | "ERROR" | "FAILING" => Some(CheckState::Failing),
+        "PENDING" | "IN_PROGRESS" | "QUEUED" => Some(CheckState::Pending),
+        "SKIPPED" | "NEUTRAL" => Some(CheckState::Skipping),
+        _ => None,
+    }
+}
+
+// Rollup entries vary (CheckRun vs StatusContext): first candidate field landing in a
+// known bucket wins, so a CheckRun's COMPLETED wrapper status never masks its conclusion.
+fn parse_rollup_entry(entry: &serde_json::Value) -> Option<CheckRun> {
+    let name = entry
+        .get("name")
+        .and_then(|v| v.as_str())
+        .or_else(|| entry.get("context").and_then(|v| v.as_str()))?
+        .to_string();
+    let state = ["state", "status", "conclusion"]
+        .iter()
+        .find_map(|key| entry.get(*key)?.as_str().and_then(map_check_token))
+        .unwrap_or(CheckState::Pending);
+    Some(CheckRun { name, state })
+}
+
+pub fn pr_status_from_json(json: &str, now_ms: u64) -> Result<PrStatus, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("pr view json parse failed: {e}"))?;
+    let text_field = |key: &str| -> Result<String, String> {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("pr view json missing {key}"))
+    };
+    let number = value
+        .get("number")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| "pr view json missing number".to_string())?;
+    let draft = value
+        .get("isDraft")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| "pr view json missing isDraft".to_string())?;
+    let rollup = value
+        .get("statusCheckRollup")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "pr view json missing statusCheckRollup".to_string())?;
+    Ok(PrStatus {
+        number,
+        title: text_field("title")?,
+        url: text_field("url")?,
+        state: text_field("state")?.to_ascii_lowercase(),
+        draft,
+        mergeable: text_field("mergeable")?.to_ascii_lowercase(),
+        base_ref_name: text_field("baseRefName")?,
+        head_ref_name: text_field("headRefName")?,
+        checks: rollup.iter().filter_map(parse_rollup_entry).collect(),
+        fetched_at_ms: now_ms,
+    })
+}
+
+pub fn pr_status(
+    cwd: &Path,
+    url: &str,
+    gh_runner: &dyn Fn(&[&str]) -> Result<String, GhRunError>,
+) -> Result<PrStatus, String> {
+    let argv = ["pr", "view", url, "--json", PR_STATUS_JSON_FIELDS];
+    let stdout = gh_runner(&argv).map_err(|e| match e {
+        GhRunError::Failed { stderr } => format!("pr view failed: {stderr}"),
+        GhRunError::TimedOut => "pr view failed: gh timed out after 60s".into(),
+    })?;
+    pr_status_from_json(&stdout, unix_now_ms())
+}
+
+// Injectable seam so the poller and manual refresh run against mocks in tests.
+pub trait GhClient: Send + Sync {
+    fn status(&self, cwd: &Path, url: &str) -> Result<PrStatus, String>;
+}
+
+pub struct LiveGhClient;
+
+impl GhClient for LiveGhClient {
+    fn status(&self, cwd: &Path, url: &str) -> Result<PrStatus, String> {
+        let program = catalog::resolve_command_with_path("gh", None)
+            .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
+        pr_status(cwd, url, &|argv: &[&str]| {
+            let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            run_gh_argv(cwd, &program, &owned)
+        })
+    }
+}
+
+// Auto-clear rule (v1): merged PRs and head-ref divergence drop the link.
+pub fn reconcile_link(
+    registry_path: &Path,
+    cwd: &Path,
+    current: &PrStatus,
+) -> Result<bool, String> {
+    let record = match worktree_current(registry_path, cwd) {
+        Some(record) => record,
+        None => return Ok(false),
+    };
+    if record.linked_pr_url.as_deref() != Some(current.url.as_str()) {
+        return Ok(false);
+    }
+    let diverged =
+        current.state == "merged" || current.head_ref_name != record.branch;
+    if !diverged {
+        return Ok(false);
+    }
+    let mut registry = WorktreeRegistry::load(registry_path);
+    if let Some(worktree) = registry.worktrees.get_mut(&record.id) {
+        worktree.linked_pr_url = None;
+    }
+    registry.save(registry_path)?;
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PollerConfig {
+    pub tick: Duration,
+    pub backoff_after: u32,
+    pub backoff_tick: Duration,
+}
+
+impl Default for PollerConfig {
+    fn default() -> Self {
+        PollerConfig {
+            tick: Duration::from_secs(60),
+            backoff_after: 3,
+            backoff_tick: Duration::from_secs(15 * 60),
+        }
+    }
+}
+
+// Per-worktree failure bookkeeping backing the 3-strikes/15min backoff.
+#[derive(Debug, Default)]
+pub struct PrPollerState {
+    consecutive_failures: HashMap<String, u32>,
+    last_attempt_ms: HashMap<String, u64>,
+}
+
+// One synchronous sweep over linked non-retired worktrees; returns fetch count.
+// Publishes the worktree id per successful fetch (fresh data or link change).
+pub fn poll_pass_once(
+    state: &mut PrPollerState,
+    config: &PollerConfig,
+    registry_path: &Path,
+    client: &dyn GhClient,
+    now_ms: u64,
+    publish: &mut dyn FnMut(Option<String>),
+) -> usize {
+    let registry = WorktreeRegistry::load(registry_path);
+    let mut targets: Vec<WorktreeRecord> = registry
+        .worktrees
+        .values()
+        .filter(|w| !w.retired && w.linked_pr_url.is_some())
+        .cloned()
+        .collect();
+    targets.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut fetched = 0;
+    for record in targets {
+        let id = record.id.clone();
+        let failures = state.consecutive_failures.get(&id).copied().unwrap_or(0);
+        let last_attempt = state.last_attempt_ms.get(&id).copied().unwrap_or(0);
+        let gated = failures >= config.backoff_after
+            && now_ms < last_attempt.saturating_add(config.backoff_tick.as_millis() as u64);
+        if gated {
+            continue;
+        }
+        state.last_attempt_ms.insert(id.clone(), now_ms);
+        // A vanished worktree is not a gh failure; skip without poisoning the counter.
+        if !record.path.exists() {
+            continue;
+        }
+        let url = record.linked_pr_url.clone().unwrap_or_default();
+        match client.status(&record.path, &url) {
+            Ok(status) => {
+                state.consecutive_failures.insert(id.clone(), 0);
+                let _ = reconcile_link(registry_path, &record.path, &status);
+                publish(Some(id));
+                fetched += 1;
+            }
+            Err(_) => {
+                *state.consecutive_failures.entry(id).or_insert(0) += 1;
+            }
+        }
+    }
+    fetched
+}
+
+// On-demand path for IPC/manual refreshes: fetch, reconcile, publish, return status.
+pub fn refresh_pr_status_now(
+    cwd: &Path,
+    registry_path: &Path,
+    client: &dyn GhClient,
+    publish: &mut dyn FnMut(Option<String>),
+) -> Result<PrStatus, String> {
+    let record = worktree_current(registry_path, cwd)
+        .ok_or_else(|| "no linked pull request: worktree not registered".to_string())?;
+    let url = record
+        .linked_pr_url
+        .clone()
+        .ok_or_else(|| "no linked pull request".to_string())?;
+    let status = client.status(cwd, &url)?;
+    reconcile_link(registry_path, cwd, &status)?;
+    publish(Some(record.id));
+    Ok(status)
 }
 
 #[cfg(test)]
@@ -1275,5 +1531,399 @@ mod tests {
         .unwrap();
         let registry = WorktreeRegistry::load(&s.registry_path);
         assert!(registry.worktrees.values().all(|w| w.linked_pr_url.is_none()));
+    }
+
+    // ---------- task 3: pr status parsing + poller ----------
+
+    const PR_VIEW_JSON: &str = r#"{
+        "number": 42,
+        "title": "Add polling",
+        "url": "https://github.com/oppa-tests/review-eligibility/pull/42",
+        "state": "OPEN",
+        "isDraft": true,
+        "mergeable": "CONFLICTING",
+        "baseRefName": "main",
+        "headRefName": "feature",
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS", "completedAt": "2026-08-23T10:00:00Z"},
+            {"__typename": "StatusContext", "context": "ci/travis", "state": "FAILURE", "targetUrl": "https://example.com/y"},
+            {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": null},
+            {"__typename": "StatusContext", "context": "docs", "state": "SKIPPED"}
+        ]
+    }"#;
+
+    fn rollup_check_state(entry_json: &str) -> CheckState {
+        let json = format!(
+            r#"{{"number":1,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"UNKNOWN","baseRefName":"b","headRefName":"h","statusCheckRollup":[{entry_json}]}}"#
+        );
+        pr_status_from_json(&json, 0).unwrap().checks.remove(0).state
+    }
+
+    fn open_status(url: &str, head_ref: &str) -> PrStatus {
+        PrStatus {
+            number: 9,
+            title: "T".into(),
+            url: url.into(),
+            state: "open".into(),
+            draft: false,
+            mergeable: "mergeable".into(),
+            base_ref_name: "main".into(),
+            head_ref_name: head_ref.into(),
+            checks: vec![],
+            fetched_at_ms: 0,
+        }
+    }
+
+    fn link_pr(registry_path: &Path, id: &str, url: &str) {
+        let mut registry = WorktreeRegistry::load(registry_path);
+        registry.worktrees.get_mut(id).unwrap().linked_pr_url = Some(url.into());
+        registry.save(registry_path).unwrap();
+    }
+
+    fn retire_record(registry_path: &Path, id: &str) {
+        let mut registry = WorktreeRegistry::load(registry_path);
+        registry.worktrees.get_mut(id).unwrap().retired = true;
+        registry.save(registry_path).unwrap();
+    }
+
+    struct MockClient {
+        result: Result<PrStatus, String>,
+        calls: Mutex<Vec<(String, String)>>,
+    }
+
+    impl MockClient {
+        fn returning(result: Result<PrStatus, String>) -> Self {
+            MockClient { result, calls: Mutex::new(Vec::new()) }
+        }
+    }
+
+    impl GhClient for MockClient {
+        fn status(&self, cwd: &Path, url: &str) -> Result<PrStatus, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((cwd.to_string_lossy().into_owned(), url.to_string()));
+            self.result.clone()
+        }
+    }
+
+    // Failure/success flips mid-sequence so backoff reset can be driven in-process.
+    struct ToggleClient {
+        failing: Mutex<bool>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl GhClient for ToggleClient {
+        fn status(&self, _cwd: &Path, url: &str) -> Result<PrStatus, String> {
+            self.calls.lock().unwrap().push(url.to_string());
+            if *self.failing.lock().unwrap() {
+                Err("gh down".into())
+            } else {
+                Ok(open_status(url, "feature"))
+            }
+        }
+    }
+
+    fn short_backoff_config() -> PollerConfig {
+        PollerConfig {
+            tick: Duration::from_secs(60),
+            backoff_after: 2,
+            backoff_tick: Duration::from_secs(900),
+        }
+    }
+
+    #[test]
+    fn pr_status_from_json_parses_every_field_lowercased_with_timestamp() {
+        let status = pr_status_from_json(PR_VIEW_JSON, 1724419200123).unwrap();
+        assert_eq!(status.number, 42);
+        assert_eq!(status.title, "Add polling");
+        assert_eq!(
+            status.url,
+            "https://github.com/oppa-tests/review-eligibility/pull/42"
+        );
+        assert_eq!(status.state, "open");
+        assert!(status.draft);
+        assert_eq!(status.mergeable, "conflicting");
+        assert_eq!(status.base_ref_name, "main");
+        assert_eq!(status.head_ref_name, "feature");
+        assert_eq!(status.fetched_at_ms, 1724419200123);
+        assert_eq!(status.checks.len(), 4);
+    }
+
+    #[test]
+    fn rollup_maps_all_four_buckets_and_unknown_to_pending() {
+        let status = pr_status_from_json(PR_VIEW_JSON, 0).unwrap();
+        let state_of =
+            |name: &str| status.checks.iter().find(|c| c.name == name).unwrap().state;
+        // conclusion beats the COMPLETED wrapper status; completedAt-style extras are ignored
+        assert_eq!(state_of("build"), CheckState::Passing);
+        assert_eq!(state_of("ci/travis"), CheckState::Failing);
+        assert_eq!(state_of("e2e"), CheckState::Pending);
+        assert_eq!(state_of("docs"), CheckState::Skipping);
+    }
+
+    #[test]
+    fn check_state_tokens_cover_buckets_context_names_and_unknown_pending() {
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"SUCCESS"}"#), CheckState::Passing);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"PASS"}"#), CheckState::Passing);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"FAILURE"}"#), CheckState::Failing);
+        assert_eq!(rollup_check_state(r#"{"name":"c","status":"ERROR"}"#), CheckState::Failing);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"FAILING"}"#), CheckState::Failing);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"PENDING"}"#), CheckState::Pending);
+        assert_eq!(rollup_check_state(r#"{"name":"c","status":"IN_PROGRESS"}"#), CheckState::Pending);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"QUEUED"}"#), CheckState::Pending);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"SKIPPED"}"#), CheckState::Skipping);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"NEUTRAL"}"#), CheckState::Skipping);
+        assert_eq!(rollup_check_state(r#"{"name":"c","state":"MYSTERY"}"#), CheckState::Pending);
+        assert_eq!(rollup_check_state(r#"{"name":"c","status":"COMPLETED"}"#), CheckState::Pending);
+        assert_eq!(rollup_check_state(r#"{"context":"deploy","state":"SUCCESS"}"#), CheckState::Passing);
+        assert_eq!(rollup_check_state(r#"{"context":"deploy"}"#), CheckState::Pending);
+    }
+
+    #[test]
+    fn malformed_or_incomplete_pr_json_errors() {
+        assert!(pr_status_from_json("not json at all", 0).is_err());
+        assert!(pr_status_from_json(r#"{"number":1}"#, 0).is_err());
+    }
+
+    #[test]
+    fn check_state_serializes_kebab_for_ipc() {
+        assert_eq!(serde_json::to_string(&CheckState::Passing).unwrap(), "\"passing\"");
+        assert_eq!(serde_json::to_string(&CheckState::Failing).unwrap(), "\"failing\"");
+        assert_eq!(serde_json::to_string(&CheckState::Pending).unwrap(), "\"pending\"");
+        assert_eq!(serde_json::to_string(&CheckState::Skipping).unwrap(), "\"skipping\"");
+        assert!(serde_json::from_str::<CheckState>("\"bogus\"").is_err());
+    }
+
+    #[test]
+    fn pr_status_builds_view_argv_and_propagates_runner_failure() {
+        let log: ArgvLog = Mutex::new(Vec::new());
+        {
+            let runner = |argv: &[&str]| -> Result<String, GhRunError> {
+                log_args(&log, argv);
+                Ok(PR_VIEW_JSON.into())
+            };
+            let status = pr_status(Path::new("."), CREATED_URL, &runner).unwrap();
+            assert_eq!(status.number, 42);
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![vec![
+                "pr".to_string(),
+                "view".into(),
+                CREATED_URL.into(),
+                "--json".into(),
+                "number,title,url,state,isDraft,mergeable,baseRefName,headRefName,statusCheckRollup"
+                    .into(),
+            ]]
+        );
+        let failing =
+            |_argv: &[&str]| -> Result<String, GhRunError> {
+                Err(GhRunError::Failed { stderr: "gh exploded".into() })
+            };
+        assert!(pr_status(Path::new("."), CREATED_URL, &failing)
+            .unwrap_err()
+            .contains("gh exploded"));
+    }
+
+    #[test]
+    fn reconcile_merged_clears_and_persists() {
+        let (s, _bare) = eligible_state("rc-merged");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let mut merged = open_status(CREATED_URL, "feature");
+        merged.state = "merged".into();
+        assert_eq!(reconcile_link(&s.registry_path, &s.repo, &merged).unwrap(), true);
+        assert!(WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.is_none());
+    }
+
+    #[test]
+    fn reconcile_head_ref_divergence_clears_link() {
+        let (s, _bare) = eligible_state("rc-diverge");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let renamed = open_status(CREATED_URL, "renamed-branch");
+        assert_eq!(reconcile_link(&s.registry_path, &s.repo, &renamed).unwrap(), true);
+        assert!(WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.is_none());
+    }
+
+    #[test]
+    fn reconcile_open_matching_head_keeps_link() {
+        let (s, _bare) = eligible_state("rc-keep");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let fresh = open_status(CREATED_URL, "feature");
+        assert_eq!(reconcile_link(&s.registry_path, &s.repo, &fresh).unwrap(), false);
+        assert_eq!(
+            WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.as_deref(),
+            Some(CREATED_URL)
+        );
+    }
+
+    #[test]
+    fn reconcile_unlinked_missing_or_foreign_url_no_ops() {
+        let (s, _bare) = eligible_state("rc-noop");
+        // No record covering cwd at all
+        assert_eq!(
+            reconcile_link(&s.registry_path, &s.repo, &open_status(CREATED_URL, "feature"))
+                .unwrap(),
+            false
+        );
+        // Record exists but never linked
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        assert_eq!(
+            reconcile_link(&s.registry_path, &s.repo, &open_status(CREATED_URL, "feature"))
+                .unwrap(),
+            false
+        );
+        assert!(WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.is_none());
+        // Linked to a different PR than the fetched one
+        link_pr(&s.registry_path, &id, "https://github.com/other/repo/pull/1");
+        assert_eq!(
+            reconcile_link(&s.registry_path, &s.repo, &open_status(CREATED_URL, "feature"))
+                .unwrap(),
+            false
+        );
+        assert_eq!(
+            WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.as_deref(),
+            Some("https://github.com/other/repo/pull/1")
+        );
+    }
+
+    #[test]
+    fn poll_pass_fetches_linked_active_records_and_publishes_ids() {
+        let (s, _bare) = eligible_state("pp-fetch");
+        std::fs::create_dir_all(s.repo.join("src")).unwrap();
+        let id_a = register_worktree_at(&s.registry_path, "r", "wt-a", &s.repo);
+        let id_b = register_worktree_at(&s.registry_path, "r", "wt-b", &s.repo.join("src"));
+        let id_retired = register_worktree_at(&s.registry_path, "r", "wt-old", Path::new("Z:\\gone"));
+        let _id_unlinked =
+            register_worktree_at(&s.registry_path, "r", "wt-bare", Path::new("Z:\\unlinked"));
+        for id in [&id_a, &id_b, &id_retired] {
+            link_pr(&s.registry_path, id, CREATED_URL);
+        }
+        retire_record(&s.registry_path, &id_retired);
+
+        let client = MockClient::returning(Ok(open_status(CREATED_URL, "feature")));
+        let mut state = PrPollerState::default();
+        let mut published: Vec<Option<String>> = Vec::new();
+        let fetched = poll_pass_once(
+            &mut state,
+            &short_backoff_config(),
+            &s.registry_path,
+            &client,
+            unix_now_ms(),
+            &mut |id| published.push(id),
+        );
+        assert_eq!(fetched, 2);
+        let mut ids: Vec<String> = published.into_iter().flatten().collect();
+        ids.sort();
+        let mut expected = vec![id_a, id_b];
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert_eq!(client.calls.lock().unwrap().len(), 2);
+        assert!(state.consecutive_failures.values().all(|count| *count == 0));
+    }
+
+    #[test]
+    fn poll_pass_skips_missing_paths_without_counting_failure() {
+        let (s, _bare) = eligible_state("pp-missing");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", Path::new("Z:\\not-here"));
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let client = MockClient::returning(Ok(open_status(CREATED_URL, "feature")));
+        let mut state = PrPollerState::default();
+        let fetched = poll_pass_once(
+            &mut state,
+            &short_backoff_config(),
+            &s.registry_path,
+            &client,
+            unix_now_ms(),
+            &mut |_| {},
+        );
+        assert_eq!(fetched, 0);
+        assert!(client.calls.lock().unwrap().is_empty());
+        assert!(state.consecutive_failures.get(&id).is_none());
+    }
+
+    #[test]
+    fn poll_pass_gates_attempts_after_consecutive_failures_until_window_elapses() {
+        let (s, _bare) = eligible_state("pp-backoff");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let client = MockClient::returning(Err("gh down".into()));
+        let config = short_backoff_config();
+        let mut state = PrPollerState::default();
+        let mut pass = |now_ms: u64| {
+            poll_pass_once(&mut state, &config, &s.registry_path, &client, now_ms, &mut |_| {})
+        };
+        pass(1_000);
+        pass(2_000);
+        pass(3_000);
+        pass(901_000);
+        pass(902_500);
+        pass(906_000);
+        assert_eq!(client.calls.lock().unwrap().len(), 3, "gated windows must suppress attempts");
+        assert_eq!(state.consecutive_failures.get(&id), Some(&3));
+        assert_eq!(state.last_attempt_ms.get(&id), Some(&902_500));
+    }
+
+    #[test]
+    fn poll_pass_success_resets_backoff_counter() {
+        let (s, _bare) = eligible_state("pp-reset");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let client = ToggleClient { failing: Mutex::new(true), calls: Mutex::new(Vec::new()) };
+        let config = short_backoff_config();
+        let mut state = PrPollerState::default();
+        let mut published: Vec<Option<String>> = Vec::new();
+        let mut pass = |failing: bool, now_ms: u64| {
+            *client.failing.lock().unwrap() = failing;
+            poll_pass_once(&mut state, &config, &s.registry_path, &client, now_ms, &mut |id| {
+                published.push(id);
+            })
+        };
+        assert_eq!(pass(true, 1_000), 0);
+        assert_eq!(pass(true, 2_000), 0);
+        assert_eq!(pass(false, 902_500), 1, "window-expired retry succeeds and resets");
+        assert_eq!(pass(true, 903_000), 0, "fresh failure attempts immediately below threshold");
+        assert_eq!(client.calls.lock().unwrap().len(), 4);
+        assert_eq!(state.consecutive_failures.get(&id), Some(&1));
+        assert_eq!(published, vec![Some(id)]);
+    }
+
+    #[test]
+    fn refresh_now_fetches_reconciles_and_publishes_worktree_id() {
+        let (s, _bare) = eligible_state("rf-now");
+        let id = register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        link_pr(&s.registry_path, &id, CREATED_URL);
+        let mut merged = open_status(CREATED_URL, "feature");
+        merged.state = "merged".into();
+        let client = MockClient::returning(Ok(merged));
+        let mut published: Vec<Option<String>> = Vec::new();
+        let out = refresh_pr_status_now(&s.repo, &s.registry_path, &client, &mut |wid| {
+            published.push(wid);
+        })
+        .unwrap();
+        assert_eq!(out.url, CREATED_URL);
+        assert_eq!(out.state, "merged");
+        assert_eq!(published, vec![Some(id.clone())]);
+        assert!(WorktreeRegistry::load(&s.registry_path).worktrees[&id].linked_pr_url.is_none());
+        assert_eq!(
+            client.calls.lock().unwrap()[0],
+            (s.repo.to_string_lossy().into_owned(), CREATED_URL.to_string())
+        );
+    }
+
+    #[test]
+    fn refresh_now_errors_without_link_or_record() {
+        let (s, _bare) = eligible_state("rf-none");
+        register_worktree_at(&s.registry_path, "r", "wt", &s.repo);
+        let client = MockClient::returning(Ok(open_status(CREATED_URL, "feature")));
+        let err = refresh_pr_status_now(&s.repo, &s.registry_path, &client, &mut |_| {})
+            .unwrap_err();
+        assert!(err.contains("no linked pull request"), "{err}");
+        let orphan = refresh_pr_status_now(Path::new("Z:\\elsewhere"), &s.registry_path, &client, &mut |_| {})
+            .unwrap_err();
+        assert!(orphan.contains("no linked pull request"), "{orphan}");
     }
 }

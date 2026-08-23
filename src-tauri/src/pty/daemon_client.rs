@@ -26,6 +26,7 @@ pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
 pub type OnGitChanged = Arc<dyn Fn() + Send + Sync>;
+pub type OnPrChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 
 /// Agent handoff result: created worktree plus the live agent session a pane
 /// can bind to (session_id doubles as the agent terminal handle).
@@ -56,6 +57,7 @@ pub struct DaemonClient {
     title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>>,
     focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>>,
     git_changed_cb: Arc<Mutex<Option<OnGitChanged>>>,
+    pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -83,6 +85,7 @@ impl DaemonClient {
         let title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>> = Arc::new(Mutex::new(None));
         let focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>> = Arc::new(Mutex::new(None));
         let git_changed_cb: Arc<Mutex<Option<OnGitChanged>>> = Arc::new(Mutex::new(None));
+        let pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -154,6 +157,7 @@ impl DaemonClient {
         let title_changed_cb_clone = Arc::clone(&title_changed_cb);
         let focus_requested_cb_clone = Arc::clone(&focus_requested_cb);
         let git_changed_cb_clone = Arc::clone(&git_changed_cb);
+        let pr_changed_cb_clone = Arc::clone(&pr_changed_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -224,6 +228,11 @@ impl DaemonClient {
                                         cb();
                                     }
                                 }
+                                DaemonEvent::PrChanged { worktree_id } => {
+                                    if let Some(cb) = pr_changed_cb_clone.lock().as_ref() {
+                                        cb(worktree_id.as_deref());
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -262,6 +271,7 @@ impl DaemonClient {
             title_changed_cb,
             focus_requested_cb,
             git_changed_cb,
+            pr_changed_cb,
             _runtime: rt,
         };
 
@@ -341,6 +351,11 @@ impl DaemonClient {
     /// Register a global hook fired whenever any client mutates source-control state.
     pub fn set_git_changed_callback(&self, cb: OnGitChanged) {
         *self.git_changed_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever a linked worktree's PR status refreshes.
+    pub fn set_pr_changed_callback(&self, cb: OnPrChanged) {
+        *self.pr_changed_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.

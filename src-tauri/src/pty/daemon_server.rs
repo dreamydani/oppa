@@ -9,6 +9,9 @@ use crate::git::source_control::{
     sc_file_diff, sc_history, sc_local_branches, sc_pull, sc_push, sc_stage, sc_status,
     sc_unstage, sc_upstream_refresh,
 };
+use crate::git::hosted_reviews::{
+    poll_pass_once, unix_now_ms, GhClient, LiveGhClient, PollerConfig, PrPollerState,
+};
 use crate::git::teardown::{session_cwd_inside, LiveSession};
 use crate::git::worktree_lineage::lineage_list;
 use crate::git::worktree_registry::WorktreeRegistry;
@@ -86,6 +89,10 @@ pub struct DaemonServer {
     worktree_registry_path: Option<PathBuf>,
     // Some(snapshot_dir/diff-comments.json) enables the diff-comment request surface
     comments_store_path: Option<PathBuf>,
+    // PR status poller: injectable gh client, per-worktree backoff state, push burst signal
+    pr_client: Arc<dyn GhClient>,
+    pr_poller_state: Arc<Mutex<PrPollerState>>,
+    pr_push_burst: Arc<Notify>,
     // Set only when the discovery file was written; None keeps the pipe unauthenticated
     auth_token: Option<String>,
     global_events: broadcast::Sender<DaemonEvent>,
@@ -105,6 +112,9 @@ impl DaemonServer {
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: None,
             comments_store_path: None,
+            pr_client: Arc::new(LiveGhClient),
+            pr_poller_state: Arc::new(Mutex::new(PrPollerState::default())),
+            pr_push_burst: Arc::new(Notify::new()),
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
@@ -117,9 +127,18 @@ impl DaemonServer {
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: Some(app_data_dir.join("worktrees.json")),
             comments_store_path: Some(app_data_dir.join("diff-comments.json")),
+            pr_client: Arc::new(LiveGhClient),
+            pr_poller_state: Arc::new(Mutex::new(PrPollerState::default())),
+            pr_push_burst: Arc::new(Notify::new()),
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
         }
+    }
+
+    // Test seam: swap the live gh runner for a mock before booting the poller.
+    pub fn with_pr_client(mut self, client: Arc<dyn GhClient>) -> Self {
+        self.pr_client = client;
+        self
     }
 
     pub fn set_auth_token(&mut self, token: Option<String>) {
@@ -618,6 +637,10 @@ impl DaemonServer {
                     DaemonResponse::ScPush,
                 );
                 self.publish_git_changed_if_success(&resp);
+                // Post-push burst: checks can move seconds after a push lands.
+                if !matches!(resp, DaemonResponse::Error(_)) {
+                    self.pr_push_burst.notify_one();
+                }
                 resp
             }
             DaemonRequest::GitUpstreamRefresh { cwd } => self.sc_response(
@@ -933,16 +956,66 @@ impl DaemonServer {
         socket_path: &str,
         cancel_token: CancellationToken,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let server = Arc::new(Self {
+        let server = self.shared_clone();
+        run_server_listener(server, socket_path, cancel_token).await
+    }
+
+    // Arc-shared clone so spawned tasks (listener, poller) share registry/event wiring.
+    fn shared_clone(&self) -> Arc<DaemonServer> {
+        Arc::new(Self {
             sessions: Arc::clone(&self.sessions),
             snapshot_dir: self.snapshot_dir.clone(),
             resumed_agent_ids: Arc::clone(&self.resumed_agent_ids),
             worktree_registry_path: self.worktree_registry_path.clone(),
             comments_store_path: self.comments_store_path.clone(),
+            pr_client: Arc::clone(&self.pr_client),
+            pr_poller_state: Arc::clone(&self.pr_poller_state),
+            pr_push_burst: Arc::clone(&self.pr_push_burst),
             auth_token: self.auth_token.clone(),
             global_events: self.global_events.clone(),
+        })
+    }
+
+    /// One synchronous poll pass over all linked worktrees; also the manual trigger.
+    pub fn run_pr_poll_pass(&self) -> usize {
+        let Some(registry_path) = self.worktree_registry_path.clone() else {
+            return 0;
+        };
+        let client = Arc::clone(&self.pr_client);
+        let mut published_ids: Vec<Option<String>> = Vec::new();
+        let fetched = {
+            let mut state = self.pr_poller_state.lock();
+            poll_pass_once(
+                &mut state,
+                &PollerConfig::default(),
+                &registry_path,
+                client.as_ref(),
+                unix_now_ms(),
+                &mut |id| published_ids.push(id),
+            )
+        };
+        for worktree_id in published_ids {
+            self.publish_global(DaemonEvent::PrChanged { worktree_id });
+        }
+        fetched
+    }
+
+    /// Background PR status loop: 60s tick plus immediate pass on push burst.
+    pub fn start_pr_poller(&self) {
+        let server = self.shared_clone();
+        tokio::spawn(async move {
+            let config = PollerConfig::default();
+            // Notify permits persist between waits, so a push landing mid-pass still wakes the next select.
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(config.tick) => {}
+                    _ = server.pr_push_burst.notified() => {}
+                }
+                let pass_server = Arc::clone(&server);
+                let _ =
+                    tokio::task::spawn_blocking(move || pass_server.run_pr_poll_pass()).await;
+            }
         });
-        run_server_listener(server, socket_path, cancel_token).await
     }
 
     fn snapshot_foreground(checkpoint: &Option<SessionSnapshot>) -> Option<String> {
@@ -3691,5 +3764,176 @@ mod tests {
         }
 
         cancel_token.cancel();
+    }
+
+    // ---------- task 3: pr poller ----------
+
+    use crate::git::hosted_reviews::{GhClient, PrStatus};
+    use crate::git::test_support::sandbox_with_origin;
+    use crate::git::worktree_registry::{worktree_record_id, WorktreeRecord, WorktreeStatus};
+
+    struct MergedPrClient {
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl GhClient for MergedPrClient {
+        fn status(&self, _cwd: &Path, url: &str) -> Result<PrStatus, String> {
+            self.calls.lock().push(url.to_string());
+            Ok(PrStatus {
+                number: 5,
+                title: "t".into(),
+                url: url.into(),
+                state: "merged".into(),
+                draft: false,
+                mergeable: "unknown".into(),
+                base_ref_name: "main".into(),
+                head_ref_name: "feature".into(),
+                checks: vec![],
+                fetched_at_ms: 0,
+            })
+        }
+    }
+
+    // Open state keeps the link intact so repeated bursts keep fetching (a merged
+    // client would clear the link after the first pass and starve later bursts).
+    struct OpenPrClient {
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl GhClient for OpenPrClient {
+        fn status(&self, _cwd: &Path, url: &str) -> Result<PrStatus, String> {
+            self.calls.lock().push(url.to_string());
+            Ok(PrStatus {
+                number: 5,
+                title: "t".into(),
+                url: url.into(),
+                state: "open".into(),
+                draft: false,
+                mergeable: "unknown".into(),
+                base_ref_name: "main".into(),
+                head_ref_name: "feature".into(),
+                checks: vec![],
+                fetched_at_ms: 0,
+            })
+        }
+    }
+
+    fn register_linked_wt(registry_path: &Path, repo_id: &str, path: &Path) -> String {
+        let id = worktree_record_id(repo_id, path);
+        let mut registry = WorktreeRegistry::load(registry_path);
+        registry.upsert_worktree(WorktreeRecord {
+            id: id.clone(),
+            repo_id: repo_id.into(),
+            name: "wt".into(),
+            display_name: None,
+            branch: "feature".into(),
+            path: path.to_path_buf(),
+            base_ref: "main".into(),
+            parent_worktree_id: None,
+            child_worktree_ids: vec![],
+            workspace_status: WorktreeStatus::Todo,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: Some("https://github.com/o/r/pull/5".into()),
+        });
+        registry.save(registry_path).unwrap();
+        id
+    }
+
+    async fn next_pr_changed(rx: &mut broadcast::Receiver<DaemonEvent>) -> Option<String> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                Ok(Ok(DaemonEvent::PrChanged { worktree_id })) => return worktree_id,
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        panic!("PrChanged never arrived on the global broadcast");
+    }
+
+    #[tokio::test]
+    async fn git_push_success_signals_poll_burst_but_errors_do_not() {
+        let (s, _bare) = sandbox_with_origin("ds-push-burst");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        let resp = server.handle_request(DaemonRequest::GitPush {
+            cwd: s.repo.to_string_lossy().into_owned(),
+            publish: false,
+            force_with_lease: false,
+        });
+        assert!(matches!(resp, DaemonResponse::ScPush(_)));
+        tokio::time::timeout(Duration::from_secs(2), server.pr_push_burst.notified())
+            .await
+            .expect("successful push must arm the poll burst");
+
+        let bad = server.handle_request(DaemonRequest::GitPush {
+            cwd: "Z:\\not-a-repo-oppa".into(),
+            publish: false,
+            force_with_lease: false,
+        });
+        assert!(matches!(bad, DaemonResponse::Error(_)));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(150), server.pr_push_burst.notified())
+                .await
+                .is_err(),
+            "failed push must not arm another burst"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_pr_poll_pass_publishes_pr_changed_and_clears_merged_link() {
+        let (s, _bare) = sandbox_with_origin("ds-poll-pass");
+        let registry_path = s.root.join("worktrees.json");
+        let id = register_linked_wt(&registry_path, "repo", &s.repo);
+        let client = Arc::new(MergedPrClient { calls: Mutex::new(Vec::new()) });
+        let server =
+            DaemonServer::with_snapshot_storage(s.root.clone()).with_pr_client(client.clone());
+        let mut rx = server.subscribe_global_events();
+
+        assert_eq!(server.run_pr_poll_pass(), 1);
+        assert_eq!(
+            next_pr_changed(&mut rx).await.as_deref(),
+            Some(id.as_str()),
+            "pass must fan out PrChanged with the worktree id"
+        );
+        assert_eq!(client.calls.lock().len(), 1);
+        assert!(WorktreeRegistry::load(&registry_path).worktrees[&id]
+            .linked_pr_url
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn start_pr_poller_runs_single_immediate_pass_per_burst() {
+        let (s, _bare) = sandbox_with_origin("ds-poller-loop");
+        let registry_path = s.root.join("worktrees.json");
+        let _id = register_linked_wt(&registry_path, "repo", &s.repo);
+        let client = Arc::new(OpenPrClient { calls: Mutex::new(Vec::new()) });
+        let server =
+            DaemonServer::with_snapshot_storage(s.root.clone()).with_pr_client(client.clone());
+
+        // A pre-boot permit makes the loop's first notified() resolve instantly.
+        server.pr_push_burst.notify_one();
+        server.start_pr_poller();
+
+        let wait_for_calls = |target: usize| {
+            let client = Arc::clone(&client);
+            async move {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while Instant::now() < deadline {
+                    if client.calls.lock().len() >= target {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                panic!("poller never reached {target} gh calls");
+            }
+        };
+        wait_for_calls(1).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(client.calls.lock().len(), 1, "one burst ⇒ exactly one immediate pass");
+
+        server.pr_push_burst.notify_one();
+        wait_for_calls(2).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(client.calls.lock().len(), 2, "each burst triggers exactly one pass");
     }
 }
