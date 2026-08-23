@@ -1,7 +1,16 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Layout, Path } from "../store/terminalStore";
+import {
+  computeFlipTransform,
+  playFlip,
+  prefersReducedMotion,
+  EASE_DOLLY,
+  ZOOM_IN_MS,
+  ZOOM_OUT_MS,
+} from "../lib/pane-manager/maximizeZoom";
+import type { FlipRect } from "../lib/pane-manager/maximizeZoom";
 import { usePaneDragStore } from "../lib/pane-manager/dragState";
 import { SessionLeaf } from "./SessionLeaf";
 
@@ -25,6 +34,68 @@ export function PaneSplit() {
 
   const { isDragging, sourceId, targetId, zone } = usePaneDragStore();
 
+  // Dolly-zoom bookkeeping: leaf elements by session id, the geometry
+  // snapshot taken just before a maximize-state change lands, and cancels for
+  // any zoom still in flight.
+  const leafElsRef = useRef(new Map<string, HTMLElement>());
+  const pendingRectsRef = useRef<Map<string, FlipRect> | null>(null);
+  const prevMaximizedRef = useRef<string | null>(maximizedSessionId);
+  const activeZoomCancelsRef = useRef<Array<() => void>>([]);
+
+  // Snapshot BEFORE React mutates the DOM: the store listener fires during
+  // setState, while the old layout is still on screen — the FLIP "First".
+  useEffect(() => {
+    return useTerminalStore.subscribe((state, prevState) => {
+      if (state.maximizedSessionId === prevState.maximizedSessionId) return;
+      const rects = new Map<string, FlipRect>();
+      leafElsRef.current.forEach((el, id) => {
+        const rect = el.getBoundingClientRect();
+        rects.set(id, { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+      });
+      pendingRectsRef.current = rects;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const prevMaximized = prevMaximizedRef.current;
+    prevMaximizedRef.current = maximizedSessionId;
+    if (prevMaximized === maximizedSessionId) return;
+
+    activeZoomCancelsRef.current.forEach((cancel) => cancel());
+    activeZoomCancelsRef.current = [];
+
+    const prevRects = pendingRectsRef.current;
+    pendingRectsRef.current = null;
+    if (prefersReducedMotion() || !prevRects) return;
+
+    // Expanding leaf flies out from its slot; collapsing one settles back in.
+    const moves: Array<{ id: string; durationMs: number }> = [];
+    if (maximizedSessionId && prevRects.has(maximizedSessionId)) {
+      moves.push({ id: maximizedSessionId, durationMs: ZOOM_OUT_MS });
+    }
+    if (prevMaximized && prevMaximized !== maximizedSessionId && prevRects.has(prevMaximized)) {
+      moves.push({ id: prevMaximized, durationMs: ZOOM_IN_MS });
+    }
+
+    for (const move of moves) {
+      const el = leafElsRef.current.get(move.id);
+      const prev = prevRects.get(move.id);
+      if (!el || !prev) continue;
+      const next = el.getBoundingClientRect();
+      const flip = computeFlipTransform(prev, next);
+      // Zero-area guard covers happy-dom tests and never-laid-out leaves.
+      if (!flip) continue;
+      activeZoomCancelsRef.current.push(playFlip(el, flip, move.durationMs, EASE_DOLLY));
+    }
+  }, [maximizedSessionId]);
+
+  useEffect(() => {
+    return () => {
+      activeZoomCancelsRef.current.forEach((cancel) => cancel());
+      activeZoomCancelsRef.current = [];
+    };
+  }, []);
+
   const renderTree = (targetLayout: Layout, targetFocusedPath: Path, isTabActive: boolean) => {
     const isAnyMaximized = Boolean(
       isTabActive && maximizedSessionId && containsSession(targetLayout, maximizedSessionId),
@@ -40,6 +111,10 @@ export function PaneSplit() {
           <div
             key={path.join(".")}
             data-pane-id={node.id}
+            ref={(el) => {
+              if (el) leafElsRef.current.set(node.id, el);
+              else leafElsRef.current.delete(node.id);
+            }}
             className={`pane-leaf${isTabActive && path.join(".") === targetFocusedPath.join(".") ? " focused" : ""}${isMaximized ? " maximized" : ""}${isHidden ? " pane-hidden" : ""}${isDragSource ? " is-drag-source" : ""}`}
             onMouseDown={() => {
               if (isTabActive) focusPane(path);

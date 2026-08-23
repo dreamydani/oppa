@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, fireEvent, act } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import { PaneSplit } from "./PaneSplit";
 import * as transport from "../lib/pty/transport";
@@ -322,6 +322,89 @@ describe("PaneSplit", () => {
     const panes = container.querySelectorAll(".terminal-pane");
     expect(panes).toHaveLength(2);
     expect(container.querySelector(".pane-divider")).not.toBeNull();
+  });
+
+  describe("dolly-zoom maximize animation", () => {
+    const domRect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    function twoPaneSetup() {
+      setSessions(["a", "b"]);
+      useTerminalStore.setState({
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        },
+        maximizedSessionId: null,
+      });
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it("applies an inverted transform on maximize and clears inline styles after the fallback timer", async () => {
+      vi.useFakeTimers();
+      twoPaneSetup();
+      const { container } = render(<PaneSplit />);
+      const [leafA] = container.querySelectorAll<HTMLElement>(".pane-leaf");
+      vi.spyOn(leafA, "getBoundingClientRect").mockReturnValue(domRect(0, 0, 400, 300));
+
+      await act(async () => {
+        useTerminalStore.setState({ maximizedSessionId: "a" });
+      });
+
+      // Play phase: inverted start released, transition armed.
+      expect(leafA.style.transform).toBe("");
+      expect(leafA.style.transition).toContain("220ms");
+      expect(leafA.style.willChange).toBe("transform");
+
+      vi.advanceTimersByTime(900);
+
+      expect(leafA.style.transition).toBe("");
+      expect(leafA.style.willChange).toBe("");
+    });
+
+    it("animates both leaves on a direct A-to-B maximize swap", async () => {
+      vi.useFakeTimers();
+      twoPaneSetup();
+      const { container } = render(<PaneSplit />);
+      const [leafA, leafB] = container.querySelectorAll<HTMLElement>(".pane-leaf");
+      vi.spyOn(leafA, "getBoundingClientRect").mockReturnValue(domRect(0, 0, 400, 300));
+      vi.spyOn(leafB, "getBoundingClientRect").mockReturnValue(domRect(400, 0, 400, 300));
+
+      await act(async () => {
+        useTerminalStore.setState({ maximizedSessionId: "a" });
+      });
+      vi.advanceTimersByTime(900);
+      expect(leafA.style.transition).toBe("");
+
+      await act(async () => {
+        useTerminalStore.setState({ maximizedSessionId: "b" });
+      });
+
+      expect(leafB.style.willChange).toBe("transform");
+      vi.advanceTimersByTime(900);
+      expect(leafB.style.transition).toBe("");
+    });
+
+    it("never animates when measured rects have zero area (happy-dom / hidden panes)", async () => {
+      twoPaneSetup();
+      const { container } = render(<PaneSplit />);
+      const [leafA] = container.querySelectorAll<HTMLElement>(".pane-leaf");
+
+      await act(async () => {
+        useTerminalStore.setState({ maximizedSessionId: "a" });
+      });
+
+      expect(leafA.style.willChange).toBe("");
+      expect(leafA.style.transition).toBe("");
+      expect(leafA.style.transform).toBe("");
+    });
   });
 
   it("renders all open tabs with keep-alive visibility toggling active and inactive tab wrappers", () => {
