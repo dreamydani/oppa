@@ -758,3 +758,148 @@ fn terminal_renderers_are_stable() {
 fn wait_grace_gives_keepalives_headroom_over_daemon_deadline() {
     assert_eq!(WAIT_GRACE_MS, 2000);
 }
+
+// ---- task 10: agent-context machine-readable command catalog ----
+
+use super::output::render_agent_context;
+use super::vocabulary::{agent_context_document, build_catalog};
+
+fn clap_leaf_paths() -> Vec<(String, String)> {
+    let root = crate::cli::command_tree::build_root_command();
+    let mut paths: Vec<(String, String)> = Vec::new();
+    for family_cmd in root.get_subcommands() {
+        if family_cmd.has_subcommands() {
+            for verb_cmd in family_cmd.get_subcommands() {
+                paths.push((
+                    family_cmd.get_name().to_string(),
+                    verb_cmd.get_name().to_string(),
+                ));
+            }
+        } else {
+            paths.push((family_cmd.get_name().to_string(), String::new()));
+        }
+    }
+    paths
+}
+
+#[test]
+fn agent_context_catalog_matches_clap_tree_and_vocabulary_table() {
+    let mut clap_paths = clap_leaf_paths();
+    let mut catalog_paths: Vec<(String, String)> =
+        build_catalog().into_iter().map(|c| (c.family, c.verb)).collect();
+    clap_paths.sort();
+    catalog_paths.sort();
+    assert_eq!(
+        catalog_paths, clap_paths,
+        "catalog must list exactly the clap tree's family/verb paths"
+    );
+
+    // The parse-level table feeds validate_verb; if it drifts from clap, parsing drifts too.
+    let table_pairs: usize = CANONICAL_COMMANDS
+        .iter()
+        .map(|(_, verbs)| verbs.len().max(1))
+        .sum();
+    assert_eq!(
+        table_pairs,
+        clap_paths.len(),
+        "CANONICAL_COMMANDS must cover exactly the clap surface"
+    );
+    for (family, verb) in &clap_paths {
+        let (_, verbs) = CANONICAL_COMMANDS
+            .iter()
+            .find(|(f, _)| f == family)
+            .unwrap_or_else(|| panic!("family '{family}' missing from CANONICAL_COMMANDS"));
+        if verb.is_empty() {
+            assert!(verbs.is_empty(), "family '{family}' must stay verb-less");
+        } else {
+            assert!(
+                verbs.contains(&verb.as_str()),
+                "verb '{family} {verb}' missing from CANONICAL_COMMANDS"
+            );
+        }
+    }
+}
+
+#[test]
+fn agent_context_document_meets_machine_contract() {
+    let doc = agent_context_document();
+    assert!(doc.commands.len() >= 20, "shipped surface has >= 20 verbs");
+    assert_eq!(doc.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(doc.protocol, crate::pty::ipc_protocol::DAEMON_PROTOCOL_VERSION);
+    assert!(doc.notes.len() >= 3);
+
+    let line = render_json(&doc);
+    assert!(!line.contains('\n'), "json must stay compact single-line");
+    let parsed: serde_json::Value = serde_json::from_str(&line).expect("document parses");
+    assert_eq!(
+        parsed["commands"].as_array().map(Vec::len),
+        Some(doc.commands.len())
+    );
+    assert_eq!(parsed["protocol"], serde_json::json!(3));
+    let notes = parsed["notes"].as_array().expect("notes array");
+    assert!(notes.len() >= 3);
+    for topic in ["exit codes", "auth", "vocabulary policy"] {
+        assert!(
+            notes.iter().any(|n| n.as_str().unwrap_or("").contains(topic)),
+            "notes must mention {topic}"
+        );
+    }
+
+    let send = parsed["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["family"] == "terminal" && c["verb"] == "send")
+        .expect("terminal send entry");
+    assert_eq!(send["summary"], "Send text to a session's input");
+    assert_eq!(
+        send["example"],
+        r#"oppa terminal send <id> --text "cargo test" --enter"#
+    );
+    let flag_names: Vec<&str> = send["flags"]
+        .as_array()
+        .expect("flags array")
+        .iter()
+        .map(|f| f["name"].as_str().expect("flag name"))
+        .collect();
+    assert_eq!(
+        flag_names,
+        ["<id>", "--text", "--enter", "--interrupt", "--json", "--timeout-ms"]
+    );
+}
+
+#[test]
+fn agent_context_human_output_groups_by_family_with_examples_and_notes() {
+    let rendered = render_agent_context(&agent_context_document());
+    for header in ["STATUS", "OPEN", "AGENT-CONTEXT", "REPO", "WORKTREE", "TERMINAL"] {
+        assert!(
+            rendered.lines().any(|line| line.trim_end() == header),
+            "missing {header} family header:\n{rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("usage: oppa worktree create feat-a"),
+        "examples render under their verb:\n{rendered}"
+    );
+    // Worktree verb width is 7, so continuations align 11 columns in.
+    assert!(
+        rendered.contains("\n           usage: oppa worktree create feat-a"),
+        "continuation lines align with the summary column:\n{rendered}"
+    );
+    assert!(rendered.contains("NOTES"));
+    assert!(rendered.contains("destructive verbs are rm"));
+}
+
+#[test]
+fn agent_context_terminal_send_entry_snapshot_is_stable() {
+    let doc = agent_context_document();
+    let send = doc
+        .commands
+        .iter()
+        .find(|c| c.family == "terminal" && c.verb == "send")
+        .expect("terminal send entry");
+    assert_eq!(
+        render_json(send),
+        r#"{"family":"terminal","verb":"send","summary":"Send text to a session's input","flags":[{"name":"<id>","takes_value":true},{"name":"--text","takes_value":true},{"name":"--enter","takes_value":false},{"name":"--interrupt","takes_value":false,"help":"Prefix a Ctrl-C byte before the text"},{"name":"--json","takes_value":false},{"name":"--timeout-ms","takes_value":true}],"example":"oppa terminal send <id> --text \"cargo test\" --enter"}"#
+    );
+}

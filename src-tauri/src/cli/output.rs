@@ -1,4 +1,5 @@
 ﻿// CLI-owned DTOs + deterministic human/json rendering; internal daemon enum names never leak past this module.
+use crate::cli::vocabulary::AgentContextDocument;
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use serde::Serialize;
 
@@ -361,4 +362,52 @@ pub fn render_wait_result(result: &CliWaitResult) -> String {
 
 pub const SWITCH_M1_NOTE: &str =
     "M1 validates the session only; GUI focus switching arrives with tab-title sync";
+
+// ---- agent-context renderers ----
+
+pub fn render_agent_context(doc: &AgentContextDocument) -> String {
+    let mut lines = vec![format!(
+        "OPPA CLI {} · protocol {}",
+        doc.version, doc.protocol
+    )];
+    let mut index = 0;
+    while index < doc.commands.len() {
+        let family = doc.commands[index].family.clone();
+        let group_end = doc.commands[index..]
+            .iter()
+            .take_while(|cmd| cmd.family == family)
+            .count();
+        lines.push(family.to_uppercase());
+        let group = &doc.commands[index..index + group_end];
+        // Standalone families (status/open/agent-context) have no verb column to align.
+        let verb_width = group.iter().map(|c| c.verb.len()).max().unwrap_or(0);
+        for cmd in group {
+            if cmd.verb.is_empty() {
+                push_catalog_entry(&mut lines, cmd, "  ", "  ");
+            } else {
+                let head =
+                    format!("  {}  ", format!("{:<width$}", cmd.verb, width = verb_width));
+                push_catalog_entry(&mut lines, cmd, &head, &" ".repeat(head.len()));
+            }
+        }
+        index += group_end;
+    }
+    lines.push("NOTES".to_string());
+    lines.extend(doc.notes.iter().map(|note| format!("- {note}")));
+    lines.join("\n")
+}
+
+fn push_catalog_entry(
+    lines: &mut Vec<String>,
+    cmd: &crate::cli::vocabulary::CatalogCommand,
+    head: &str,
+    cont: &str,
+) {
+    lines.push(format!("{head}{}", cmd.summary));
+    lines.push(format!("{cont}usage: {}", cmd.example));
+    if !cmd.flags.is_empty() {
+        let names: Vec<&str> = cmd.flags.iter().map(|f| f.name.as_str()).collect();
+        lines.push(format!("{cont}flags: {}", names.join(" ")));
+    }
+}
 

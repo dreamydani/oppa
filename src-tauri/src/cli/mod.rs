@@ -6,6 +6,7 @@ use crate::pty::ipc_protocol::{
 };
 use output::{CliRepoRecord, CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord};
 
+pub mod command_tree;
 pub mod output;
 pub mod vocabulary;
 
