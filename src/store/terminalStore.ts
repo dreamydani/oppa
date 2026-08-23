@@ -550,8 +550,11 @@ export interface TerminalState {
   markCommentsSent: (ids: string[]) => Promise<void>;
   // Hosted reviews: keyed by cwd; debounced refresh on PrChanged like git-changed
   reviewByCwd: Record<string, { eligibility?: Eligibility; prStatus?: PrStatus; loading: boolean }>;
+  // Registry-level cache for worktree cards keyed by worktree id
+  prStatusByWorktreeId: Record<string, PrStatus>;
   setReviewEligibility: (cwd: string, eligibility: Eligibility) => void;
   setPrStatus: (cwd: string, prStatus: PrStatus) => void;
+  setPrStatusByWorktreeId: (worktreeId: string, prStatus: PrStatus) => void;
   refreshReviewEligibility: (cwd?: string) => Promise<void>;
   createReview: (cwd: string, input: { title: string; body: string; draft: boolean }) => Promise<CreatedReview>;
   refreshReviewStatus: (cwd?: string) => Promise<void>;
@@ -641,6 +644,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   leftSidebarView: "tabs",
   isWorktreeCreateOpen: false,
   reviewByCwd: {},
+  prStatusByWorktreeId: {},
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -2704,6 +2708,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       },
     })),
 
+  setPrStatusByWorktreeId: (worktreeId, prStatus) =>
+    set((state) => ({
+      prStatusByWorktreeId: { ...state.prStatusByWorktreeId, [worktreeId]: prStatus },
+    })),
+
   refreshReviewEligibility: async (cwd) => {
     const dir = cwd ?? get().getActiveCwd();
     if (!dir || !requestReviewEligibility) return;
@@ -2752,12 +2761,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }));
     try {
       const prStatus = await requestReviewStatus(dir);
-      set((state) => ({
-        reviewByCwd: {
-          ...state.reviewByCwd,
-          [dir]: { ...(state.reviewByCwd[dir] ?? { loading: false }), prStatus, loading: false },
-        },
-      }));
+      set((state) => {
+        const next: Record<string, PrStatus> = { ...state.prStatusByWorktreeId };
+        // Mirror into worktree-id cache for badge lookup
+        const match = state.worktrees.find((w) => w.record.path === dir);
+        if (match) next[match.record.id] = prStatus;
+        return {
+          reviewByCwd: {
+            ...state.reviewByCwd,
+            [dir]: { ...(state.reviewByCwd[dir] ?? { loading: false }), prStatus, loading: false },
+          },
+          prStatusByWorktreeId: next,
+        };
+      });
     } catch {
       set((state) => ({
         reviewByCwd: {
@@ -2819,13 +2835,24 @@ void onGitChanged(() => {
 });
 
 let prChangedTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPrWorktreeId: string | null = null;
 if (onPrChanged) {
-  void onPrChanged(() => {
+  void onPrChanged((payload) => {
+    // Remember targeted worktree for registry-level badge refresh
+    if (payload?.worktree_id) pendingPrWorktreeId = payload.worktree_id;
     if (prChangedTimer) clearTimeout(prChangedTimer);
     prChangedTimer = setTimeout(() => {
       prChangedTimer = null;
-      const cwd = useTerminalStore.getState().getActiveCwd();
-      if (cwd) void useTerminalStore.getState().refreshReviewStatus(cwd).catch(() => {});
+      const state = useTerminalStore.getState();
+      // Targeted worktree refresh for badge cache
+      if (pendingPrWorktreeId) {
+        const targetId = pendingPrWorktreeId;
+        pendingPrWorktreeId = null;
+        const entry = state.worktrees.find((w) => w.record.id === targetId);
+        if (entry) void state.refreshReviewStatus(entry.record.path).catch(() => {});
+      }
+      const cwd = state.getActiveCwd();
+      if (cwd) void state.refreshReviewStatus(cwd).catch(() => {});
     }, 300);
   });
 }

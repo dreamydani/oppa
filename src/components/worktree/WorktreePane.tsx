@@ -1,8 +1,22 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { GitBranch, MoreHorizontal } from "lucide-react";
+import { ExternalLink, GitBranch, MoreHorizontal } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
 import "./worktree.css";
+
+function prNumberFromUrl(url: string): string | null {
+  const m = url.match(/\/pull\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+function prDotClassForState(state?: string): string {
+  const s = (state ?? "").toLowerCase();
+  if (s === "open") return "dot-open";
+  if (s === "merged") return "dot-merged";
+  if (s === "closed") return "dot-closed";
+  return "dot-unknown";
+}
 
 const STATUS_ORDER: WorktreeStatus[] = ["todo", "in-progress", "in-review", "completed"];
 
@@ -25,6 +39,8 @@ function sortEntries(entries: WorktreeListEntry[]): WorktreeListEntry[] {
 export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactElement {
   const worktrees = useTerminalStore((s) => s.worktrees);
   const liveSessions = useTerminalStore((s) => s.worktreeLiveSessions);
+  const reviewByCwd = useTerminalStore((s) => s.reviewByCwd);
+  const prStatusByWorktreeId = useTerminalStore((s) => s.prStatusByWorktreeId);
   const setWorktreeStatus = useTerminalStore((s) => s.setWorktreeStatus);
   const renameWorktree = useTerminalStore((s) => s.renameWorktree);
   const removeWorktree = useTerminalStore((s) => s.removeWorktree);
@@ -121,6 +137,12 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     );
   };
 
+  const handleOpenPr = (url: string) => {
+    openUrl(url).catch(() => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+  };
+
   return (
     <div className="worktree-pane">
       <div className="tab-list" role="list">
@@ -195,6 +217,32 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                   </div>
                   <div className="worktree-card-meta">
                     <span className="worktree-chip branch">{record.branch}</span>
+                    {record.linked_pr_url && (() => {
+                      const num = prNumberFromUrl(record.linked_pr_url!);
+                      const cached = prStatusByWorktreeId[record.id] ?? reviewByCwd[record.path]?.prStatus;
+                      const dotCls = prDotClassForState(cached?.state);
+                      return (
+                        <>
+                          <span className="worktree-pr-badge" data-testid="pr-badge" title={record.linked_pr_url!}>
+                            <span className={`pr-badge-dot ${dotCls}`} data-testid="pr-badge-dot" />
+                            #{num ?? "PR"}
+                          </span>
+                          <button
+                            type="button"
+                            className="worktree-pr-open"
+                            data-testid="pr-open-link"
+                            title="Open PR"
+                            aria-label={`Open PR for ${record.display_name || record.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenPr(record.linked_pr_url!);
+                            }}
+                          >
+                            <ExternalLink size={12} />
+                          </button>
+                        </>
+                      );
+                    })()}
                     {!record.retired && (
                       <span
                         className={`worktree-status-chip status-${record.workspace_status}`}

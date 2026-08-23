@@ -136,6 +136,66 @@
   background: rgba(63, 185, 80, 0.08);
 }
 
+.worktree-pr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.18);
+}
+
+.pr-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: #8a8f98;
+}
+
+.pr-badge-dot.dot-open {
+  background: #3fb950;
+}
+
+.pr-badge-dot.dot-closed {
+  background: #8a8f98;
+}
+
+.pr-badge-dot.dot-merged {
+  background: #ab70ff;
+}
+
+.pr-badge-dot.dot-unknown {
+  background: #8a8f98;
+}
+
+.worktree-pr-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.worktree-pr-open:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .worktree-card-menu-btn {
   background: transparent;
   border: none;
