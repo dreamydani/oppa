@@ -4,12 +4,13 @@ use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
     SourceControlStatus, UpstreamStatus,
 };
+use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 4;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 5;
 
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +203,15 @@ pub enum DaemonRequest {
     DiffCommentUpdate { id: String, body: String },
     DiffCommentDelete { id: String },
     DiffCommentsMarkSent { ids: Vec<String> },
+    // v5 hosted-review surface: eligibility, creation, and status refresh
+    ReviewEligibility { cwd: String },
+    CreateReview {
+        cwd: String,
+        title: String,
+        body: String,
+        draft: bool,
+    },
+    ReviewStatus { cwd: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +257,10 @@ pub enum DaemonResponse {
     ScCommitMessage(CommitMessage),
     CommentRecords(Vec<DiffComment>),
     CommentRecordOne(DiffComment),
+    // v5 hosted-review replies
+    ReviewEligibility(Eligibility),
+    CreateReview(CreatedReview),
+    ReviewStatus(PrStatus),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -891,7 +891,10 @@ fn agent_context_document_meets_machine_contract() {
         parsed["commands"].as_array().map(Vec::len),
         Some(doc.commands.len())
     );
-    assert_eq!(parsed["protocol"], serde_json::json!(4));
+    assert_eq!(
+        parsed["protocol"],
+        serde_json::json!(crate::pty::ipc_protocol::DAEMON_PROTOCOL_VERSION)
+    );
     let notes = parsed["notes"].as_array().expect("notes array");
     assert!(notes.len() >= 3);
     for topic in ["exit codes", "auth", "vocabulary policy"] {

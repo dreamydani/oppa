@@ -27,6 +27,7 @@ pub const CANONICAL_COMMANDS: &[(&str, &[&str])] = &[
             "history", "compare", "fetch", "pull", "ff", "push",
         ],
     ),
+    ("review", &["status", "create"]),
 ];
 
 // Parse-level aliasing keeps muscle memory working while the wire/help surface stays canonical.
@@ -150,6 +151,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("git pull", "oppa git pull --merge"),
     ("git ff", "oppa git ff"),
     ("git push", "oppa git push --publish --force-with-lease"),
+    ("review status", "oppa review status --cwd /path/to/repo"),
+    ("review create", "oppa review create --title \"feat: ship\" --body \"details\" --draft"),
 ];
 
 fn lookup_example(key: &str) -> &'static str {

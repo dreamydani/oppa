@@ -1,5 +1,5 @@
 use clap::Parser;
-use oppa_lib::cli::command_tree::{Cli, Command, GitAction, RepoAction, TerminalAction, WorktreeAction};
+use oppa_lib::cli::command_tree::{Cli, Command, GitAction, RepoAction, ReviewAction, TerminalAction, WorktreeAction};
 use oppa_lib::cli::output::{
     render_agent_context, render_agent_handoff, render_json, render_lineage_tree, render_ps_rows,
     render_repo_detail, render_repo_table, render_sc_branches, render_sc_compare, render_sc_diff,
@@ -12,13 +12,15 @@ use oppa_lib::cli::{
     build_git_branches, build_git_checkout, build_git_commit, build_git_compare, build_git_discard,
     build_git_fetch, build_git_ff, build_git_file_diff, build_git_history, build_git_pull,
     build_git_push, build_git_stage, build_git_status, build_git_unstage, build_repo_add,
-    build_terminal_create, build_terminal_send, build_worktree_create, build_worktree_set,
-    decode_attached, decode_ok, decode_ps_entries, decode_read_screen, decode_repo_records,
-    decode_sc_branches, decode_sc_commit, decode_sc_compare, decode_sc_diff, decode_sc_history,
-    decode_sc_pull, decode_sc_push, decode_sc_status, decode_session_ids, decode_wait_result,
-    decode_worktree_list, decode_worktree_many, decode_worktree_one, filter_active_only,
-    new_session_handle, parse_status, parse_wait_condition, resolve_cwd, validate_create_handoff,
-    CreateArgs, CliError, ParentUpdate, RuntimeConnection, RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
+    build_review_create, build_review_eligibility, build_review_status, build_terminal_create,
+    build_terminal_send, build_worktree_create, build_worktree_set, decode_attached,
+    decode_created_review, decode_ok, decode_ps_entries, decode_read_screen, decode_repo_records,
+    decode_review_eligibility, decode_review_status, decode_sc_branches, decode_sc_commit,
+    decode_sc_compare, decode_sc_diff, decode_sc_history, decode_sc_pull, decode_sc_push,
+    decode_sc_status, decode_session_ids, decode_wait_result, decode_worktree_list,
+    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle,
+    parse_status, parse_wait_condition, resolve_cwd, validate_create_handoff, CreateArgs, CliError,
+    ParentUpdate, RuntimeConnection, RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
 };
 use oppa_lib::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
 use std::path::PathBuf;
@@ -46,6 +48,7 @@ fn run(command: &Command, json: bool, timeout: Duration) -> Result<(), CliError>
         Command::Worktree { action } => run_worktree(action, json, timeout),
         Command::Terminal { action } => run_terminal(action, json, timeout),
         Command::Git { action } => run_git(action, json, timeout),
+        Command::Review { action } => run_review(action, json, timeout),
     }
 }
 
@@ -511,6 +514,43 @@ fn run_git(action: &GitAction, json: bool, timeout: Duration) -> Result<(), CliE
             )?)?;
             let human = render_sc_push(&outcome);
             emit(json, &outcome, move || human.clone())
+        }
+    }
+}
+
+fn run_review(action: &ReviewAction, json: bool, timeout: Duration) -> Result<(), CliError> {
+    match action {
+        ReviewAction::Status { cwd } => {
+            let cwd = resolve_cwd(cwd.as_deref())?;
+            // Try PR status first; if no linked PR, fall back to eligibility probe
+            let resp = send(build_review_status(&cwd), timeout)?;
+            match decode_review_status(resp) {
+                Ok(status) => emit(json, &status, || format!("PR #{} · {} · {}", status.number, status.title, status.state)),
+                Err(CliError::Daemon(msg)) if msg.contains("no linked") => {
+                    let eligibility = decode_review_eligibility(send(build_review_eligibility(&cwd), timeout)?)?;
+                    emit(json, &eligibility, || {
+                        if eligibility.eligible {
+                            format!("eligible · base {}", eligibility.base_ref.as_deref().unwrap_or("-"))
+                        } else {
+                            format!(
+                                "blocked: {}",
+                                eligibility
+                                    .blocked_reason
+                                    .as_ref()
+                                    .map(|r| format!("{r:?}"))
+                                    .unwrap_or_else(|| "unknown".into())
+                                    .to_lowercase()
+                            )
+                        }
+                    })
+                }
+                Err(e) => Err(e),
+            }
+        }
+        ReviewAction::Create { cwd, title, body, draft } => {
+            let cwd = resolve_cwd(cwd.as_deref())?;
+            let created = decode_created_review(send(build_review_create(&cwd, title, body, *draft), timeout)?)?;
+            emit(json, &created, || format!("created {}", created.pr_url))
         }
     }
 }

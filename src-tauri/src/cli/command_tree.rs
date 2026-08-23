@@ -42,6 +42,11 @@ pub enum Command {
         #[command(subcommand)]
         action: GitAction,
     },
+    /// Hosted review (GitHub PR) operations
+    Review {
+        #[command(subcommand)]
+        action: ReviewAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -173,6 +178,26 @@ pub enum TerminalAction {
     },
     /// Second session sharing the source's cwd and worktree; prints both handles
     Split { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum ReviewAction {
+    /// Show eligibility or linked PR status for a directory
+    Status {
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Create a pull request for the current branch
+    Create {
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: String,
+        #[arg(long)]
+        draft: bool,
+    },
 }
 
 // Every verb takes --cwd so the daemon resolves ops against that directory;

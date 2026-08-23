@@ -25,6 +25,7 @@ import {
   onTitleChanged,
   onFocusRequested,
   onGitChanged,
+  onPrChanged,
   scStatus,
   scStage,
   scUnstage,
@@ -44,6 +45,9 @@ import {
   diffCommentUpdate,
   diffCommentDelete,
   diffCommentsMarkSent,
+  requestReviewEligibility,
+  requestCreateReview,
+  requestReviewStatus,
 } from "../lib/pty/transport";
 import type {
   PtySpawnOptions,
@@ -61,6 +65,9 @@ import type {
   GitArea,
   DiffComment,
   NewDiffComment,
+  Eligibility,
+  CreatedReview,
+  PrStatus,
 } from "../lib/pty/transport";
 import {
   split,
@@ -541,6 +548,13 @@ export interface TerminalState {
   updateComment: (id: string, body: string) => Promise<void>;
   deleteComment: (id: string) => Promise<void>;
   markCommentsSent: (ids: string[]) => Promise<void>;
+  // Hosted reviews: keyed by cwd; debounced refresh on PrChanged like git-changed
+  reviewByCwd: Record<string, { eligibility?: Eligibility; prStatus?: PrStatus; loading: boolean }>;
+  setReviewEligibility: (cwd: string, eligibility: Eligibility) => void;
+  setPrStatus: (cwd: string, prStatus: PrStatus) => void;
+  refreshReviewEligibility: (cwd?: string) => Promise<void>;
+  createReview: (cwd: string, input: { title: string; body: string; draft: boolean }) => Promise<CreatedReview>;
+  refreshReviewStatus: (cwd?: string) => Promise<void>;
   sendToSession: (sessionId: string, data: string) => Promise<void>;
 }
 
@@ -626,6 +640,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   repos: [],
   leftSidebarView: "tabs",
   isWorktreeCreateOpen: false,
+  reviewByCwd: {},
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -2673,6 +2688,86 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
+  setReviewEligibility: (cwd, eligibility) =>
+    set((state) => ({
+      reviewByCwd: {
+        ...state.reviewByCwd,
+        [cwd]: { ...(state.reviewByCwd[cwd] ?? { loading: false }), eligibility },
+      },
+    })),
+
+  setPrStatus: (cwd, prStatus) =>
+    set((state) => ({
+      reviewByCwd: {
+        ...state.reviewByCwd,
+        [cwd]: { ...(state.reviewByCwd[cwd] ?? { loading: false }), prStatus },
+      },
+    })),
+
+  refreshReviewEligibility: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir || !requestReviewEligibility) return;
+    set((state) => ({
+      reviewByCwd: {
+        ...state.reviewByCwd,
+        [dir]: { ...(state.reviewByCwd[dir] ?? {}), loading: true } as typeof state.reviewByCwd[string],
+      },
+    }));
+    try {
+      const eligibility = await requestReviewEligibility(dir);
+      set((state) => ({
+        reviewByCwd: {
+          ...state.reviewByCwd,
+          [dir]: { ...(state.reviewByCwd[dir] ?? { loading: false }), eligibility, loading: false },
+        },
+      }));
+    } catch {
+      set((state) => ({
+        reviewByCwd: {
+          ...state.reviewByCwd,
+          [dir]: { ...(state.reviewByCwd[dir] ?? {}), loading: false } as typeof state.reviewByCwd[string],
+        },
+      }));
+    }
+  },
+
+  createReview: async (cwd, input) => {
+    const dir = cwd;
+    if (!requestCreateReview) throw new Error("review transport unavailable");
+    const created = await requestCreateReview(dir, input);
+    // After creation, refresh both eligibility and status for this cwd
+    void get().refreshReviewEligibility(dir).catch(() => {});
+    void get().refreshReviewStatus(dir).catch(() => {});
+    return created;
+  },
+
+  refreshReviewStatus: async (cwd) => {
+    const dir = cwd ?? get().getActiveCwd();
+    if (!dir || !requestReviewStatus) return;
+    set((state) => ({
+      reviewByCwd: {
+        ...state.reviewByCwd,
+        [dir]: { ...(state.reviewByCwd[dir] ?? {}), loading: true } as typeof state.reviewByCwd[string],
+      },
+    }));
+    try {
+      const prStatus = await requestReviewStatus(dir);
+      set((state) => ({
+        reviewByCwd: {
+          ...state.reviewByCwd,
+          [dir]: { ...(state.reviewByCwd[dir] ?? { loading: false }), prStatus, loading: false },
+        },
+      }));
+    } catch {
+      set((state) => ({
+        reviewByCwd: {
+          ...state.reviewByCwd,
+          [dir]: { ...(state.reviewByCwd[dir] ?? {}), loading: false } as typeof state.reviewByCwd[string],
+        },
+      }));
+    }
+  },
+
   sendToSession: async (sessionId, data) => {
     await ptyWrite(sessionId, data);
   },
@@ -2722,3 +2817,15 @@ void onGitChanged(() => {
     if (cwd) void useTerminalStore.getState().refreshGitStatus(cwd).catch(() => {});
   }, 300);
 });
+
+let prChangedTimer: ReturnType<typeof setTimeout> | null = null;
+if (onPrChanged) {
+  void onPrChanged(() => {
+    if (prChangedTimer) clearTimeout(prChangedTimer);
+    prChangedTimer = setTimeout(() => {
+      prChangedTimer = null;
+      const cwd = useTerminalStore.getState().getActiveCwd();
+      if (cwd) void useTerminalStore.getState().refreshReviewStatus(cwd).catch(() => {});
+    }, 300);
+  });
+}

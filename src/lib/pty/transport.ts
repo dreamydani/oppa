@@ -458,3 +458,79 @@ export function diffCommentsMarkSent(ids: string[]): Promise<DiffComment[]> {
 export async function onGitChanged(cb: () => void) {
   return listen("git-changed", () => cb());
 }
+
+// ---- v5 hosted-review surface; TS types serde-exact to Rust hosted_reviews.rs ----
+
+export type ForgeProvider = "github" | "unsupported";
+
+export type BlockedReason =
+  | "detached-head"
+  | "existing-review"
+  | "unsupported-provider"
+  | "default-branch"
+  | "dirty"
+  | "no-upstream"
+  | "needs-sync"
+  | "auth-required"
+  | "needs-push"
+  | "base-not-on-remote"
+  | "gh-missing"
+  | "gh-not-authed";
+
+export interface Eligibility {
+  eligible: boolean;
+  blocked_reason: BlockedReason | null;
+  base_ref: string | null;
+  owner_repo: string | null;
+  existing_pr_url: string | null;
+}
+
+export interface CreatedReview {
+  pr_url: string;
+  pr_number: number | null;
+  base_ref: string;
+  owner_repo: string;
+}
+
+export type CheckState = "passing" | "failing" | "pending" | "skipping";
+
+export interface CheckRun {
+  name: string;
+  state: CheckState;
+}
+
+export interface PrStatus {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  mergeable: string;
+  base_ref_name: string;
+  head_ref_name: string;
+  checks: CheckRun[];
+  fetched_at_ms: number;
+}
+
+export interface PrChangedPayload {
+  worktree_id: string | null;
+}
+
+export function requestReviewEligibility(cwd: string): Promise<Eligibility> {
+  return invoke("review_eligibility", { cwd });
+}
+
+export function requestCreateReview(
+  cwd: string,
+  input: { title: string; body: string; draft: boolean },
+): Promise<CreatedReview> {
+  return invoke("create_review", { cwd, title: input.title, body: input.body, draft: input.draft });
+}
+
+export function requestReviewStatus(cwd: string): Promise<PrStatus> {
+  return invoke("review_status", { cwd });
+}
+
+export async function onPrChanged(cb: (p: PrChangedPayload) => void) {
+  return listen<PrChangedPayload>("pr-changed", (e) => cb(e.payload));
+}

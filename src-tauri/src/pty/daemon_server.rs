@@ -10,7 +10,8 @@ use crate::git::source_control::{
     sc_unstage, sc_upstream_refresh,
 };
 use crate::git::hosted_reviews::{
-    poll_pass_once, unix_now_ms, GhClient, LiveGhClient, PollerConfig, PrPollerState,
+    create_pull_request_live, poll_pass_once, refresh_pr_status_now, review_eligibility_live,
+    unix_now_ms, CreateReviewInput, GhClient, LiveGhClient, PollerConfig, PrPollerState,
 };
 use crate::git::teardown::{session_cwd_inside, LiveSession};
 use crate::git::worktree_lineage::lineage_list;
@@ -683,6 +684,45 @@ impl DaemonServer {
                     DaemonResponse::CommentRecords,
                 );
                 self.publish_git_changed_if_success(&resp);
+                resp
+            }
+            DaemonRequest::ReviewEligibility { cwd } => {
+                DaemonResponse::ReviewEligibility(review_eligibility_live(Path::new(&cwd)))
+            }
+            DaemonRequest::CreateReview {
+                cwd,
+                title,
+                body,
+                draft,
+            } => {
+                let Some(registry_path) = self.worktree_registry_path.clone() else {
+                    return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
+                };
+                let input = CreateReviewInput { title, body, draft };
+                match create_pull_request_live(Path::new(&cwd), &registry_path, input) {
+                    Ok(created) => DaemonResponse::CreateReview(created),
+                    Err(e) => DaemonResponse::Error(e),
+                }
+            }
+            DaemonRequest::ReviewStatus { cwd } => {
+                let Some(registry_path) = self.worktree_registry_path.clone() else {
+                    return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
+                };
+                let mut published: Vec<Option<String>> = Vec::new();
+                let resp = match refresh_pr_status_now(
+                    Path::new(&cwd),
+                    &registry_path,
+                    self.pr_client.as_ref(),
+                    &mut |wid| published.push(wid),
+                ) {
+                    Ok(status) => DaemonResponse::ReviewStatus(status),
+                    Err(e) => DaemonResponse::Error(e),
+                };
+                for wid in published.into_iter().flatten() {
+                    self.publish_global(DaemonEvent::PrChanged {
+                        worktree_id: Some(wid),
+                    });
+                }
                 resp
             }
         }

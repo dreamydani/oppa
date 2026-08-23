@@ -147,6 +147,9 @@ pub fn run() {
             pty::commands::diff_comment_update,
             pty::commands::diff_comment_delete,
             pty::commands::diff_comments_mark_sent,
+            pty::commands::review_eligibility,
+            pty::commands::create_review,
+            pty::commands::review_status,
             layout::save_layout,
             layout::load_layout,
             settings::save_settings,
@@ -193,6 +196,9 @@ pub fn run() {
                         pty::commands::session_focus_requested_forwarder(&app_handle),
                     );
                     manager.set_git_changed_callback(pty::commands::git_changed_forwarder(
+                        &app_handle,
+                    ));
+                    manager.set_pr_changed_callback(pty::commands::pr_changed_forwarder(
                         &app_handle,
                     ));
                     let _ = manager.get_client();

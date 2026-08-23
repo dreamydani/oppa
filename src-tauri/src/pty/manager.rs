@@ -1,6 +1,6 @@
 use crate::pty::daemon_client::{
-    DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnGitChanged, OnTitleChanged,
-    OnWorktreeChanged,
+    DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnGitChanged, OnPrChanged,
+    OnTitleChanged, OnWorktreeChanged,
 };
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
@@ -15,6 +15,7 @@ pub struct PtyManager {
     title_changed_cb: Mutex<Option<OnTitleChanged>>,
     focus_requested_cb: Mutex<Option<OnFocusRequested>>,
     git_changed_cb: Mutex<Option<OnGitChanged>>,
+    pr_changed_cb: Mutex<Option<OnPrChanged>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -33,6 +34,7 @@ impl PtyManager {
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
             git_changed_cb: Mutex::new(None),
+            pr_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -46,6 +48,7 @@ impl PtyManager {
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
             git_changed_cb: Mutex::new(None),
+            pr_changed_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -68,6 +71,7 @@ impl PtyManager {
             title_changed_cb: Mutex::new(None),
             focus_requested_cb: Mutex::new(None),
             git_changed_cb: Mutex::new(None),
+            pr_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -102,6 +106,14 @@ impl PtyManager {
         *self.git_changed_cb.lock() = Some(Arc::clone(&cb));
         if let Some(client) = self.client.lock().as_ref() {
             client.set_git_changed_callback(cb);
+        }
+    }
+
+    /// Install the pr-changed forwarder; re-applied on every reconnect.
+    pub fn set_pr_changed_callback(&self, cb: OnPrChanged) {
+        *self.pr_changed_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_pr_changed_callback(cb);
         }
     }
 
@@ -146,6 +158,9 @@ impl PtyManager {
         }
         if let Some(cb) = self.git_changed_cb.lock().as_ref() {
             client.set_git_changed_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.pr_changed_cb.lock().as_ref() {
+            client.set_pr_changed_callback(Arc::clone(cb));
         }
         Ok(client)
     }

@@ -1,6 +1,7 @@
 use crate::agents::catalog::PromptDelivery;
 use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
     SourceControlStatus, UpstreamStatus,
@@ -99,6 +100,24 @@ pub fn git_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn() + Send + Sync> {
     let emitter = app.clone();
     Arc::new(move || {
         let _ = emitter.emit("git-changed", ());
+    })
+}
+
+/// Payload emitted on `pr-changed` when any linked PR status refreshes.
+#[derive(Clone, Serialize)]
+pub struct PrChangedPayload {
+    pub worktree_id: Option<String>,
+}
+
+pub fn pr_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id| {
+        let _ = emitter.emit(
+            "pr-changed",
+            PrChangedPayload {
+                worktree_id: id.map(str::to_string),
+            },
+        );
     })
 }
 
@@ -626,6 +645,33 @@ pub fn diff_comments_mark_sent(
     ids: Vec<String>,
 ) -> Result<Vec<DiffComment>, String> {
     manager.get_client()?.diff_comments_mark_sent(&ids)
+}
+
+#[tauri::command]
+pub fn review_eligibility(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+) -> Result<Eligibility, String> {
+    manager.get_client()?.review_eligibility(&cwd)
+}
+
+#[tauri::command]
+pub fn create_review(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+    title: String,
+    body: String,
+    draft: bool,
+) -> Result<CreatedReview, String> {
+    manager.get_client()?.create_review(&cwd, &title, &body, draft)
+}
+
+#[tauri::command]
+pub fn review_status(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+) -> Result<PrStatus, String> {
+    manager.get_client()?.review_status(&cwd)
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 ﻿// CLI-facing runtime discovery + authed connect; the `oppa-cli` binary is a thin wrapper over this module.
 use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
     SourceControlStatus,
@@ -553,6 +554,23 @@ pub fn build_git_push(cwd: &str, publish: bool, force_with_lease: bool) -> Daemo
     }
 }
 
+pub fn build_review_eligibility(cwd: &str) -> DaemonRequest {
+    DaemonRequest::ReviewEligibility { cwd: cwd.into() }
+}
+
+pub fn build_review_create(cwd: &str, title: &str, body: &str, draft: bool) -> DaemonRequest {
+    DaemonRequest::CreateReview {
+        cwd: cwd.into(),
+        title: title.into(),
+        body: body.into(),
+        draft,
+    }
+}
+
+pub fn build_review_status(cwd: &str) -> DaemonRequest {
+    DaemonRequest::ReviewStatus { cwd: cwd.into() }
+}
+
 // Shared error/variant plumbing for the typed payload decoders below.
 fn decode_with<T>(
     resp: DaemonResponse,
@@ -585,6 +603,24 @@ sc_payload_decoder!(decode_sc_history, DaemonResponse::ScHistory, HistoryResult,
 sc_payload_decoder!(decode_sc_compare, DaemonResponse::ScCompare, BranchCompare, "git compare");
 sc_payload_decoder!(decode_sc_pull, DaemonResponse::ScPull, PullOutcome, "git pull");
 sc_payload_decoder!(decode_sc_push, DaemonResponse::ScPush, PushOutcome, "git push");
+sc_payload_decoder!(
+    decode_review_eligibility,
+    DaemonResponse::ReviewEligibility,
+    Eligibility,
+    "review eligibility"
+);
+sc_payload_decoder!(
+    decode_created_review,
+    DaemonResponse::CreateReview,
+    CreatedReview,
+    "create review"
+);
+sc_payload_decoder!(
+    decode_review_status,
+    DaemonResponse::ReviewStatus,
+    PrStatus,
+    "review status"
+);
 
 pub fn decode_session_ids(resp: DaemonResponse) -> Result<Vec<String>, CliError> {
     match resp {
@@ -685,6 +721,9 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::ScCommitMessage(_) => "ScCommitMessage".into(),
         DaemonResponse::CommentRecords(_) => "CommentRecords".into(),
         DaemonResponse::CommentRecordOne(_) => "CommentRecordOne".into(),
+        DaemonResponse::ReviewEligibility(_) => "ReviewEligibility".into(),
+        DaemonResponse::CreateReview(_) => "CreateReview".into(),
+        DaemonResponse::ReviewStatus(_) => "ReviewStatus".into(),
     }
 }
 

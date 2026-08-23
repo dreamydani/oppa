@@ -1,5 +1,6 @@
 use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
+use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
     SourceControlStatus, UpstreamStatus,
@@ -907,6 +908,42 @@ impl DaemonClient {
             other => Err(format!(
                 "unexpected response for GitGenerateCommitMessage: {other:?}"
             )),
+        }
+    }
+
+    pub fn review_eligibility(&self, cwd: &str) -> Result<Eligibility, String> {
+        match self.send_request(DaemonRequest::ReviewEligibility { cwd: cwd.into() })? {
+            DaemonResponse::ReviewEligibility(eligibility) => Ok(eligibility),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for ReviewEligibility: {other:?}")),
+        }
+    }
+
+    pub fn create_review(
+        &self,
+        cwd: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> Result<CreatedReview, String> {
+        let req = DaemonRequest::CreateReview {
+            cwd: cwd.into(),
+            title: title.into(),
+            body: body.into(),
+            draft,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::CreateReview(created) => Ok(created),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for CreateReview: {other:?}")),
+        }
+    }
+
+    pub fn review_status(&self, cwd: &str) -> Result<PrStatus, String> {
+        match self.send_request(DaemonRequest::ReviewStatus { cwd: cwd.into() })? {
+            DaemonResponse::ReviewStatus(status) => Ok(status),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for ReviewStatus: {other:?}")),
         }
     }
 
