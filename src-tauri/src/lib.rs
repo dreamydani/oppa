@@ -1,3 +1,4 @@
+pub mod agents;
 mod browser;
 pub mod cli;
 mod fs;
