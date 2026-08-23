@@ -19,9 +19,11 @@
   /* Motion (single home for durations/easing; consumed via var()) */
   --dur-zoom-out: 220ms;
   --dur-zoom-in: 180ms;
-  --dur-panel-open: 240ms;
-  --dur-panel-close: 200ms;
+  /* Panels (sidebars): slow enough that the full travel arc reads to the eye. */
+  --dur-panel-open: 380ms;
+  --dur-panel-close: 300ms;
   --ease-dolly: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-slide: cubic-bezier(0.32, 0.72, 0, 1);
 
   /* Core Canvas & Surfaces — neutral graphite ramp (flat #171717 field) */
   --topbar-bg: #171717;

@@ -17,8 +17,8 @@
      the close duration — transitions always use the destination's timing. */
   width: var(--sidebar-w, 280px);
   transition:
-    width var(--dur-panel-open) var(--ease-dolly),
-    margin var(--dur-panel-open) var(--ease-dolly),
+    width var(--dur-panel-open) var(--ease-slide),
+    margin var(--dur-panel-open) var(--ease-slide),
     opacity var(--dur-panel-open) ease,
     box-shadow 0.2s ease,
     border-color 0.2s ease,
@@ -34,8 +34,8 @@
   visibility: hidden;
   pointer-events: none;
   transition:
-    width var(--dur-panel-close) var(--ease-dolly),
-    margin var(--dur-panel-close) var(--ease-dolly),
+    width var(--dur-panel-close) var(--ease-slide),
+    margin var(--dur-panel-close) var(--ease-slide),
     opacity var(--dur-panel-close) ease,
     visibility 0s linear var(--dur-panel-close);
 }
@@ -54,14 +54,14 @@
   flex: 1;
   min-height: 0;
   transition:
-    transform var(--dur-panel-open) var(--ease-dolly),
+    transform var(--dur-panel-open) var(--ease-slide),
     opacity var(--dur-panel-open) ease;
 }
 
 .right-sidebar.closed .sidebar-slide-inner {
-  transform: translateX(24px);
+  transform: translateX(44px);
   transition:
-    transform var(--dur-panel-close) var(--ease-dolly),
+    transform var(--dur-panel-close) var(--ease-slide),
     opacity var(--dur-panel-close) ease;
 }
 

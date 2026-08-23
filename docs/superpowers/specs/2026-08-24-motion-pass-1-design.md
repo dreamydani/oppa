@@ -25,8 +25,9 @@ code in steady state):
 | Direct A→B maximize swap | Animate both panes simultaneously |
 | Zoom feel | Quick dolly: 220ms out / 180ms back, `cubic-bezier(0.22, 1, 0.36, 1)` |
 | Sidebar layout semantics | Push (terminal area reclaims space, animated) |
-| Sidebar inner content | Parallax: drifts ∓24px toward exit edge + fade inside clipped panel |
-| Sidebar timing | 240ms open / 200ms close |
+| Sidebar inner content | Parallax: drifts ∓44px toward exit edge + fade inside clipped panel |
+| Sidebar timing | 380ms open / 300ms close, `cubic-bezier(0.32, 0.72, 0, 1)` (`--ease-slide`) — retuned from 240/200 after human-eye review: the original strong-deceleration curve compressed ~90% of travel into ~110ms, reading as a flick |
+| Sidebar parallax | ±44px inner drift (retuned from ±24px, which finished before the eye locked on) |
 
 ## Feature A — Dolly & zoom maximize
 
@@ -74,7 +75,7 @@ map keyed by session id.
   smoothly (push semantics) along the same curve. Terminal surface, borders and
   rounded corners track the motion; the glyph grid re-fits exactly once at rest
   (stable-fit guard defers commit until motion ends).
-- Inner content parallax: `.sidebar-slide-inner` translates ∓24px toward the
+- Inner content parallax: `.sidebar-slide-inner` translates ∓44px toward the
   exit edge while fading, clipped by the panel's `overflow:hidden`.
 - Fully interruptible: open/close are pure class flips; rapid Ctrl+B/Ctrl+Shift+B
   spam reverses mid-flight natively. No timers, no unmount races.
@@ -102,9 +103,10 @@ map keyed by session id.
 ```
 --dur-zoom-out: 220ms;
 --dur-zoom-in: 180ms;
---dur-panel-open: 240ms;
---dur-panel-close: 200ms;
+--dur-panel-open: 380ms;
+--dur-panel-close: 300ms;
 --ease-dolly: cubic-bezier(0.22, 1, 0.36, 1);
+--ease-slide: cubic-bezier(0.32, 0.72, 0, 1);
 ```
 
 Plus a global `@media (prefers-reduced-motion: reduce)` kill-switch.
