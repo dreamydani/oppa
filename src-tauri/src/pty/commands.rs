@@ -1,4 +1,5 @@
 use crate::agents::catalog::PromptDelivery;
+use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
@@ -579,6 +580,14 @@ pub fn sc_upstream_refresh(
     cwd: String,
 ) -> Result<UpstreamStatus, String> {
     manager.get_client()?.sc_upstream_refresh(&cwd)
+}
+
+#[tauri::command]
+pub fn sc_generate_commit_message(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+) -> Result<CommitMessage, String> {
+    manager.get_client()?.sc_generate_commit_message(&cwd)
 }
 
 #[tauri::command]

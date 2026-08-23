@@ -429,6 +429,16 @@ export function scPush(
 export function scUpstreamRefresh(cwd: string): Promise<UpstreamStatus> {
   return invoke("sc_upstream_refresh", { cwd });
 }
+
+export interface CommitMessage {
+  message: string;
+}
+
+// Read-only op: never fires git-changed; backend falls back to a heuristic
+// message instead of erroring when no agent resolves.
+export function generateCommitMessage(cwd: string): Promise<CommitMessage> {
+  return invoke("sc_generate_commit_message", { cwd });
+}
 export function diffCommentsList(worktreeId: string): Promise<DiffComment[]> {
   return invoke("diff_comments_list", { worktreeId });
 }

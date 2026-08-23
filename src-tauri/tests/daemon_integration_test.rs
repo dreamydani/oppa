@@ -672,3 +672,83 @@ fn test_e2e_daemon_v4_git_status_stage_commit_and_comment_crud_over_pipe() {
     cancel_token.cancel();
     let _ = server_thread.join();
 }
+
+// Restores the process PATH on every exit path; the daemon resolves agents from it.
+struct PathRestoreGuard(Option<std::ffi::OsString>);
+
+impl Drop for PathRestoreGuard {
+    fn drop(&mut self) {
+        if let Some(old) = self.0.take() {
+            std::env::set_var("PATH", old);
+        }
+    }
+}
+
+#[test]
+fn test_e2e_daemon_v4_git_generate_commit_message_over_pipe_uses_fake_agent() {
+    let repo_dir = tempfile::tempdir().expect("temp repo dir");
+    run_git_in(repo_dir.path(), &["init", "-b", "main"]);
+    run_git_in(repo_dir.path(), &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(repo_dir.path(), &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_dir.path().join("flow.txt"), "v1").expect("write staged file");
+    run_git_in(repo_dir.path(), &["add", "."]);
+
+    // Fake agent dir is PREPENDED so it shadows any real claude/codex install.
+    let fake_dir = tempfile::tempdir().expect("fake agent dir");
+    #[cfg(windows)]
+    {
+        std::fs::write(fake_dir.path().join("claude.cmd"), "@echo off\r\necho feat: fake subject\r\n")
+            .unwrap();
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = fake_dir.path().join("claude");
+        std::fs::write(&script, "#!/bin/sh\necho \"feat: fake subject\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let old_path_raw = std::env::var_os("PATH");
+    let guard = PathRestoreGuard(old_path_raw.clone());
+    let injected = std::env::join_paths(
+        std::iter::once(fake_dir.path().to_path_buf()).chain(
+            old_path_raw
+                .as_deref()
+                .map(std::env::split_paths)
+                .into_iter()
+                .flatten(),
+        ),
+    )
+    .expect("join paths");
+    std::env::set_var("PATH", &injected);
+
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    let socket_path = generate_test_socket_path("v4aimsg");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client");
+    let cwd = repo_dir.path().to_string_lossy().into_owned();
+
+    let result = client.sc_generate_commit_message(&cwd).expect("ai message over pipe");
+    assert_eq!(result.message, "feat: fake subject");
+
+    drop(client);
+    cancel_token.cancel();
+    let _ = server_thread.join();
+    drop(guard);
+}

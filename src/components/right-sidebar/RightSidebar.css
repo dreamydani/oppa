@@ -599,13 +599,35 @@
 }
 
 .git-commit-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 8px;
   font-size: 11px;
   border-radius: var(--radius-sm);
   border: 1px dashed var(--sidebar-border);
   background: transparent;
   color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.git-commit-ai-btn:hover:not(:disabled) {
+  border-color: var(--accent, var(--sidebar-border));
+  color: var(--foreground);
+}
+
+.git-commit-ai-btn:disabled {
   cursor: default;
+}
+
+.git-ai-spinner {
+  animation: git-ai-spin 0.8s linear infinite;
+}
+
+@keyframes git-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .git-commit-btn {

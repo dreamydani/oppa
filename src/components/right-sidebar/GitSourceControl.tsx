@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, GitBranch, Minus, Plus, RefreshCw, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, Loader2, Minus, Plus, RefreshCw, Sparkles, Undo2 } from "lucide-react";
 import { useTerminalStore, setGitChangedListening } from "../../store/terminalStore";
 import type { GitArea, StatusEntry } from "../../lib/pty/transport";
+import { generateCommitMessage } from "../../lib/pty/transport";
 import { DiffNotesShelf } from "./DiffNotesShelf";
 
 interface GitSourceControlProps {
@@ -140,6 +141,7 @@ export function GitSourceControl({ refreshKey = 0 }: GitSourceControlProps): Rea
 
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [generatingAi, setGeneratingAi] = useState(false);
   const [statusLine, setStatusLine] = useState<StatusLine | null>(null);
   const [hasConflictWarning, setHasConflictWarning] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -248,6 +250,29 @@ export function GitSourceControl({ refreshKey = 0 }: GitSourceControlProps): Rea
       setCommitMessage("");
       showInfo(`committed ${sha}`);
     });
+
+  const handleAiMessage = () => {
+    if (!cwd || generatingAi) return;
+    setGeneratingAi(true);
+    setStatusLine(null);
+    void (async () => {
+      try {
+        const { message } = await generateCommitMessage(cwd);
+        setCommitMessage(message);
+      } catch (err) {
+        // Backend only errors when it cannot help at all; keep a committable
+        // heuristic from the staged paths so the box is never dead.
+        const text = err instanceof Error ? err.message : String(err);
+        const bases = groups.staged.map((e) => splitPath(e.path).base);
+        const fallback =
+          bases.length === 1 ? `chore: update ${bases[0]}` : `chore: update ${bases.length} files`;
+        setCommitMessage(`${fallback} (fallback)`);
+        setStatusLine({ kind: "error", text });
+      } finally {
+        setGeneratingAi(false);
+      }
+    })();
+  };
 
   const canCommit = commitMessage.trim().length > 0 && groups.staged.length > 0;
 
@@ -409,8 +434,24 @@ export function GitSourceControl({ refreshKey = 0 }: GitSourceControlProps): Rea
                       onChange={(e) => setCommitMessage(e.target.value)}
                     />
                     <div className="git-commit-actions">
-                      <button type="button" className="git-commit-ai-btn" disabled>
-                        AI message — next task
+                      <button
+                        type="button"
+                        className="git-commit-ai-btn"
+                        disabled={generatingAi || syncing !== null}
+                        title="Generate a commit message from the staged diff"
+                        onClick={handleAiMessage}
+                      >
+                        {generatingAi ? (
+                          <>
+                            <Loader2 size={12} className="git-ai-spinner" />
+                            AI message…
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} />
+                            AI message
+                          </>
+                        )}
                       </button>
                       <button
                         type="button"

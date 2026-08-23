@@ -1,3 +1,4 @@
+use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
@@ -194,6 +195,8 @@ pub enum DaemonRequest {
         force_with_lease: bool,
     },
     GitUpstreamRefresh { cwd: String },
+    // Read-only AI commit-message generation; never publishes GitChanged
+    GitGenerateCommitMessage { cwd: String },
     DiffCommentsList { worktree_id: String },
     DiffCommentAdd { comment: NewDiffComment },
     DiffCommentUpdate { id: String, body: String },
@@ -241,6 +244,7 @@ pub enum DaemonResponse {
     ScPull(PullOutcome),
     ScPush(PushOutcome),
     ScUpstream(UpstreamStatus),
+    ScCommitMessage(CommitMessage),
     CommentRecords(Vec<DiffComment>),
     CommentRecordOne(DiffComment),
 }
@@ -904,6 +908,7 @@ mod tests {
                 force_with_lease: false,
             },
             DaemonRequest::GitUpstreamRefresh { cwd: "/r".into() },
+            DaemonRequest::GitGenerateCommitMessage { cwd: "/r".into() },
         ];
         for req in requests {
             let json = serde_json::to_string(&req).expect("serialize request");
@@ -981,6 +986,9 @@ mod tests {
                 ahead: 0,
                 behind: 0,
                 remote_branch: None,
+            }),
+            DaemonResponse::ScCommitMessage(CommitMessage {
+                message: "feat: generated".into(),
             }),
             DaemonResponse::CommentRecords(vec![sample_comment()]),
             DaemonResponse::CommentRecordOne(sample_comment()),

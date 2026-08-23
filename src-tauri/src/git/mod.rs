@@ -1,3 +1,4 @@
+pub mod commit_message;
 pub mod comments_store;
 pub mod source_control;
 pub mod teardown;

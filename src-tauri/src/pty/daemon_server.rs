@@ -1,5 +1,6 @@
 use crate::agents::catalog::{self, build_launch_command, resolve_command, AgentProfile, PromptDelivery};
 use crate::agents::shell_line::join_argv;
+use crate::git::commit_message::{sc_generate_commit_message, CommitMessage};
 use crate::git::comments_store::{
     comment_add, comment_delete, comment_update, comments_list, comments_mark_sent,
 };
@@ -622,6 +623,11 @@ impl DaemonServer {
             DaemonRequest::GitUpstreamRefresh { cwd } => self.sc_response(
                 || Ok(sc_upstream_refresh(Path::new(&cwd))),
                 DaemonResponse::ScUpstream,
+            ),
+            DaemonRequest::GitGenerateCommitMessage { cwd } => self.sc_response(
+                || sc_generate_commit_message(Path::new(&cwd))
+                    .map(|message| CommitMessage { message }),
+                DaemonResponse::ScCommitMessage,
             ),
             DaemonRequest::DiffCommentsList { worktree_id } => self.comment_response(
                 |store| comments_list(&store, &worktree_id),

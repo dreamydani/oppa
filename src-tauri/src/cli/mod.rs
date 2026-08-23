@@ -682,6 +682,7 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::ScPull(_) => "ScPull".into(),
         DaemonResponse::ScPush(_) => "ScPush".into(),
         DaemonResponse::ScUpstream(_) => "ScUpstream".into(),
+        DaemonResponse::ScCommitMessage(_) => "ScCommitMessage".into(),
         DaemonResponse::CommentRecords(_) => "CommentRecords".into(),
         DaemonResponse::CommentRecordOne(_) => "CommentRecordOne".into(),
     }

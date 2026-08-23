@@ -1,3 +1,4 @@
+use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
@@ -880,6 +881,16 @@ impl DaemonClient {
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!(
                 "unexpected response for GitUpstreamRefresh: {other:?}"
+            )),
+        }
+    }
+
+    pub fn sc_generate_commit_message(&self, cwd: &str) -> Result<CommitMessage, String> {
+        match self.send_request(DaemonRequest::GitGenerateCommitMessage { cwd: cwd.into() })? {
+            DaemonResponse::ScCommitMessage(message) => Ok(message),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for GitGenerateCommitMessage: {other:?}"
             )),
         }
     }

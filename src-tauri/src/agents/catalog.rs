@@ -56,6 +56,11 @@ pub fn build_launch_command(profile: &AgentProfile, prompt: Option<&str>) -> Vec
 }
 
 pub fn resolve_command(command: &str) -> Option<PathBuf> {
+    resolve_command_with_path(command, None)
+}
+
+// path_var=None falls back to the process PATH so tests can inject a fake lookup scope.
+pub fn resolve_command_with_path(command: &str, path_var: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     if command.trim().is_empty() {
         return None;
     }
@@ -64,7 +69,7 @@ pub fn resolve_command(command: &str) -> Option<PathBuf> {
     if has_dir_component {
         return is_executable_file(as_path).then(|| as_path.to_path_buf());
     }
-    let path_var = std::env::var_os("PATH")?;
+    let path_var = path_var.map(|p| p.to_os_string()).or_else(|| std::env::var_os("PATH"))?;
     for dir in std::env::split_paths(&path_var) {
         for candidate in extension_candidates(command) {
             let full = dir.join(&candidate);

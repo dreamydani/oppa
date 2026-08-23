@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { GitSourceControl } from "./GitSourceControl";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { SourceControlStatus } from "../../lib/pty/transport";
+import type { PullOutcome, SourceControlStatus } from "../../lib/pty/transport";
 import * as ptyTransport from "../../lib/pty/transport";
 
 vi.mock("../../lib/pty/transport", async (importOriginal) => ({
@@ -25,6 +25,7 @@ vi.mock("../../lib/pty/transport", async (importOriginal) => ({
   scPull: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
   scFastForward: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
   scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/main", was_publish: false }),
+  generateCommitMessage: vi.fn().mockResolvedValue({ message: "" }),
 }));
 
 const scStatusMock = vi.mocked(ptyTransport.scStatus);
@@ -36,6 +37,7 @@ const scCheckoutMock = vi.mocked(ptyTransport.scCheckout);
 const scFileDiffMock = vi.mocked(ptyTransport.scFileDiff);
 const scPullMock = vi.mocked(ptyTransport.scPull);
 const scPushMock = vi.mocked(ptyTransport.scPush);
+const generateCommitMessageMock = vi.mocked(ptyTransport.generateCommitMessage);
 
 function makeStatus(): SourceControlStatus {
   return {
@@ -279,12 +281,55 @@ describe("GitSourceControl", () => {
     expect(screen.queryByPlaceholderText("Commit message…")).toBeNull();
   });
 
-  it("AI message button is a disabled placeholder", async () => {
+  it("AI message button fills the textarea with the agent reply", async () => {
+    generateCommitMessageMock.mockResolvedValue({ message: "feat: generated subject" });
     await seedStore();
     render(<GitSourceControl />);
 
     const aiBtn = screen.getByRole("button", { name: /AI message/ });
+    expect(aiBtn).toBeEnabled();
+
+    fireEvent.click(aiBtn);
     expect(aiBtn).toBeDisabled();
+    await waitFor(() =>
+      expect(generateCommitMessageMock).toHaveBeenCalledWith("/mock/repo"),
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByPlaceholderText("Commit message…") as HTMLTextAreaElement).value,
+      ).toBe("feat: generated subject"),
+    );
+  });
+
+  it("AI message failure shows inline error and fills heuristic fallback", async () => {
+    generateCommitMessageMock.mockRejectedValue(new Error("agent timed out"));
+    await seedStore();
+    render(<GitSourceControl />);
+
+    fireEvent.click(screen.getByRole("button", { name: /AI message/ }));
+
+    expect(await screen.findByText(/agent timed out/)).toBeInTheDocument();
+    expect(
+      (screen.getByPlaceholderText("Commit message…") as HTMLTextAreaElement).value,
+    ).toMatch(/\(fallback\)$/);
+  });
+
+  it("AI message button is disabled while a commit sync is running", async () => {
+    await seedStore();
+    let releasePull: (v: PullOutcome) => void = () => {};
+    scPullMock.mockReturnValue(
+      new Promise<PullOutcome>((resolve) => {
+        releasePull = resolve;
+      }),
+    );
+    render(<GitSourceControl />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
+    const aiBtn = screen.getByRole("button", { name: /AI message/ });
+    expect(aiBtn).toBeDisabled();
+
+    releasePull({ status: "up-to-date", new_head: null });
+    await waitFor(() => expect(aiBtn).toBeEnabled());
   });
 
   it("shows the conflict banner when pull fails with a conflict error", async () => {
