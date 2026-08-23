@@ -38,6 +38,30 @@ pub(crate) fn sandbox_without_commits(tag: &str) -> Sandbox {
     }
 }
 
+// Repo wired to a local bare "origin" with main pushed+tracked; bare lives under root for cleanup.
+pub(crate) fn sandbox_with_origin(tag: &str) -> (Sandbox, PathBuf) {
+    let s = sandbox(tag);
+    let bare = s.root.join("origin.git");
+    let bare_s = bare.to_string_lossy().into_owned();
+    let repo_s = s.repo.to_string_lossy().into_owned();
+    git(&s.root, &["clone", "--bare", &repo_s, &bare_s]);
+    git(&s.repo, &["remote", "add", "origin", &bare_s]);
+    git(&s.repo, &["push", "-u", "origin", "main"]);
+    (s, bare)
+}
+
+// Fresh working clone of a bare origin carrying the same identity as sandbox repos.
+pub(crate) fn clone_repo(origin: &Path, target: &PathBuf) {
+    let origin_s = origin.to_string_lossy().into_owned();
+    let target_s = target.to_string_lossy().into_owned();
+    git(
+        target.parent().unwrap(),
+        &["clone", &origin_s, &target_s],
+    );
+    git(target, &["config", "user.email", "test@oppa.dev"]);
+    git(target, &["config", "user.name", "Oppa Test"]);
+}
+
 pub(crate) fn git(cwd: &Path, args: &[&str]) -> String {
     let output = super::worktrees::run_git(cwd, args).expect("git spawn");
     assert!(

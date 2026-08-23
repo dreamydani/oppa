@@ -4,6 +4,7 @@
 use crate::git::worktrees::{git_ok, run_git};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::process::Output;
 
 const STATUS_ENTRY_LIMIT: usize = 2000;
 const DIFF_SIDE_CAP_BYTES: usize = 512 * 1024;
@@ -118,6 +119,29 @@ pub struct BranchCompare {
     pub changed_files: Vec<CompareEntry>,
 }
 
+// Err prefix marking an interrupted merge so UI can offer resolution instead of retry.
+pub(crate) const CONFLICT_PREFIX: &str = "conflict:";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PullStatus {
+    FastForward,
+    UpToDate,
+    Merged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullOutcome {
+    pub status: PullStatus,
+    pub new_head: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PushOutcome {
+    pub pushed_to: String,
+    pub was_publish: bool,
+}
+
 pub fn sc_status(cwd: &Path) -> Result<SourceControlStatus, String> {
     let output = git_ok(cwd, &["status", "--porcelain=v1", "-z", "-b", "-uall"])?;
     let mut fields = output.split('\0');
@@ -225,6 +249,141 @@ pub fn sc_local_branches(cwd: &Path) -> Result<LocalBranches, String> {
 pub fn sc_checkout(cwd: &Path, branch: &str) -> Result<(), String> {
     validate_ref_name(branch)?;
     git_ok(cwd, &["checkout", "-q", branch]).map(|_| ())
+}
+
+pub fn sc_fetch(cwd: &Path) -> Result<(), String> {
+    git_ok(cwd, &["fetch", "--quiet", "--all"]).map(|_| ())
+}
+
+pub fn sc_pull(cwd: &Path, ff_only: bool) -> Result<PullOutcome, String> {
+    require_upstream(cwd)?;
+    git_ok(cwd, &["fetch", "-q"])?;
+    let (_, behind) = divergence_counts(cwd)?;
+    if behind == 0 {
+        return Ok(PullOutcome { status: PullStatus::UpToDate, new_head: None });
+    }
+    let args: &[&str] = if ff_only {
+        &["pull", "-q", "--ff-only"]
+    } else {
+        &["pull", "-q", "--no-rebase"]
+    };
+    let output = run_git(cwd, args)?;
+    if !output.status.success() {
+        return Err(pull_failure_error(cwd, args, output));
+    }
+    Ok(PullOutcome {
+        status: if ff_only { PullStatus::FastForward } else { PullStatus::Merged },
+        new_head: Some(head_short(cwd)?),
+    })
+}
+
+pub fn sc_fast_forward(cwd: &Path) -> Result<PullOutcome, String> {
+    require_upstream(cwd)?;
+    git_ok(cwd, &["fetch", "-q"])?;
+    let before = head_short(cwd)?;
+    git_ok(cwd, &["merge", "-q", "--ff-only", "@{upstream}"])?;
+    let after = head_short(cwd)?;
+    let moved = before != after;
+    Ok(PullOutcome {
+        status: if moved { PullStatus::FastForward } else { PullStatus::UpToDate },
+        new_head: moved.then_some(after),
+    })
+}
+
+pub fn sc_push(cwd: &Path, publish: bool, force_with_lease: bool) -> Result<PushOutcome, String> {
+    if probe_upstream(cwd)?.is_none() {
+        if !publish {
+            return Err("no upstream — publish first".into());
+        }
+        let origin_exists = run_git(cwd, &["remote", "get-url", "origin"])?.status.success();
+        if !origin_exists {
+            return Err("no 'origin' remote — add one before publishing".into());
+        }
+        git_ok(cwd, &["push", "-q", "-u", "origin", "HEAD"])?;
+        let pushed_to = format!("origin/{}", current_branch_name(cwd)?);
+        return Ok(PushOutcome { pushed_to, was_publish: true });
+    }
+    let branch = current_branch_name(cwd)?;
+    let remote = git_ok(cwd, &["config", &format!("branch.{branch}.remote")])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "origin".into());
+    let mut args: Vec<&str> = vec!["push", "-q"];
+    if force_with_lease {
+        args.push("--force-with-lease");
+    }
+    git_ok(cwd, &args)?;
+    Ok(PushOutcome { pushed_to: format!("{remote}/{branch}"), was_publish: false })
+}
+
+// Cheap ahead/behind refresh: three ref queries instead of sc_status's full porcelain walk.
+pub fn sc_upstream_refresh(cwd: &Path) -> UpstreamStatus {
+    let Some(remote_branch) = probe_upstream(cwd).ok().flatten() else {
+        return no_upstream();
+    };
+    UpstreamStatus {
+        has_upstream: true,
+        ahead: rev_list_count(cwd, "@{upstream}..HEAD"),
+        behind: rev_list_count(cwd, "HEAD..@{upstream}"),
+        remote_branch: Some(remote_branch),
+    }
+}
+
+// None ⇔ branch has no upstream configured.
+fn probe_upstream(cwd: &Path) -> Result<Option<String>, String> {
+    let probe = run_git(
+        cwd,
+        &["rev-parse", "--quiet", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    )?;
+    if !probe.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&probe.stdout).trim().to_string()))
+}
+
+fn require_upstream(cwd: &Path) -> Result<String, String> {
+    probe_upstream(cwd)?.ok_or_else(|| "no upstream configured for this branch".to_string())
+}
+
+fn divergence_counts(cwd: &Path) -> Result<(u32, u32), String> {
+    let ahead = git_ok(cwd, &["rev-list", "--count", "@{upstream}..HEAD"])?
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let behind = git_ok(cwd, &["rev-list", "--count", "HEAD..@{upstream}"])?
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    Ok((ahead, behind))
+}
+
+fn rev_list_count(cwd: &Path, range: &str) -> u32 {
+    git_ok(cwd, &["rev-list", "--count", range])
+        .ok()
+        .and_then(|out| out.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn head_short(cwd: &Path) -> Result<String, String> {
+    Ok(git_ok(cwd, &["rev-parse", "--short", "HEAD"])?.trim().to_string())
+}
+
+fn current_branch_name(cwd: &Path) -> Result<String, String> {
+    Ok(git_ok(cwd, &["rev-parse", "--abbrev-ref", "HEAD"])?.trim().to_string())
+}
+
+fn pull_failure_error(cwd: &Path, args: &[&str], output: Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    // Merge state left on disk is the conflict signal; prefix lets UI route to resolution.
+    if matches!(detect_conflict_state(cwd), Ok(ConflictState::Merge)) {
+        return format!("{CONFLICT_PREFIX}{stderr}");
+    }
+    format!(
+        "git {} in {}: failed: {stderr}",
+        args.join(" "),
+        cwd.display()
+    )
 }
 
 // Side-resolution table (task 7 UI wires buttons to this):
@@ -599,7 +758,10 @@ fn detect_conflict_state(cwd: &Path) -> Result<ConflictState, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::test_support::{commit_file, git, sandbox, sandbox_without_commits, write_file};
+    use crate::git::test_support::{
+        clone_repo, commit_file, git, sandbox, sandbox_with_origin, sandbox_without_commits,
+        write_file,
+    };
 
     fn one_path(name: &str) -> Vec<String> {
         vec![name.to_string()]
@@ -1201,5 +1363,223 @@ mod tests {
         let s = sandbox("compare-ghost-base");
         let err = sc_branch_compare(&s.repo, "no-such-ref").unwrap_err();
         assert!(err.contains("no-such-ref"), "stderr must surface base name: {err}");
+    }
+
+    // ---------- remote sync (task 5) ----------
+
+    fn short_head(repo: &Path) -> String {
+        git(repo, &["rev-parse", "--short", "HEAD"]).trim().to_string()
+    }
+
+    fn push_main(repo: &Path) {
+        git(repo, &["push", "origin", "main"]);
+    }
+
+    #[test]
+    fn pull_status_serializes_kebab_case_for_ipc() {
+        assert_eq!(serde_json::to_string(&PullStatus::FastForward).unwrap(), "\"fast-forward\"");
+        assert_eq!(serde_json::to_string(&PullStatus::UpToDate).unwrap(), "\"up-to-date\"");
+        assert_eq!(serde_json::to_string(&PullStatus::Merged).unwrap(), "\"merged\"");
+    }
+
+    #[test]
+    fn fetch_is_noop_success_without_remotes() {
+        let s = sandbox("fetch-noop");
+        sc_fetch(&s.repo).unwrap();
+        assert!(!sc_upstream_refresh(&s.repo).has_upstream);
+    }
+
+    #[test]
+    fn fetch_updates_remote_refs_visible_in_refresh() {
+        let (s, bare) = sandbox_with_origin("fetch-refresh");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+
+        assert_eq!(sc_upstream_refresh(&s.repo).behind, 0);
+        sc_fetch(&s.repo).unwrap();
+        let up = sc_upstream_refresh(&s.repo);
+        assert_eq!(up.behind, 1);
+        assert_eq!(up.ahead, 0);
+        assert_eq!(up.remote_branch.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn pull_reports_up_to_date_when_nothing_behind() {
+        let (s, _bare) = sandbox_with_origin("pull-current");
+        for ff_only in [true, false] {
+            let out = sc_pull(&s.repo, ff_only).unwrap();
+            assert_eq!(out.status, PullStatus::UpToDate);
+            assert_eq!(out.new_head, None);
+        }
+    }
+
+    #[test]
+    fn pull_ff_only_fast_forwards_to_remote_head() {
+        let (s, bare) = sandbox_with_origin("pull-ff");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+
+        let out = sc_pull(&s.repo, true).unwrap();
+        assert_eq!(out.status, PullStatus::FastForward);
+        assert_eq!(out.new_head.as_deref(), Some(short_head(&twin).as_str()));
+        let up = sc_upstream_refresh(&s.repo);
+        assert_eq!((up.ahead, up.behind), (0, 0));
+    }
+
+    #[test]
+    fn pull_ff_only_diverged_errors_without_merge_state_or_conflict_prefix() {
+        let (s, bare) = sandbox_with_origin("pull-ff-diverged");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+        commit_file(&s.repo, "local.txt", "local", "local adds");
+
+        let err = sc_pull(&s.repo, true).unwrap_err();
+        assert!(err.contains("fast-forward"), "{err}");
+        assert!(!err.starts_with(CONFLICT_PREFIX));
+        assert_eq!(sc_status(&s.repo).unwrap().conflict_state, ConflictState::None);
+    }
+
+    #[test]
+    fn pull_merge_combines_divergent_history_and_reports_merged() {
+        let (s, bare) = sandbox_with_origin("pull-merge");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+        commit_file(&s.repo, "local.txt", "local", "local adds");
+
+        let out = sc_pull(&s.repo, false).unwrap();
+        assert_eq!(out.status, PullStatus::Merged);
+        assert_eq!(out.new_head.as_deref(), Some(short_head(&s.repo).as_str()));
+        assert_eq!(sc_status(&s.repo).unwrap().conflict_state, ConflictState::None);
+        let up = sc_upstream_refresh(&s.repo);
+        assert_eq!((up.ahead, up.behind), (2, 0));
+    }
+
+    #[test]
+    fn pull_conflict_surfaces_conflict_prefix_and_merge_state() {
+        let (s, bare) = sandbox_with_origin("pull-conflict");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "README.md", "twin line\n", "twin edit");
+        push_main(&twin);
+        commit_file(&s.repo, "README.md", "primary line\n", "primary edit");
+
+        let err = sc_pull(&s.repo, false).unwrap_err();
+        assert!(
+            err.starts_with(CONFLICT_PREFIX),
+            "UI branches on this prefix, got: {err}"
+        );
+        let st = sc_status(&s.repo).unwrap();
+        assert_eq!(st.conflict_state, ConflictState::Merge);
+        assert_eq!(entry_for(&st, "README.md").area, GitArea::Conflict);
+
+        git(&s.repo, &["merge", "--abort"]);
+        assert_eq!(sc_status(&s.repo).unwrap().conflict_state, ConflictState::None);
+    }
+
+    #[test]
+    fn fast_forward_applies_remote_commits_then_is_up_to_date() {
+        let (s, bare) = sandbox_with_origin("ff-applies");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+
+        let moved = sc_fast_forward(&s.repo).unwrap();
+        assert_eq!(moved.status, PullStatus::FastForward);
+        assert_eq!(moved.new_head.as_deref(), Some(short_head(&twin).as_str()));
+
+        let settled = sc_fast_forward(&s.repo).unwrap();
+        assert_eq!(settled.status, PullStatus::UpToDate);
+        assert_eq!(settled.new_head, None);
+    }
+
+    #[test]
+    fn fast_forward_requires_upstream() {
+        let s = sandbox("ff-no-upstream");
+        commit_file(&s.repo, "more.txt", "m", "second");
+        let err = sc_fast_forward(&s.repo).unwrap_err();
+        assert!(err.contains("no upstream"), "{err}");
+    }
+
+    #[test]
+    fn push_publish_sets_upstream_and_plain_push_requires_it() {
+        let (s, _bare) = sandbox_with_origin("push-publish");
+        git(&s.repo, &["checkout", "-b", "feature"]);
+        commit_file(&s.repo, "f.txt", "f", "feature work");
+
+        let refused = sc_push(&s.repo, false, false).unwrap_err();
+        assert!(refused.contains("publish first"), "{refused}");
+
+        let out = sc_push(&s.repo, true, false).unwrap();
+        assert!(out.was_publish);
+        assert_eq!(out.pushed_to, "origin/feature");
+        let up = sc_upstream_refresh(&s.repo);
+        assert!(up.has_upstream);
+        assert_eq!(up.remote_branch.as_deref(), Some("origin/feature"));
+        assert_eq!((up.ahead, up.behind), (0, 0));
+    }
+
+    #[test]
+    fn push_publish_without_origin_remote_lists_hint() {
+        let s = sandbox("push-publish-no-origin");
+        let err = sc_push(&s.repo, true, false).unwrap_err();
+        assert!(err.contains("'origin' remote"), "{err}");
+    }
+
+    #[test]
+    fn push_after_new_commit_clears_ahead_and_reports_destination() {
+        let (s, _bare) = sandbox_with_origin("push-ahead");
+        assert_eq!(sc_upstream_refresh(&s.repo).ahead, 0);
+        commit_file(&s.repo, "next.txt", "n", "second");
+
+        assert_eq!(sc_upstream_refresh(&s.repo).ahead, 1);
+        let out = sc_push(&s.repo, false, false).unwrap();
+        assert!(!out.was_publish);
+        assert_eq!(out.pushed_to, "origin/main");
+        assert_eq!(sc_upstream_refresh(&s.repo).ahead, 0);
+    }
+
+    #[test]
+    fn push_force_with_lease_succeeds_on_synced_clean_repo() {
+        let (s, _bare) = sandbox_with_origin("push-fw-lease");
+        let out = sc_push(&s.repo, false, true).unwrap();
+        assert!(!out.was_publish);
+        assert_eq!(out.pushed_to, "origin/main");
+        assert_eq!(sc_upstream_refresh(&s.repo).ahead, 0);
+    }
+
+    #[test]
+    fn push_rejected_when_remote_moved_and_local_stale() {
+        let (s, bare) = sandbox_with_origin("push-rejected");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&s.repo, "a.txt", "a", "primary moves");
+        sc_push(&s.repo, false, false).unwrap();
+        commit_file(&twin, "b.txt", "b", "twin moves stale");
+
+        let err = sc_push(&twin, false, false).unwrap_err();
+        assert!(err.contains("rejected"), "{err}");
+        assert_eq!(sc_upstream_refresh(&twin).ahead, 1);
+    }
+
+    #[test]
+    fn upstream_refresh_matches_sc_status_upstream_values() {
+        let (s, bare) = sandbox_with_origin("refresh-parity");
+        let twin = s.root.join("twin");
+        clone_repo(&bare, &twin);
+        commit_file(&twin, "twin.txt", "twin", "twin adds");
+        push_main(&twin);
+        commit_file(&s.repo, "local.txt", "local", "local adds");
+
+        sc_fetch(&s.repo).unwrap();
+        assert_eq!(sc_upstream_refresh(&s.repo), sc_status(&s.repo).unwrap().upstream);
     }
 }
