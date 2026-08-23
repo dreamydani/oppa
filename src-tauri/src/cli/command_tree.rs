@@ -158,9 +158,9 @@ pub enum TerminalAction {
     },
     /// Close (kill) a session
     Close { id: String },
-    /// Focus a session in the GUI (M1: existence validation only)
+    /// Focus a session in the GUI (applies when a window is attached)
     Switch { id: String },
-    /// Unsupported in M1: arrives with tab-title sync
+    /// Rename a session's tab title
     Rename {
         id: String,
         #[arg(long)]

@@ -20,6 +20,8 @@ import {
   repoAdd,
   repoList,
   onWorktreeChanged,
+  onTitleChanged,
+  onFocusRequested,
 } from "../lib/pty/transport";
 import type {
   PtySpawnOptions,
@@ -2344,4 +2346,21 @@ void onWorktreeChanged(() => {
     worktreeReloadTimer = null;
     void useTerminalStore.getState().loadWorktrees().catch(() => {});
   }, 300);
+});
+
+void onTitleChanged(({ id, title }) => {
+  const state = useTerminalStore.getState();
+  if (!state.sessions[id]) return;
+  state.renameSession(id, title);
+  const tab = state.tabs.find((t) => leafIds(t.layout).includes(id));
+  if (tab) state.renameTab(tab.id, title);
+});
+
+void onFocusRequested(({ id }) => {
+  const state = useTerminalStore.getState();
+  const tab = state.tabs.find((t) => findLeafPath(t.layout, id) !== null);
+  if (!tab) return;
+  state.selectTab(tab.id);
+  const path = tab.focusedPath ? findLeafPath(tab.layout, id) : null;
+  if (path) state.focusPane(path);
 });

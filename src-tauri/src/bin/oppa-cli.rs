@@ -4,8 +4,8 @@ use oppa_lib::cli::output::{
     render_agent_context, render_agent_handoff, render_json, render_lineage_tree, render_ps_rows,
     render_repo_detail, render_repo_table, render_screen_text, render_session_detail,
     render_session_list, render_wait_result, render_worktree_list, render_worktree_show,
-    CliActionNote, CliScreenText, CliSessionDetail, CliSessionHandle, CliSplitHandles,
-    CliWaitResult, OkPayload, SWITCH_M1_NOTE,
+    CliRenameResult, CliScreenText, CliSessionDetail, CliSessionHandle, CliSplitHandles,
+    CliWaitResult, OkPayload,
 };
 use oppa_lib::cli::{
     build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
@@ -314,20 +314,35 @@ fn run_terminal(action: &TerminalAction, json: bool, timeout: Duration) -> Resul
             json,
             || format!("closed {id}"),
         ),
-        TerminalAction::Switch { id } => {
-            require_existing(id, timeout)?;
+        TerminalAction::Switch { id } => run_unit(
+            send(
+                DaemonRequest::RequestSessionFocus {
+                    session_id: id.clone(),
+                },
+                timeout,
+            )?,
+            json,
+            || format!("focus requested for {id} · applies when a GUI window is attached"),
+        ),
+        TerminalAction::Rename { id, to } => {
+            decode_ok(send(
+                DaemonRequest::SetSessionTitle {
+                    session_id: id.clone(),
+                    title: to.clone(),
+                },
+                timeout,
+            )?)?;
+            // Echo the sanitized title so output matches what the daemon stored
+            let title = oppa_lib::pty::ipc_protocol::sanitize_session_title(to);
             emit(
                 json,
-                &CliActionNote {
+                &CliRenameResult {
                     ok: true,
-                    note: SWITCH_M1_NOTE.into(),
+                    title: title.clone(),
                 },
-                || format!("switched to {id}\nnote: {SWITCH_M1_NOTE}"),
+                || format!("renamed to '{title}'"),
             )
         }
-        TerminalAction::Rename { .. } => Err(CliError::Usage(
-            "rename arrives with tab-title sync".into(),
-        )),
         TerminalAction::Split { id } => {
             require_existing(id, timeout)?;
             let source = attach_existing(id, timeout)?;

@@ -10,8 +10,8 @@ use crate::git::worktrees::{
 use crate::pty::agent_resume;
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
-    CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, ResumeKind, ResumePlan,
-    WaitCondition, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
+    ResumeKind, ResumePlan, WaitCondition, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use crate::pty::runtime_metadata;
 use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
@@ -293,6 +293,33 @@ impl DaemonServer {
             // the writer handle); this arm only catches direct callers.
             DaemonRequest::WaitFor { .. } => {
                 DaemonResponse::Error("WaitFor requires the client-stream handler".into())
+            }
+            DaemonRequest::SetSessionTitle { session_id, title } => {
+                // Validate before lookup: a garbage title is rejected even for dead ids
+                let sanitized = sanitize_session_title(&title);
+                if sanitized.is_empty() {
+                    return DaemonResponse::Error("title required".into());
+                }
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => {
+                        session.set_title(sanitized.clone());
+                        self.publish_global(DaemonEvent::TitleChanged {
+                            session_id,
+                            title: sanitized,
+                        });
+                        DaemonResponse::Ok
+                    }
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
+            DaemonRequest::RequestSessionFocus { session_id } => {
+                let exists = self.sessions.lock().contains_key(&session_id);
+                if !exists {
+                    return DaemonResponse::Error("session not found".into());
+                }
+                self.publish_global(DaemonEvent::SessionFocusRequested { session_id });
+                DaemonResponse::Ok
             }
             DaemonRequest::ListSessions => {
                 let sessions = self.sessions.lock();
@@ -886,7 +913,7 @@ impl DaemonServer {
         SessionSnapshot {
             session_id: session.id.clone(),
             cwd,
-            title: None,
+            title: session.title(),
             cols: session.cols(),
             rows: session.rows(),
             persona_id: None,
@@ -2519,6 +2546,276 @@ mod tests {
             }
             other => panic!("expected WorktreeRecords, got {other:?}"),
         }
+
+        cancel_token.cancel();
+    }
+
+    // ---- session title sync ----
+
+    fn spawn_bare_session(server: &DaemonServer, id: &str) {
+        match server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: id.into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        }) {
+            DaemonResponse::SessionAttached(_) => {}
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_session_title_rejects_empty_and_unknown_sessions() {
+        let server = DaemonServer::new();
+        // Empty after sanitize wins over the existence check
+        assert_eq!(
+            server.handle_request(DaemonRequest::SetSessionTitle {
+                session_id: "ghost".into(),
+                title: "  \x07 ".into(),
+            }),
+            DaemonResponse::Error("title required".into())
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::SetSessionTitle {
+                session_id: "ghost".into(),
+                title: "valid".into(),
+            }),
+            DaemonResponse::Error("session not found".into())
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::RequestSessionFocus {
+                session_id: "ghost".into(),
+            }),
+            DaemonResponse::Error("session not found".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn set_session_title_sanitizes_stores_and_publishes() {
+        let server = DaemonServer::new();
+        spawn_bare_session(&server, "titled");
+        let mut rx = server.subscribe_global_events();
+
+        assert_eq!(
+            server.handle_request(DaemonRequest::SetSessionTitle {
+                session_id: "titled".into(),
+                title: "\x07 My Tab \n".into(),
+            }),
+            DaemonResponse::Ok
+        );
+
+        let session = server.sessions.lock().get("titled").cloned().expect("live");
+        assert_eq!(
+            session.title().as_deref(),
+            Some("My Tab"),
+            "sanitized title must be stored on the session"
+        );
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(DaemonEvent::TitleChanged { session_id, title })) => {
+                assert_eq!(session_id, "titled");
+                assert_eq!(title, "My Tab");
+            }
+            other => panic!("expected TitleChanged broadcast, got {other:?}"),
+        }
+
+        assert_eq!(
+            server.handle_request(DaemonRequest::RequestSessionFocus {
+                session_id: "titled".into(),
+            }),
+            DaemonResponse::Ok
+        );
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(DaemonEvent::SessionFocusRequested { session_id })) => {
+                assert_eq!(session_id, "titled");
+            }
+            other => panic!("expected SessionFocusRequested broadcast, got {other:?}"),
+        }
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "titled".into(),
+        });
+    }
+
+    #[tokio::test]
+    async fn test_pipe_level_set_session_title_fans_out_to_second_client() {
+        let server = Arc::new(DaemonServer::new());
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-title-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-title-{}.sock",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let send = |req: &DaemonRequest| {
+            let mut json = serde_json::to_string(req).unwrap();
+            json.push('\n');
+            json
+        };
+        async fn hello_line() -> String {
+            serde_json::to_string(&DaemonRequest::Hello {
+                client_version: "0.0.0".into(),
+                protocol_version: DAEMON_PROTOCOL_VERSION,
+                auth_token: None,
+            })
+            .unwrap()
+            + "\n"
+        }
+
+        // Client A creates the session
+        #[cfg(target_os = "windows")]
+        let client_a = {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = ClientOptions::new().open(&socket_path) {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect client A")
+        };
+        #[cfg(not(target_os = "windows"))]
+        let client_a = {
+            use tokio::net::UnixStream;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = UnixStream::connect(&socket_path).await {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect client A")
+        };
+
+        let (read_a, mut write_a) = tokio::io::split(client_a);
+        let mut reader_a = BufReader::new(read_a);
+        write_a.write_all(hello_line().await.as_bytes()).await.unwrap();
+        let mut line = String::new();
+        reader_a.read_line(&mut line).await.unwrap();
+        write_a
+            .write_all(send(&DaemonRequest::CreateOrAttach {
+                session_id: "title-pipe-sess".into(),
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                shell: None,
+                resume_agents: false,
+                worktree_id: None,
+                extra_env: Vec::new(),
+            })
+            .as_bytes())
+            .await
+            .unwrap();
+        line.clear();
+        reader_a.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<DaemonResponse>(line.trim()).unwrap(),
+            DaemonResponse::SessionAttached(_)
+        ));
+
+        // Second connected client renames it
+        #[cfg(target_os = "windows")]
+        let client_b = {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = ClientOptions::new().open(&socket_path) {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect client B")
+        };
+        #[cfg(not(target_os = "windows"))]
+        let client_b = {
+            use tokio::net::UnixStream;
+            let mut client = None;
+            for _ in 0..20 {
+                if let Ok(c) = UnixStream::connect(&socket_path).await {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            client.expect("connect client B")
+        };
+
+        let (read_b, mut write_b) = tokio::io::split(client_b);
+        let mut reader_b = BufReader::new(read_b);
+        write_b.write_all(hello_line().await.as_bytes()).await.unwrap();
+        line.clear();
+        reader_b.read_line(&mut line).await.unwrap();
+        write_b
+            .write_all(send(&DaemonRequest::SetSessionTitle {
+                session_id: "title-pipe-sess".into(),
+                title: "build".into(),
+            })
+            .as_bytes())
+            .await
+            .unwrap();
+
+        // B sees its own Ok response frame followed by the broadcast event
+        let mut saw_ok_on_b = false;
+        let mut saw_event_on_b = false;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && !(saw_ok_on_b && saw_event_on_b) {
+            line.clear();
+            if reader_b.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            if matches!(
+                serde_json::from_str::<DaemonResponse>(line.trim()).unwrap_or(DaemonResponse::Error(String::new())),
+                DaemonResponse::Ok
+            ) {
+                saw_ok_on_b = true;
+            }
+            if let Ok(DaemonEvent::TitleChanged { ref title, .. }) =
+                serde_json::from_str::<DaemonEvent>(line.trim())
+            {
+                assert_eq!(title, "build");
+                saw_event_on_b = true;
+            }
+        }
+        assert!(saw_ok_on_b, "rename response never reached client B");
+        assert!(saw_event_on_b, "TitleChanged never fanned out to client B");
+
+        // A (the other attached client) observes the same broadcast
+        let mut saw_event_on_a = false;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            line.clear();
+            if reader_a.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            if let Ok(DaemonEvent::TitleChanged { ref title, .. }) =
+                serde_json::from_str::<DaemonEvent>(line.trim())
+            {
+                assert_eq!(title, "build");
+                saw_event_on_a = true;
+                break;
+            }
+        }
+        assert!(saw_event_on_a, "TitleChanged never reached the first client");
 
         cancel_token.cancel();
     }

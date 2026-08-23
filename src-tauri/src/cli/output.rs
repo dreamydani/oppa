@@ -107,11 +107,10 @@ pub struct CliSessionDetail {
     pub worktree_id: Option<String>,
 }
 
-// Honest no-op verbs (switch in M1) carry their deviation note into JSON too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CliActionNote {
+pub struct CliRenameResult {
     pub ok: bool,
-    pub note: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -375,9 +374,6 @@ pub fn render_wait_result(result: &CliWaitResult) -> String {
         None => format!("{status} · {}ms", result.waited_ms),
     }
 }
-
-pub const SWITCH_M1_NOTE: &str =
-    "M1 validates the session only; GUI focus switching arrives with tab-title sync";
 
 // ---- agent-context renderers ----
 

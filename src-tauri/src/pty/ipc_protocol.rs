@@ -101,6 +101,15 @@ pub enum DaemonRequest {
         cond: WaitCondition,
         timeout_ms: u64,
     },
+    // Tab-title sync: daemon sanitizes, stores, and broadcasts TitleChanged
+    SetSessionTitle {
+        session_id: String,
+        title: String,
+    },
+    // CLI-driven focus switch; the GUI decides what "focus" means
+    RequestSessionFocus {
+        session_id: String,
+    },
     ListSessions,
     Disconnect,
     Shutdown,
@@ -205,6 +214,22 @@ pub enum DaemonEvent {
     WorktreeChanged {
         id: Option<String>,
     },
+    TitleChanged {
+        session_id: String,
+        title: String,
+    },
+    SessionFocusRequested {
+        session_id: String,
+    },
+}
+
+// Tab bars render titles verbatim: control bytes and runaway length never belong there.
+pub const MAX_SESSION_TITLE_CHARS: usize = 80;
+
+/// Strip control chars (<0x20, 0x7F-0x9F), trim, then cap at 80 chars on a char boundary.
+pub fn sanitize_session_title(raw: &str) -> String {
+    let stripped: String = raw.chars().filter(|c| !c.is_control()).collect();
+    stripped.trim().chars().take(MAX_SESSION_TITLE_CHARS).collect()
 }
 
 pub fn get_daemon_socket_path() -> String {
@@ -422,6 +447,13 @@ mod tests {
             DaemonEvent::WorktreeChanged {
                 id: Some("repo::C:/ws/feat-a".into()),
             },
+            DaemonEvent::TitleChanged {
+                session_id: "s1".into(),
+                title: "build".into(),
+            },
+            DaemonEvent::SessionFocusRequested {
+                session_id: "s1".into(),
+            },
         ];
 
         for event in events {
@@ -429,6 +461,46 @@ mod tests {
             let decoded: DaemonEvent = serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(event, decoded);
         }
+    }
+
+    #[test]
+    fn test_title_sync_requests_roundtrip() {
+        let requests = vec![
+            DaemonRequest::SetSessionTitle {
+                session_id: "s1".into(),
+                title: "build".into(),
+            },
+            DaemonRequest::RequestSessionFocus {
+                session_id: "s1".into(),
+            },
+        ];
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+    }
+
+    #[test]
+    fn test_sanitize_session_title_strips_controls_and_trims() {
+        assert_eq!(sanitize_session_title("\x07 My Tab \n"), "My Tab");
+        assert_eq!(sanitize_session_title("a\tb\x1b[0mc"), "ab[0mc");
+        assert_eq!(sanitize_session_title("del\u{7f}c1\u{85}end"), "delc1end");
+    }
+
+    #[test]
+    fn test_sanitize_session_title_truncates_multibyte_at_80_chars() {
+        // 'é' is 2 bytes in UTF-8: 100 of them are 200 bytes but must cut at 80 chars
+        let long = "é".repeat(100);
+        let sanitized = sanitize_session_title(&long);
+        assert_eq!(sanitized.chars().count(), MAX_SESSION_TITLE_CHARS);
+        assert_eq!(sanitized, "é".repeat(MAX_SESSION_TITLE_CHARS));
+    }
+
+    #[test]
+    fn test_sanitize_session_title_empty_after_strip_rejects() {
+        assert_eq!(sanitize_session_title("\x07\x1b\u{7f}"), "");
+        assert_eq!(sanitize_session_title("   "), "");
     }
 
     fn sample_repo_record(repo_id: &str) -> RepoRecord {

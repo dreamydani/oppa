@@ -16,6 +16,8 @@ pub type OnExit = Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static>;
 pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
 // Arc-shared so one forwarder can be installed on every reconnecting client.
 pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
+pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
+pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Default)]
 struct SessionCallbacks {
@@ -35,6 +37,8 @@ pub struct DaemonClient {
     exit_rx_map: Arc<Mutex<HashMap<String, Receiver<Option<i32>>>>>,
     pending_response: Arc<Mutex<Option<Sender<DaemonResponse>>>>,
     worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>>,
+    title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>>,
+    focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -59,6 +63,8 @@ impl DaemonClient {
         let exit_rx_map = Arc::new(Mutex::new(HashMap::<String, Receiver<Option<i32>>>::new()));
         let pending_response = Arc::new(Mutex::new(None::<Sender<DaemonResponse>>));
         let worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>> = Arc::new(Mutex::new(None));
+        let title_changed_cb: Arc<Mutex<Option<OnTitleChanged>>> = Arc::new(Mutex::new(None));
+        let focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -127,6 +133,8 @@ impl DaemonClient {
         let exit_rx_map_clone = Arc::clone(&exit_rx_map);
         let pending_response_clone = Arc::clone(&pending_response);
         let worktree_changed_cb_clone = Arc::clone(&worktree_changed_cb);
+        let title_changed_cb_clone = Arc::clone(&title_changed_cb);
+        let focus_requested_cb_clone = Arc::clone(&focus_requested_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -182,6 +190,16 @@ impl DaemonClient {
                                         cb(id.as_deref());
                                     }
                                 }
+                                DaemonEvent::TitleChanged { session_id, title } => {
+                                    if let Some(cb) = title_changed_cb_clone.lock().as_ref() {
+                                        cb(&session_id, &title);
+                                    }
+                                }
+                                DaemonEvent::SessionFocusRequested { session_id } => {
+                                    if let Some(cb) = focus_requested_cb_clone.lock().as_ref() {
+                                        cb(&session_id);
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -217,6 +235,8 @@ impl DaemonClient {
             exit_rx_map,
             pending_response,
             worktree_changed_cb,
+            title_changed_cb,
+            focus_requested_cb,
             _runtime: rt,
         };
 
@@ -281,6 +301,16 @@ impl DaemonClient {
     /// Register a global hook fired whenever any client mutates a worktree.
     pub fn set_worktree_changed_callback(&self, cb: OnWorktreeChanged) {
         *self.worktree_changed_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever any client renames a session.
+    pub fn set_title_changed_callback(&self, cb: OnTitleChanged) {
+        *self.title_changed_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever any client requests session focus.
+    pub fn set_focus_requested_callback(&self, cb: OnFocusRequested) {
+        *self.focus_requested_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.

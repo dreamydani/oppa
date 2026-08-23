@@ -87,8 +87,8 @@ fn status_report_type_shape_roundtrips_json() {
 use super::output::{
     render_json, render_lineage_tree, render_ps_rows, render_repo_detail, render_repo_table,
     render_screen_text, render_session_detail, render_session_list, render_wait_result,
-    render_worktree_list, render_worktree_show, CliActionNote, CliRepoRecord,
-    CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord, SWITCH_M1_NOTE,
+    render_worktree_list, render_worktree_show, CliRenameResult, CliRepoRecord,
+    CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord,
 };
 use super::vocabulary::{normalize_verb, validate_verb, CANONICAL_COMMANDS};
 use super::{
@@ -801,8 +801,8 @@ fn terminal_renderers_are_stable() {
         "not satisfied · 30000ms"
     );
     assert_eq!(
-        render_json(&CliActionNote { ok: true, note: SWITCH_M1_NOTE.into() }),
-        format!(r#"{{"ok":true,"note":"{SWITCH_M1_NOTE}"}}"#)
+        render_json(&CliRenameResult { ok: true, title: "build".into() }),
+        r#"{"ok":true,"title":"build"}"#
     );
     assert_eq!(
         render_json(&CliSplitHandles { primary: "p".into(), secondary: "s".into() }),

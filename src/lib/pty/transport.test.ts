@@ -28,6 +28,8 @@ import {
   repoAdd,
   repoList,
   onWorktreeChanged,
+  onTitleChanged,
+  onFocusRequested,
 } from "./transport";
 import type { PtySpawnResult } from "./transport";
 
@@ -306,6 +308,34 @@ describe("pty transport", () => {
     handler({ payload: { id: null } });
     expect(cb).toHaveBeenNthCalledWith(1, { id: "wt-1" });
     expect(cb).toHaveBeenNthCalledWith(2, { id: null });
+    expect(result).toBe(unlisten);
+  });
+
+  it("onTitleChanged subscribes to session-title-changed and forwards the payload", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onTitleChanged(cb);
+    expect(listenMock).toHaveBeenCalledWith("session-title-changed", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { id: string; title: string };
+    }) => void;
+    handler({ payload: { id: "s1", title: "build" } });
+    expect(cb).toHaveBeenCalledWith({ id: "s1", title: "build" });
+    expect(result).toBe(unlisten);
+  });
+
+  it("onFocusRequested subscribes to session-focus-requested and forwards the payload", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onFocusRequested(cb);
+    expect(listenMock).toHaveBeenCalledWith("session-focus-requested", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { id: string };
+    }) => void;
+    handler({ payload: { id: "s9" } });
+    expect(cb).toHaveBeenCalledWith({ id: "s9" });
     expect(result).toBe(unlisten);
   });
 });

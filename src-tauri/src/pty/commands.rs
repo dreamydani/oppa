@@ -37,6 +37,19 @@ pub struct WorktreeChangedPayload {
     pub id: Option<String>,
 }
 
+/// Payload emitted on `session-title-changed` when any client renames a session.
+#[derive(Clone, Serialize)]
+pub struct SessionTitleChangedPayload {
+    pub id: String,
+    pub title: String,
+}
+
+/// Payload emitted on `session-focus-requested` (CLI-driven tab switch).
+#[derive(Clone, Serialize)]
+pub struct SessionFocusRequestedPayload {
+    pub id: String,
+}
+
 /// Builds the webview forwarder installed on the manager; survives reconnects
 /// because PtyManager re-applies it to every client it creates.
 pub fn worktree_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) + Send + Sync> {
@@ -47,6 +60,29 @@ pub fn worktree_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) +
             WorktreeChangedPayload {
                 id: id.map(str::to_string),
             },
+        );
+    })
+}
+
+pub fn session_title_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str, &str) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id, title| {
+        let _ = emitter.emit(
+            "session-title-changed",
+            SessionTitleChangedPayload {
+                id: id.to_string(),
+                title: title.to_string(),
+            },
+        );
+    })
+}
+
+pub fn session_focus_requested_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id| {
+        let _ = emitter.emit(
+            "session-focus-requested",
+            SessionFocusRequestedPayload { id: id.to_string() },
         );
     })
 }
@@ -464,5 +500,23 @@ mod tests {
 
         let without_id = serde_json::to_string(&WorktreeChangedPayload { id: None }).unwrap();
         assert!(without_id.contains("\"id\":null"));
+    }
+
+    #[test]
+    fn session_title_changed_payload_serializes() {
+        let json = serde_json::to_string(&SessionTitleChangedPayload {
+            id: "s1".into(),
+            title: "build".into(),
+        })
+        .unwrap();
+        assert!(json.contains("\"id\":\"s1\""));
+        assert!(json.contains("\"title\":\"build\""));
+    }
+
+    #[test]
+    fn session_focus_requested_payload_serializes() {
+        let json =
+            serde_json::to_string(&SessionFocusRequestedPayload { id: "s1".into() }).unwrap();
+        assert_eq!(json, r#"{"id":"s1"}"#);
     }
 }

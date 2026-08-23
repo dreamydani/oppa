@@ -575,6 +575,60 @@ fn read_screen_unknown_session_is_daemon_error() {
     listener.join().unwrap();
 }
 
+#[test]
+fn terminal_rename_and_switch_drive_title_sync_over_pipe() {
+    let (mut conn, _root, listener, cancel) = start_registry_daemon("rename");
+    decode_attached(conn.request(attach_request("rename-target")).expect("create")).expect("new");
+
+    decode_ok(
+        conn.request(DaemonRequest::SetSessionTitle {
+            session_id: "rename-target".into(),
+            title: "\x07 release \nnotes ".into(),
+        })
+        .expect("rename request"),
+    )
+    .unwrap();
+
+    match conn.request(DaemonRequest::SetSessionTitle {
+        session_id: "ghost".into(),
+        title: "valid".into(),
+    }) {
+        Ok(DaemonResponse::Error(msg)) => assert_eq!(msg, "session not found"),
+        other => panic!("expected session-not-found error, got {other:?}"),
+    }
+    match conn.request(DaemonRequest::SetSessionTitle {
+        session_id: "ghost".into(),
+        title: "  \x07 ".into(),
+    }) {
+        Ok(DaemonResponse::Error(msg)) => assert_eq!(msg, "title required"),
+        other => panic!("expected title-required error, got {other:?}"),
+    }
+
+    decode_ok(
+        conn.request(DaemonRequest::RequestSessionFocus {
+            session_id: "rename-target".into(),
+        })
+        .expect("switch request"),
+    )
+    .unwrap();
+    match conn.request(DaemonRequest::RequestSessionFocus {
+        session_id: "ghost".into(),
+    }) {
+        Ok(DaemonResponse::Error(msg)) => assert_eq!(msg, "session not found"),
+        other => panic!("expected session-not-found error, got {other:?}"),
+    }
+
+    decode_ok(
+        conn.request(DaemonRequest::Kill {
+            session_id: "rename-target".into(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    cancel.cancel();
+    listener.join().unwrap();
+}
+
 // Raw-pipe client so keepalive frames stay observable (RuntimeConnection hides them).
 #[test]
 fn keepalive_frames_flow_on_long_wait() {

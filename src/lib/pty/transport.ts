@@ -147,6 +147,15 @@ export interface WorktreeChangedPayload {
   id: string | null;
 }
 
+export interface SessionTitleChangedPayload {
+  id: string;
+  title: string;
+}
+
+export interface SessionFocusRequestedPayload {
+  id: string;
+}
+
 export type WorktreeCreateOptions = {
   repoPath: string;
   name?: string;
@@ -206,4 +215,10 @@ export function repoList(): Promise<RepoRecord[]> {
 }
 export async function onWorktreeChanged(cb: (p: WorktreeChangedPayload) => void) {
   return listen<WorktreeChangedPayload>("worktree-changed", (e) => cb(e.payload));
+}
+export async function onTitleChanged(cb: (p: SessionTitleChangedPayload) => void) {
+  return listen<SessionTitleChangedPayload>("session-title-changed", (e) => cb(e.payload));
+}
+export async function onFocusRequested(cb: (p: SessionFocusRequestedPayload) => void) {
+  return listen<SessionFocusRequestedPayload>("session-focus-requested", (e) => cb(e.payload));
 }

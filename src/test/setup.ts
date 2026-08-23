@@ -3,6 +3,17 @@ import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+// Module-init subscriptions call listen() at import time even in suites that
+// never mock the pty transport; outside a webview that throws synchronously,
+// so default every suite to a resolving no-op listener.
+vi.mock("@tauri-apps/api/event", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tauri-apps/api/event")>();
+  return {
+    ...actual,
+    listen: vi.fn().mockResolvedValue(() => {}),
+  };
+});
+
 // Mock @monaco-editor/react for fast and deterministic DOM unit testing
 vi.mock("@monaco-editor/react", () => {
   return {

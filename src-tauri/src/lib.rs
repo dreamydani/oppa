@@ -162,6 +162,12 @@ pub fn run() {
                     manager.set_worktree_changed_callback(
                         pty::commands::worktree_changed_forwarder(&app_handle),
                     );
+                    manager.set_title_changed_callback(
+                        pty::commands::session_title_changed_forwarder(&app_handle),
+                    );
+                    manager.set_focus_requested_callback(
+                        pty::commands::session_focus_requested_forwarder(&app_handle),
+                    );
                     let _ = manager.get_client();
                 }
             });

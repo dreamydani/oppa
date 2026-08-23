@@ -1,4 +1,6 @@
-use crate::pty::daemon_client::{DaemonClient, OnCwd, OnData, OnExit, OnWorktreeChanged};
+use crate::pty::daemon_client::{
+    DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnTitleChanged, OnWorktreeChanged,
+};
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,6 +11,8 @@ use std::sync::Arc;
 pub struct PtyManager {
     client: Arc<Mutex<Option<Arc<DaemonClient>>>>,
     worktree_changed_cb: Mutex<Option<OnWorktreeChanged>>,
+    title_changed_cb: Mutex<Option<OnTitleChanged>>,
+    focus_requested_cb: Mutex<Option<OnFocusRequested>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -24,6 +28,8 @@ impl PtyManager {
         Self {
             client: Arc::new(Mutex::new(None)),
             worktree_changed_cb: Mutex::new(None),
+            title_changed_cb: Mutex::new(None),
+            focus_requested_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -34,6 +40,8 @@ impl PtyManager {
         Self {
             client: Arc::new(Mutex::new(None)),
             worktree_changed_cb: Mutex::new(None),
+            title_changed_cb: Mutex::new(None),
+            focus_requested_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -53,6 +61,8 @@ impl PtyManager {
         Self {
             client: Arc::new(Mutex::new(Some(client))),
             worktree_changed_cb: Mutex::new(None),
+            title_changed_cb: Mutex::new(None),
+            focus_requested_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -63,6 +73,22 @@ impl PtyManager {
         *self.worktree_changed_cb.lock() = Some(Arc::clone(&cb));
         if let Some(client) = self.client.lock().as_ref() {
             client.set_worktree_changed_callback(cb);
+        }
+    }
+
+    /// Install the session-title forwarder; re-applied on every reconnect.
+    pub fn set_title_changed_callback(&self, cb: OnTitleChanged) {
+        *self.title_changed_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_title_changed_callback(cb);
+        }
+    }
+
+    /// Install the session-focus forwarder; re-applied on every reconnect.
+    pub fn set_focus_requested_callback(&self, cb: OnFocusRequested) {
+        *self.focus_requested_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_focus_requested_callback(cb);
         }
     }
 
@@ -98,6 +124,12 @@ impl PtyManager {
         *client_guard = Some(Arc::clone(&client));
         if let Some(cb) = self.worktree_changed_cb.lock().as_ref() {
             client.set_worktree_changed_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.title_changed_cb.lock().as_ref() {
+            client.set_title_changed_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.focus_requested_cb.lock().as_ref() {
+            client.set_focus_requested_callback(Arc::clone(cb));
         }
         Ok(client)
     }

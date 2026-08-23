@@ -50,6 +50,8 @@ pub struct DaemonSession {
     pub agent_ref_from_hook: Arc<Mutex<bool>>,
     // Worktree this pane was bound to at spawn; fixed for the session's lifetime
     pub worktree_id: Option<String>,
+    // Tab-title sync: set via SetSessionTitle, mirrored into checkpoints
+    pub title: Mutex<Option<String>>,
     env_bindings: Vec<(String, String)>,
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
@@ -212,6 +214,7 @@ impl DaemonSession {
                 .iter()
                 .find(|(k, _)| k == "OPPA_WORKTREE_ID")
                 .map(|(_, v)| v.clone()),
+            title: Mutex::new(None),
             env_bindings: applied_bindings,
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
@@ -571,6 +574,14 @@ impl DaemonSession {
     /// Worktree this pane was bound to at spawn, if any.
     pub fn worktree_id(&self) -> Option<&str> {
         self.worktree_id.as_deref()
+    }
+
+    pub fn title(&self) -> Option<String> {
+        self.title.lock().clone()
+    }
+
+    pub fn set_title(&self, title: String) {
+        *self.title.lock() = Some(title);
     }
 
     /// Command currently running in the foreground, per OSC 133 C/D markers.
@@ -1104,6 +1115,34 @@ mod tests {
             started.elapsed()
         );
         assert!(session.ready_seen.load(Ordering::SeqCst));
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_set_title_flows_into_checkpoint_snapshot() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "title-snap".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn title session");
+        assert_eq!(session.title(), None);
+
+        session.set_title("release pane".into());
+        assert_eq!(session.title().as_deref(), Some("release pane"));
+
+        let snapshot = DaemonServer::build_checkpoint(&session);
+        assert_eq!(
+            snapshot.title.as_deref(),
+            Some("release pane"),
+            "checkpoint must carry the session title for warm/cold restore"
+        );
         let _ = session.kill();
     }
 

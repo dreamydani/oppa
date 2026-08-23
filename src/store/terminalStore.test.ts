@@ -20,6 +20,8 @@ vi.mock("../lib/pty/transport", () => ({
   deleteScrollback: vi.fn().mockResolvedValue(undefined),
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
   onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  onTitleChanged: vi.fn().mockResolvedValue(() => {}),
+  onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -104,6 +106,10 @@ function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): tran
 function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
 }
+
+// Module-init subscriptions register during import; capture before clearAllMocks runs.
+const titleChangedHandler = vi.mocked(transport.onTitleChanged).mock.calls[0]?.[0];
+const focusRequestedHandler = vi.mocked(transport.onFocusRequested).mock.calls[0]?.[0];
 
 describe("terminalStore", () => {
   beforeEach(() => {
@@ -3944,6 +3950,74 @@ describe("terminalStore", () => {
       await vi.waitFor(() => {
         expect(useTerminalStore.getState().repos).toHaveLength(1);
       });
+    });
+  });
+
+  describe("daemon session-title sync events", () => {
+    it("title change updates the matching session and its tab title", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+
+      titleChangedHandler?.({ id: "s1", title: "build" });
+
+      expect(useTerminalStore.getState().sessions["s1"].title).toBe("build");
+      expect(useTerminalStore.getState().tabs[0].title).toBe("build");
+    });
+
+    it("title change for an unknown session is ignored silently", () => {
+      expect(() => titleChangedHandler?.({ id: "ghost", title: "x" })).not.toThrow();
+      expect(Object.keys(useTerminalStore.getState().sessions)).not.toContain("ghost");
+    });
+
+    it("focus request selects the owning tab and focuses that pane", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          s9: { id: "s9", title: "s9", status: "running", cols: 80, rows: 24 },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          {
+            id: "tab-2",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.5,
+              a: { type: "leaf", id: "s1" },
+              b: { type: "leaf", id: "s9" },
+            },
+            focusedPath: [0],
+          },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+
+      focusRequestedHandler?.({ id: "s9" });
+
+      expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
+      expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+    });
+
+    it("focus request for a session with no tab is ignored", () => {
+      useTerminalStore.setState({
+        tabs: [{ id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+      focusRequestedHandler?.({ id: "ghost" });
+      expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
     });
   });
 });
