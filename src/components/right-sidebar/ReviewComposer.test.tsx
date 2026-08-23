@@ -78,7 +78,6 @@ function seedStore(reviewByCwd: Record<string, unknown>) {
       status_length: 0,
     },
     gitBranches: { branches: ["main", "feature"], current: "feature" },
-    // @ts-expect-error partial for test
     reviewByCwd,
   } as unknown as Record<string, unknown>);
 }
@@ -407,7 +406,6 @@ describe("ReviewComposer", () => {
 
   it("shows stacked chip when base is another worktree branch", async () => {
     useTerminalStore.setState({
-      // @ts-expect-error partial
       worktrees: [
         { record: { id: "a", branch: "feature-parent", path: "/ws/parent" } },
         { record: { id: "b", branch: "feature-child", path: "/mock/repo" } },
@@ -432,7 +430,6 @@ describe("ReviewComposer", () => {
 
   it("does not show stacked chip for main base", async () => {
     useTerminalStore.setState({
-      // @ts-expect-error partial
       worktrees: [{ record: { id: "a", branch: "feature-parent", path: "/ws/parent" } }],
     } as unknown as Record<string, unknown>);
     seedStore({
