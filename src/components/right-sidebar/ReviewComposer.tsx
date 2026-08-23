@@ -35,11 +35,21 @@ const BLOCKED_HINT: Record<BlockedReason, string> = {
   "existing-review": "",
 };
 
+function isStackedBase(
+  baseRef: string | null | undefined,
+  worktrees: { record: { branch: string } }[],
+): string | null {
+  if (!baseRef || baseRef === "main" || baseRef === "master") return null;
+  const match = worktrees.find((w) => w.record.branch === baseRef);
+  return match ? baseRef : null;
+}
+
 export function ReviewComposer(): React.ReactElement | null {
   const cwd = useTerminalStore((s) => s.getActiveCwd());
   const reviewEntry = useTerminalStore((s) => (cwd ? s.reviewByCwd[cwd] : undefined));
   const refreshReviewEligibility = useTerminalStore((s) => s.refreshReviewEligibility);
   const createReview = useTerminalStore((s) => s.createReview);
+  const worktrees = useTerminalStore((s) => s.worktrees);
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -127,6 +137,7 @@ export function ReviewComposer(): React.ReactElement | null {
 
   // Eligible composer form
   if (eligibility.eligible && !eligibility.existing_pr_url) {
+    const stackedOn = isStackedBase(eligibility.base_ref, worktrees);
     const handleGenerate = () => {
       if (!cwd || generating) return;
       setGenerating(true);
@@ -170,6 +181,11 @@ export function ReviewComposer(): React.ReactElement | null {
           {eligibility.base_ref && (
             <span className="review-base-badge" title={`base ${eligibility.base_ref}`}>
               → {eligibility.base_ref}
+            </span>
+          )}
+          {stackedOn && (
+            <span className="review-stacked-chip" data-testid="stacked-chip" title={`stacked onto ${stackedOn}`}>
+              stacked onto {stackedOn}
             </span>
           )}
         </div>

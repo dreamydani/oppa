@@ -404,4 +404,50 @@ describe("ReviewComposer", () => {
     render(<ReviewComposer />);
     await waitFor(() => expect(onGitChangedMock).toHaveBeenCalled());
   });
+
+  it("shows stacked chip when base is another worktree branch", async () => {
+    useTerminalStore.setState({
+      // @ts-expect-error partial
+      worktrees: [
+        { record: { id: "a", branch: "feature-parent", path: "/ws/parent" } },
+        { record: { id: "b", branch: "feature-child", path: "/mock/repo" } },
+      ],
+    } as unknown as Record<string, unknown>);
+    seedStore({
+      "/mock/repo": {
+        loading: false,
+        eligibility: {
+          eligible: true,
+          blocked_reason: null,
+          base_ref: "feature-parent",
+          owner_repo: "owner/repo",
+          existing_pr_url: null,
+        },
+      },
+    });
+    render(<ReviewComposer />);
+    expect(screen.getByTestId("stacked-chip")).toBeInTheDocument();
+    expect(screen.getByText(/stacked onto feature-parent/)).toBeInTheDocument();
+  });
+
+  it("does not show stacked chip for main base", async () => {
+    useTerminalStore.setState({
+      // @ts-expect-error partial
+      worktrees: [{ record: { id: "a", branch: "feature-parent", path: "/ws/parent" } }],
+    } as unknown as Record<string, unknown>);
+    seedStore({
+      "/mock/repo": {
+        loading: false,
+        eligibility: {
+          eligible: true,
+          blocked_reason: null,
+          base_ref: "main",
+          owner_repo: "owner/repo",
+          existing_pr_url: null,
+        },
+      },
+    });
+    render(<ReviewComposer />);
+    expect(screen.queryByTestId("stacked-chip")).toBeNull();
+  });
 });
