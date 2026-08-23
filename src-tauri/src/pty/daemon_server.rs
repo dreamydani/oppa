@@ -11,7 +11,8 @@ use crate::git::source_control::{
     sc_unstage, sc_upstream_refresh,
 };
 use crate::git::hosted_reviews::{
-    create_pull_request_live, poll_pass_once, refresh_pr_status_now, review_eligibility_live,
+    create_pull_request_live, create_pull_request_live_with_search_path, poll_pass_once,
+    refresh_pr_status_now, review_eligibility_live, review_eligibility_live_with_search_path,
     unix_now_ms, CreateReviewInput, GhClient, LiveGhClient, PollerConfig, PrPollerState,
 };
 use crate::git::teardown::{session_cwd_inside, LiveSession};
@@ -98,6 +99,8 @@ pub struct DaemonServer {
     // Set only when the discovery file was written; None keeps the pipe unauthenticated
     auth_token: Option<String>,
     global_events: broadcast::Sender<DaemonEvent>,
+    // Test seam: isolated fake gh dir without mutating global PATH; None → PATH lookup
+    gh_search_path: Option<PathBuf>,
 }
 
 impl Default for DaemonServer {
@@ -114,11 +117,12 @@ impl DaemonServer {
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: None,
             comments_store_path: None,
-            pr_client: Arc::new(LiveGhClient),
+            pr_client: Arc::new(LiveGhClient::new()),
             pr_poller_state: Arc::new(Mutex::new(PrPollerState::default())),
             pr_push_burst: Arc::new(Notify::new()),
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
+            gh_search_path: None,
         }
     }
 
@@ -129,11 +133,12 @@ impl DaemonServer {
             resumed_agent_ids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worktree_registry_path: Some(app_data_dir.join("worktrees.json")),
             comments_store_path: Some(app_data_dir.join("diff-comments.json")),
-            pr_client: Arc::new(LiveGhClient),
+            pr_client: Arc::new(LiveGhClient::new()),
             pr_poller_state: Arc::new(Mutex::new(PrPollerState::default())),
             pr_push_burst: Arc::new(Notify::new()),
             auth_token: None,
             global_events: broadcast::channel(GLOBAL_EVENT_CAPACITY).0,
+            gh_search_path: None,
         }
     }
 
@@ -141,6 +146,21 @@ impl DaemonServer {
     pub fn with_pr_client(mut self, client: Arc<dyn GhClient>) -> Self {
         self.pr_client = client;
         self
+    }
+
+    // Test seam: isolated fake gh dir without mutating global PATH; None → PATH lookup.
+    // When set, eligibility and creation use this dir for gh resolution, and the
+    // poller client is rebuilt to honor the same path unless a mock was injected.
+    pub fn with_fake_gh_dir(mut self, dir: PathBuf) -> Self {
+        self.gh_search_path = Some(dir.clone());
+        // Rebuild live client to honor the injected dir; a later with_pr_client can override.
+        self.pr_client = Arc::new(LiveGhClient::with_search_path(Some(dir)));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_gh_search_path(self, dir: PathBuf) -> Self {
+        self.with_fake_gh_dir(dir)
     }
 
     pub fn set_auth_token(&mut self, token: Option<String>) {
@@ -692,7 +712,12 @@ impl DaemonServer {
                 resp
             }
             DaemonRequest::ReviewEligibility { cwd } => {
-                DaemonResponse::ReviewEligibility(review_eligibility_live(Path::new(&cwd)))
+                let eligibility = if let Some(dir) = self.gh_search_path.as_deref() {
+                    review_eligibility_live_with_search_path(Path::new(&cwd), Some(dir))
+                } else {
+                    review_eligibility_live(Path::new(&cwd))
+                };
+                DaemonResponse::ReviewEligibility(eligibility)
             }
             DaemonRequest::CreateReview {
                 cwd,
@@ -704,7 +729,17 @@ impl DaemonServer {
                     return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
                 };
                 let input = CreateReviewInput { title, body, draft };
-                match create_pull_request_live(Path::new(&cwd), &registry_path, input) {
+                let result = if let Some(dir) = self.gh_search_path.as_deref() {
+                    create_pull_request_live_with_search_path(
+                        Path::new(&cwd),
+                        &registry_path,
+                        input,
+                        Some(dir),
+                    )
+                } else {
+                    create_pull_request_live(Path::new(&cwd), &registry_path, input)
+                };
+                match result {
                     Ok(created) => DaemonResponse::CreateReview(created),
                     Err(e) => DaemonResponse::Error(e),
                 }
@@ -1018,6 +1053,7 @@ impl DaemonServer {
             pr_push_burst: Arc::clone(&self.pr_push_burst),
             auth_token: self.auth_token.clone(),
             global_events: self.global_events.clone(),
+            gh_search_path: self.gh_search_path.clone(),
         })
     }
 

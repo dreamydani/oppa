@@ -263,9 +263,9 @@ pub fn review_eligibility(
     }
 }
 
-// Real-gh wiring for daemon/UI callers; PR lookup arrives with the task-2 gh client.
+// Real-gh wiring for daemon/UI callers; PR lookup now probes via gh view/list.
 pub fn review_eligibility_live(cwd: &Path) -> Eligibility {
-    review_eligibility(cwd, &|| gh_available(None), &|_owner_repo, _branch| None)
+    review_eligibility_live_with_search_path(cwd, None)
 }
 
 fn blocked_message(reason: &BlockedReason) -> String {
@@ -482,20 +482,13 @@ fn run_gh_argv(cwd: &Path, program: &Path, argv: &[String]) -> Result<String, Gh
     }
 }
 
-// Real-gh wiring; lookup stays a None-stub until the task-3 gh client lands.
+// Real-gh wiring; now probes via gh for duplicate detection.
 pub fn create_pull_request_live(
     cwd: &Path,
     registry_path: &Path,
     input: CreateReviewInput,
 ) -> Result<CreatedReview, String> {
-    let program = catalog::resolve_command_with_path("gh", None)
-        .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
-    let runner = |argv: &[&str]| -> Result<String, GhRunError> {
-        let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
-        run_gh_argv(cwd, &program, &owned)
-    };
-    let lookup = |_owner_repo: &str, _branch: &str| -> Option<String> { None };
-    create_pull_request(cwd, registry_path, input, &runner, &lookup)
+    create_pull_request_live_with_search_path(cwd, registry_path, input, None)
 }
 
 // ---------- task 3: pr status parsing + poller ----------
@@ -620,17 +613,135 @@ pub trait GhClient: Send + Sync {
     fn status(&self, cwd: &Path, url: &str) -> Result<PrStatus, String>;
 }
 
-pub struct LiveGhClient;
+pub struct LiveGhClient {
+    gh_search_path: Option<PathBuf>,
+}
+
+impl LiveGhClient {
+    pub fn new() -> Self {
+        Self { gh_search_path: None }
+    }
+
+    pub fn with_search_path(path: Option<PathBuf>) -> Self {
+        Self { gh_search_path: path }
+    }
+
+    fn resolve_program(&self) -> Option<PathBuf> {
+        catalog::resolve_command_with_path(
+            "gh",
+            self.gh_search_path.as_deref().map(|p| p.as_os_str()),
+        )
+    }
+}
+
+impl Default for LiveGhClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GhClient for LiveGhClient {
     fn status(&self, cwd: &Path, url: &str) -> Result<PrStatus, String> {
-        let program = catalog::resolve_command_with_path("gh", None)
+        let program = self
+            .resolve_program()
             .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
         pr_status(cwd, url, &|argv: &[&str]| {
             let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
             run_gh_argv(cwd, &program, &owned)
         })
     }
+}
+
+fn gh_lookup_pr_url(
+    cwd: &Path,
+    program: &Path,
+    owner_repo: &str,
+    branch: &str,
+) -> Option<String> {
+    // Primary: gh pr view <branch> --json url
+    let view_argv = vec![
+        "pr".to_string(),
+        "view".to_string(),
+        branch.to_string(),
+        "--json".to_string(),
+        "url".to_string(),
+    ];
+    if let Ok(stdout) = run_gh_argv(cwd, program, &view_argv) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(url) = value.get("url").and_then(|v| v.as_str()) {
+                if !url.is_empty() && url.contains("/pull/") {
+                    return Some(url.to_string());
+                }
+            }
+        }
+        if let Some(url) = extract_pr_url(&stdout) {
+            return Some(url);
+        }
+    }
+    // Fallback: gh pr list --repo owner/repo --head branch --json number,url --limit 5
+    let list_argv = vec![
+        "pr".to_string(),
+        "list".to_string(),
+        "--repo".to_string(),
+        owner_repo.to_string(),
+        "--head".to_string(),
+        branch.to_string(),
+        "--json".to_string(),
+        "number,url".to_string(),
+        "--limit".to_string(),
+        "5".to_string(),
+    ];
+    if let Ok(stdout) = run_gh_argv(cwd, program, &list_argv) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(arr) = value.as_array() {
+                if let Some(first) = arr.first() {
+                    if let Some(url) = first.get("url").and_then(|v| v.as_str()) {
+                        if !url.is_empty() {
+                            return Some(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(url) = extract_pr_url(&stdout) {
+            return Some(url);
+        }
+    }
+    None
+}
+
+pub fn review_eligibility_live_with_search_path(
+    cwd: &Path,
+    search_path: Option<&Path>,
+) -> Eligibility {
+    let gh_probe = || gh_available(search_path.map(|p| p.as_os_str()));
+    let lookup = |owner_repo: &str, branch: &str| {
+        let program = catalog::resolve_command_with_path(
+            "gh",
+            search_path.map(|p| p.as_os_str()),
+        )?;
+        gh_lookup_pr_url(cwd, &program, owner_repo, branch)
+    };
+    review_eligibility(cwd, &gh_probe, &lookup)
+}
+
+pub fn create_pull_request_live_with_search_path(
+    cwd: &Path,
+    registry_path: &Path,
+    input: CreateReviewInput,
+    search_path: Option<&Path>,
+) -> Result<CreatedReview, String> {
+    let program = catalog::resolve_command_with_path(
+        "gh",
+        search_path.map(|p| p.as_os_str()),
+    )
+    .ok_or_else(|| blocked_message(&BlockedReason::GhMissing))?;
+    let runner = |argv: &[&str]| -> Result<String, GhRunError> {
+        let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+        run_gh_argv(cwd, &program, &owned)
+    };
+    let lookup = |owner_repo: &str, branch: &str| gh_lookup_pr_url(cwd, &program, owner_repo, branch);
+    create_pull_request(cwd, registry_path, input, &runner, &lookup)
 }
 
 // Auto-clear rule (v1): merged PRs and head-ref divergence drop the link.

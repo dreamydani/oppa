@@ -855,3 +855,346 @@ fn test_pr_changed_event_roundtrips_over_pipe_with_mock_client() {
     cancel_token.cancel();
     let _ = server_thread.join();
 }
+
+// ---------- hosted-review e2e with stateful fake gh (real daemon pipe, no mocks) ----------
+
+fn setup_eligible_repo_for_e2e(
+    tag: &str,
+) -> (tempfile::TempDir, tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    // Returns (repo_root, app_data_dir, repo_path, bare_path) with feature pushed and github origin set.
+    let repo_root = tempfile::tempdir().expect("repo_root temp");
+    let app_data_dir = tempfile::tempdir().expect("app_data temp");
+    let repo_path = repo_root.path().join("repo");
+    std::fs::create_dir_all(&repo_path).unwrap();
+    run_git_in(&repo_path, &["init", "-b", "main"]);
+    run_git_in(&repo_path, &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(&repo_path, &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_path.join("README.md"), "# init").unwrap();
+    run_git_in(&repo_path, &["add", "."]);
+    run_git_in(&repo_path, &["commit", "-m", "init"]);
+    let bare_path = repo_root.path().join("origin.git");
+    run_git_in(
+        repo_root.path(),
+        &[
+            "clone",
+            "--bare",
+            &repo_path.to_string_lossy().into_owned(),
+            &bare_path.to_string_lossy().into_owned(),
+        ],
+    );
+    run_git_in(
+        &repo_path,
+        &["remote", "add", "origin", &bare_path.to_string_lossy().into_owned()],
+    );
+    run_git_in(&repo_path, &["push", "-u", "origin", "main"]);
+    run_git_in(&repo_path, &["checkout", "-b", "feature"]);
+    std::fs::write(repo_path.join("f.txt"), "f").unwrap();
+    run_git_in(&repo_path, &["add", "."]);
+    run_git_in(&repo_path, &["commit", "-m", "feature work"]);
+    run_git_in(&repo_path, &["push", "-u", "origin", "feature"]);
+    run_git_in(
+        &repo_path,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/oppa-tests/review-eligibility.git",
+        ],
+    );
+    (repo_root, app_data_dir, repo_path, bare_path)
+}
+
+fn register_worktree_for_e2e(
+    registry_path: &std::path::Path,
+    repo_path: &std::path::Path,
+) -> String {
+    let id = worktree_record_id("test-repo", repo_path);
+    let mut registry = WorktreeRegistry::load(registry_path);
+    registry.upsert_worktree(WorktreeRecord {
+        id: id.clone(),
+        repo_id: "test-repo".into(),
+        name: "feature-wt".into(),
+        display_name: None,
+        branch: "feature".into(),
+        path: repo_path.to_path_buf(),
+        base_ref: "main".into(),
+        parent_worktree_id: None,
+        child_worktree_ids: vec![],
+        workspace_status: WorktreeStatus::Todo,
+        retired: false,
+        created_at_ms: 0,
+        linked_pr_url: None,
+    });
+    registry.save(registry_path).unwrap();
+    id
+}
+
+#[test]
+fn test_hosted_review_e2e_eligibility_create_status_diverge_clears_over_pipe_with_fake_gh() {
+    let fake_gh_dir = oppa_lib::git::test_support::fake_gh_stateful_dir();
+    let (repo_root, app_data_dir, repo_path, _bare) = setup_eligible_repo_for_e2e("e2e-full");
+    let registry_path = app_data_dir.path().join("worktrees.json");
+    let worktree_id = register_worktree_for_e2e(&registry_path, &repo_path);
+
+    let socket_path = generate_test_socket_path("e2e-full");
+    let server = Arc::new(
+        DaemonServer::with_snapshot_storage(app_data_dir.path().to_path_buf())
+            .with_fake_gh_dir(fake_gh_dir.clone()),
+    );
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(200));
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client");
+    let (pr_tx, pr_rx) = channel::<Option<String>>();
+    client.set_pr_changed_callback(Arc::new(move |wid| {
+        let _ = pr_tx.send(wid.map(str::to_string));
+    }));
+    std::thread::sleep(Duration::from_millis(100));
+
+    let repo_str = repo_path.to_string_lossy().into_owned();
+
+    // 1. Eligibility before any PR: eligible true, no existing_pr_url
+    let elig_before = client
+        .review_eligibility(&repo_str)
+        .expect("eligibility before");
+    assert!(elig_before.eligible, "expected eligible before PR: {elig_before:?}");
+    assert_eq!(elig_before.existing_pr_url, None);
+    assert_eq!(elig_before.base_ref.as_deref(), Some("main"));
+    assert_eq!(
+        elig_before.owner_repo.as_deref(),
+        Some("oppa-tests/review-eligibility")
+    );
+
+    // 2. Create PR over pipe
+    let created = client
+        .create_review(&repo_str, "Test PR", "body text", false)
+        .expect("create_review");
+    assert!(created.pr_url.contains("/pull/"), "got {}", created.pr_url);
+    assert_eq!(created.pr_number, Some(9));
+    assert_eq!(created.base_ref, "main");
+    assert_eq!(created.owner_repo, "oppa-tests/review-eligibility");
+
+    // Registry must be stamped
+    let reg = WorktreeRegistry::load(&registry_path);
+    assert_eq!(
+        reg.worktrees[&worktree_id].linked_pr_url.as_deref(),
+        Some(created.pr_url.as_str())
+    );
+
+    // 3. Eligibility after creation should now show existing_pr_url
+    let elig_after = client
+        .review_eligibility(&repo_str)
+        .expect("eligibility after");
+    assert!(elig_after.eligible);
+    assert_eq!(
+        elig_after.existing_pr_url.as_deref(),
+        Some(created.pr_url.as_str()),
+        "after create, eligibility must surface existing_pr_url"
+    );
+
+    // 4. Status refresh over pipe: parses checks, publishes PrChanged
+    let status = client.review_status(&repo_str).expect("review_status");
+    assert_eq!(status.url, created.pr_url);
+    assert_eq!(status.state, "open");
+    assert_eq!(status.head_ref_name, "feature");
+    assert_eq!(status.checks.len(), 4, "mixed rollup must yield 4 checks");
+    let has_passing = status.checks.iter().any(|c| c.state == oppa_lib::git::hosted_reviews::CheckState::Passing);
+    let has_failing = status.checks.iter().any(|c| c.state == oppa_lib::git::hosted_reviews::CheckState::Failing);
+    let has_pending = status.checks.iter().any(|c| c.state == oppa_lib::git::hosted_reviews::CheckState::Pending);
+    let has_skipping = status.checks.iter().any(|c| c.state == oppa_lib::git::hosted_reviews::CheckState::Skipping);
+    assert!(has_passing && has_failing && has_pending && has_skipping, "checks: {:?}", status.checks);
+
+    // PrChanged must have fired for the status refresh
+    let pr_event = pr_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("PrChanged after status");
+    assert_eq!(pr_event.as_deref(), Some(worktree_id.as_str()));
+
+    // Second refresh still succeeds (no regression)
+    let status2 = client.review_status(&repo_str).expect("second status");
+    assert_eq!(status2.url, created.pr_url);
+    let _ = pr_rx.recv_timeout(Duration::from_secs(2)).expect("second PrChanged");
+
+    // 5. Simulate diverge: mutate registry branch to mismatch headRefName
+    {
+        let mut reg = WorktreeRegistry::load(&registry_path);
+        if let Some(w) = reg.worktrees.get_mut(&worktree_id) {
+            w.branch = "other-branch".into();
+        }
+        reg.save(&registry_path).unwrap();
+    }
+    // Drain any pending events
+    while pr_rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
+    let diverged_status = client.review_status(&repo_str).expect("diverged status");
+    assert_eq!(diverged_status.head_ref_name, "feature");
+    // PrChanged must fire even though link is cleared
+    let diverge_event = pr_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("PrChanged after diverge");
+    assert_eq!(diverge_event.as_deref(), Some(worktree_id.as_str()));
+
+    // Link must be cleared by reconcile
+    let reg_after = WorktreeRegistry::load(&registry_path);
+    assert!(
+        reg_after.worktrees[&worktree_id].linked_pr_url.is_none(),
+        "diverge must clear linked_pr_url, got {:?}", reg_after.worktrees[&worktree_id].linked_pr_url
+    );
+
+    // After diverge, eligibility should be eligible again with no existing_pr (lookup still finds old PR but diverge cleared link)
+    // The second create should short-circuit or create anew; we just verify status now errors without link
+    let err_after = client.review_status(&repo_str).unwrap_err();
+    assert!(
+        err_after.contains("no linked pull request"),
+        "after diverge, status without link must error, got: {err_after}"
+    );
+
+    drop(client);
+    cancel_token.cancel();
+    let _ = server_thread.join();
+    drop(repo_root);
+    drop(app_data_dir);
+}
+
+#[test]
+fn test_hosted_review_e2e_ambiguous_stdout_recovers_via_probe() {
+    let fake_gh_dir = oppa_lib::git::test_support::fake_gh_stateful_blank_dir();
+    let (repo_root, app_data_dir, repo_path, _bare) = setup_eligible_repo_for_e2e("e2e-blank");
+    let registry_path = app_data_dir.path().join("worktrees.json");
+    let worktree_id = register_worktree_for_e2e(&registry_path, &repo_path);
+
+    let socket_path = generate_test_socket_path("e2e-blank");
+    let server = Arc::new(
+        DaemonServer::with_snapshot_storage(app_data_dir.path().to_path_buf())
+            .with_fake_gh_dir(fake_gh_dir.clone()),
+    );
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(200));
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client");
+    let repo_str = repo_path.to_string_lossy().into_owned();
+
+    // Create with blank stdout must recover via probe and still stamp
+    let created = client
+        .create_review(&repo_str, "Blank PR", "body", false)
+        .expect("blank create must recover via probe");
+    assert!(created.pr_url.contains("/pull/9"));
+    assert_eq!(created.pr_number, Some(9));
+
+    let reg = WorktreeRegistry::load(&registry_path);
+    assert_eq!(
+        reg.worktrees[&worktree_id].linked_pr_url.as_deref(),
+        Some(created.pr_url.as_str())
+    );
+
+    drop(client);
+    cancel_token.cancel();
+    let _ = server_thread.join();
+    drop(repo_root);
+    drop(app_data_dir);
+}
+
+#[test]
+#[ignore]
+fn test_hosted_review_live_smoke_requires_gh_authed() {
+    // Gate: only run when OPPA_LIVE_SMOKE=1 or when gh is present and authed; otherwise gracefully skip.
+    let live_requested = std::env::var("OPPA_LIVE_SMOKE").as_deref() == Ok("1");
+    let gh_program = oppa_lib::agents::catalog::resolve_command_with_path(
+        "gh",
+        None,
+    );
+    let Some(gh_path) = gh_program else {
+        eprintln!("live smoke skipped: gh not on PATH");
+        return;
+    };
+    // Check auth
+    let mut cmd = std::process::Command::new(&gh_path);
+    cmd.args(["auth", "status"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let auth_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+    if !auth_ok {
+        eprintln!("live smoke skipped: gh not authed");
+        return;
+    }
+    if !live_requested {
+        eprintln!("live smoke skipped: set OPPA_LIVE_SMOKE=1 to run fully (gh authed)");
+        return;
+    }
+
+    // Real smoke: create a temp bare-backed repo and run live eligibility (local bare is unsupported provider, so just check gh path wiring doesn't panic)
+    let repo_root = tempfile::tempdir().expect("smoke repo_root");
+    let repo_path = repo_root.path().join("repo");
+    std::fs::create_dir_all(&repo_path).unwrap();
+    run_git_in(&repo_path, &["init", "-b", "main"]);
+    run_git_in(&repo_path, &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(&repo_path, &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_path.join("README.md"), "init").unwrap();
+    run_git_in(&repo_path, &["add", "."]);
+    run_git_in(&repo_path, &["commit", "-m", "init"]);
+    let bare_path = repo_root.path().join("origin.git");
+    run_git_in(
+        repo_root.path(),
+        &[
+            "clone",
+            "--bare",
+            &repo_path.to_string_lossy().into_owned(),
+            &bare_path.to_string_lossy().into_owned(),
+        ],
+    );
+    run_git_in(
+        &repo_path,
+        &["remote", "add", "origin", &bare_path.to_string_lossy().into_owned()],
+    );
+    run_git_in(&repo_path, &["push", "-u", "origin", "main"]);
+    run_git_in(&repo_path, &["checkout", "-b", "feature"]);
+    std::fs::write(repo_path.join("f.txt"), "f").unwrap();
+    run_git_in(&repo_path, &["add", "."]);
+    run_git_in(&repo_path, &["commit", "-m", "feat"]);
+    run_git_in(&repo_path, &["push", "-u", "origin", "feature"]);
+    // Point at real github for eligibility ladder (will be eligible if gh authed)
+    run_git_in(
+        &repo_path,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/oppa-tests/review-eligibility.git",
+        ],
+    );
+    let elig = oppa_lib::git::hosted_reviews::review_eligibility_live(&repo_path);
+    assert!(
+        elig.eligible || elig.blocked_reason.is_some(),
+        "live eligibility must return a decision, got {elig:?}"
+    );
+}
