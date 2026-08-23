@@ -4,8 +4,14 @@ import {
   useRef,
   type KeyboardEvent,
 } from "react";
-import Editor, { DiffEditor, type OnMount, type BeforeMount } from "@monaco-editor/react";
+import Editor, {
+  DiffEditor,
+  type OnMount,
+  type DiffOnMount,
+  type BeforeMount,
+} from "@monaco-editor/react";
 import { useTerminalStore } from "../../store/terminalStore";
+import { registerDiffSelectionGetter } from "./diffSelectionBridge";
 import {
   mapToMonacoLanguage,
   defineOppaMonacoThemes,
@@ -55,6 +61,41 @@ export function CodeEditor({
     defineOppaMonacoThemes(monaco);
   };
 
+  // Shared by the plain and diff mounts; notes always read the modified side.
+  const registerSelectionBridge = (
+    editor: Parameters<OnMount>[0] | Parameters<DiffOnMount>[0],
+  ) => {
+    const target =
+      typeof (editor as { getModifiedEditor?: () => any }).getModifiedEditor === "function"
+        ? (editor as { getModifiedEditor: () => any }).getModifiedEditor()
+        : editor;
+    registerDiffSelectionGetter(() => {
+      const model = target.getModel?.();
+      const selection = target.getSelection?.();
+      const position = target.getPosition?.();
+      const hasSelection = Boolean(selection && !selection.isEmpty());
+      const selectedText =
+        hasSelection && selection && model ? model.getValueInRange(selection) : "";
+      return {
+        selectedText,
+        lineNumber:
+          hasSelection && selection
+            ? selection.endLineNumber
+            : (position?.lineNumber ?? selection?.endLineNumber ?? 1),
+        rangeStartLine:
+          hasSelection &&
+          selection &&
+          selection.startLineNumber !== selection.endLineNumber
+            ? selection.startLineNumber
+            : null,
+      };
+    });
+    // Test doubles may omit disposal hooks; real Monaco always has them.
+    (editor as { onDidDispose?: (cb: () => void) => void }).onDidDispose?.(() =>
+      registerDiffSelectionGetter(null),
+    );
+  };
+
   const handleOnMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
 
@@ -62,6 +103,12 @@ export function CodeEditor({
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       void saveActiveFile();
     });
+
+    registerSelectionBridge(editor);
+  };
+
+  const handleDiffOnMount: DiffOnMount = (editor) => {
+    registerSelectionBridge(editor);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -101,6 +148,7 @@ export function CodeEditor({
           language={currentLang}
           theme={monacoTheme}
           beforeMount={handleBeforeMount}
+          onMount={handleDiffOnMount}
           options={{
             readOnly: true,
             renderSideBySide: !isInlineDiff,

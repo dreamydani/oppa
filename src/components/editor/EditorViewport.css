@@ -485,6 +485,111 @@
   color: #18181b;
 }
 
+.view-only-diff-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.view-only-diff-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: transparent;
+  color: var(--muted-foreground, #9e9e9a);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.view-only-diff-note-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--foreground, #ededec);
+}
+
+.view-only-diff-note-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.diff-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: var(--sidebar, #141416);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.diff-note-body {
+  resize: vertical;
+  min-height: 46px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--foreground, #ededec);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm, 4px);
+  outline: none;
+}
+
+.diff-note-body:focus {
+  border-color: rgba(88, 166, 255, 0.4);
+}
+
+.diff-note-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diff-note-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted-foreground, #9e9e9a);
+}
+
+.diff-note-line-input {
+  width: 56px;
+  padding: 2px 5px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--foreground, #ededec);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm, 4px);
+  outline: none;
+}
+
+.diff-note-scope-select {
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--foreground, #ededec);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm, 4px);
+}
+
+.diff-note-form-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.git-note-save-btn {
+  border-color: rgba(88, 166, 255, 0.35);
+  color: var(--accent-blue, #58a6ff);
+}
+
 .editor-main-canvas {
   flex: 1;
   width: 100%;

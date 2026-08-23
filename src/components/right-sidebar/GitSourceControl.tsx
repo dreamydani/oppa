@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, GitBranch, Minus, Plus, RefreshCw, Undo2 } from "lucide-react";
 import { useTerminalStore, setGitChangedListening } from "../../store/terminalStore";
 import type { GitArea, StatusEntry } from "../../lib/pty/transport";
+import { DiffNotesShelf } from "./DiffNotesShelf";
 
 interface GitSourceControlProps {
   refreshKey?: number;
@@ -455,6 +456,8 @@ export function GitSourceControl({ refreshKey = 0 }: GitSourceControlProps): Rea
           </div>
         )}
       </div>
+
+      <DiffNotesShelf />
     </div>
   );
 }

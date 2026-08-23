@@ -39,6 +39,11 @@ import {
   scFastForward,
   scPush,
   scFileDiff,
+  diffCommentsList,
+  diffCommentAdd,
+  diffCommentUpdate,
+  diffCommentDelete,
+  diffCommentsMarkSent,
 } from "../lib/pty/transport";
 import type {
   PtySpawnOptions,
@@ -54,6 +59,8 @@ import type {
   PullOutcome,
   PushOutcome,
   GitArea,
+  DiffComment,
+  NewDiffComment,
 } from "../lib/pty/transport";
 import {
   split,
@@ -253,6 +260,8 @@ export interface SessionInfo {
   title: string;
   status: SessionStatus;
   cwd?: string;
+  // Worktree the session was spawned for, when created through a worktree tab.
+  worktreeId?: string;
   // Message from the failed spawn; set only on error sessions so the pane can
   // render the real reason instead of a hardcoded string.
   error?: string;
@@ -523,6 +532,16 @@ export interface TerminalState {
     opts?: { publish?: boolean; forceWithLease?: boolean },
     cwd?: string,
   ) => Promise<PushOutcome>;
+  getActiveWorktreeId: () => string;
+  // Diff notes: daemon-persisted per worktree; "" key never used since notes
+  // require a worktree-bound tab.
+  diffComments: Record<string, DiffComment[]>;
+  loadComments: (worktreeId: string) => Promise<void>;
+  addComment: (worktreeId: string, comment: NewDiffComment) => Promise<DiffComment>;
+  updateComment: (id: string, body: string) => Promise<void>;
+  deleteComment: (id: string) => Promise<void>;
+  markCommentsSent: (ids: string[]) => Promise<void>;
+  sendToSession: (sessionId: string, data: string) => Promise<void>;
 }
 
 function isNonEmptyLayout(layout?: Layout): boolean {
@@ -693,6 +712,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               rows,
               ...(isColdRestored || existingSession?.isRestored ? { isRestored: true } : {}),
               ...(resumeKind ? { resumeKind } : {}),
+              ...(worktreeId || existingSession?.worktreeId
+                ? { worktreeId: worktreeId ?? existingSession?.worktreeId }
+                : {}),
             },
           },
         };
@@ -1552,16 +1574,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           if (Array.isArray(parsed.sessions)) {
             for (const s of parsed.sessions) {
               if (s.id) {
-                const isRestoring = activeOldIds.has(s.id);
-                updatedSessions[s.id] = {
-                  id: s.id,
-                  title: s.title || s.id,
-                  status: isRestoring ? "restoring" : "sleeping",
-                  cwd: s.cwd,
-                  cols: s.cols || DEFAULT_COLS,
-                  rows: s.rows || DEFAULT_ROWS,
-                  ...(s.isRestored ? { isRestored: true } : {}),
-                };
+                 const isRestoring = activeOldIds.has(s.id);
+                 updatedSessions[s.id] = {
+                   id: s.id,
+                   title: s.title || s.id,
+                   status: isRestoring ? "restoring" : "sleeping",
+                   cwd: s.cwd,
+                   cols: s.cols || DEFAULT_COLS,
+                   rows: s.rows || DEFAULT_ROWS,
+                   ...(s.isRestored ? { isRestored: true } : {}),
+                   ...(s.worktreeId ? { worktreeId: s.worktreeId } : {}),
+                 };
               }
             }
           }
@@ -1576,6 +1599,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                 cols: saved?.cols || DEFAULT_COLS,
                 rows: saved?.rows || DEFAULT_ROWS,
                 ...(saved?.isRestored ? { isRestored: true } : {}),
+                ...(saved?.worktreeId ? { worktreeId: saved.worktreeId } : {}),
               };
             }
           }
@@ -1702,6 +1726,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                   cols: s.cols || DEFAULT_COLS,
                   rows: s.rows || DEFAULT_ROWS,
                   ...(s.isRestored ? { isRestored: true } : {}),
+                  ...(s.worktreeId ? { worktreeId: s.worktreeId } : {}),
                 };
               }
             }
@@ -1717,6 +1742,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                 cols: saved?.cols || DEFAULT_COLS,
                 rows: saved?.rows || DEFAULT_ROWS,
                 ...(saved?.isRestored ? { isRestored: true } : {}),
+                ...(saved?.worktreeId ? { worktreeId: saved.worktreeId } : {}),
               };
             }
           }
@@ -2450,6 +2476,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   gitBranches: null,
   gitHistory: null,
   gitCompare: null,
+  diffComments: {},
 
   refreshGitStatus: async (cwd) => {
     const dir = cwd ?? get().getActiveCwd();
@@ -2558,6 +2585,96 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const outcome = await scPush(dir, opts?.publish ?? false, opts?.forceWithLease ?? false);
     await get().refreshGitStatus();
     return outcome;
+  },
+
+  // Notes need a concrete worktree; an explicit session binding wins over the
+  // cwd prefix match because nested checkouts can share a parent directory.
+  getActiveWorktreeId: () => {
+    const state = get();
+    const activeTab = getActiveTab(state);
+    if (!activeTab) return "";
+    let sessionId = "";
+    try {
+      sessionId = focus(activeTab.layout, activeTab.focusedPath);
+    } catch {
+      return "";
+    }
+    const session = state.sessions[sessionId];
+    if (!session) return "";
+    if (session.worktreeId && state.worktrees.some((w) => w.record.id === session.worktreeId)) {
+      return session.worktreeId;
+    }
+    const cwd = session.cwd?.replace(/[\\/]+$/, "").toLowerCase();
+    if (!cwd) return "";
+    const match = state.worktrees.find((w) => {
+      const base = w.record.path.replace(/[\\/]+$/, "").toLowerCase();
+      return cwd === base || cwd.startsWith(`${base}\\`) || cwd.startsWith(`${base}/`);
+    });
+    return match?.record.id ?? "";
+  },
+
+  loadComments: async (worktreeId) => {
+    if (!worktreeId) return;
+    try {
+      const list = await diffCommentsList(worktreeId);
+      set((state) => ({ diffComments: { ...state.diffComments, [worktreeId]: list } }));
+    } catch {
+      // Stopped daemon keeps previous notes visible
+    }
+  },
+
+  addComment: async (worktreeId, comment) => {
+    const added = await diffCommentAdd(comment);
+    set((state) => ({
+      diffComments: {
+        ...state.diffComments,
+        [worktreeId]: [...(state.diffComments[worktreeId] ?? []), added],
+      },
+    }));
+    return added;
+  },
+
+  updateComment: async (id, body) => {
+    const updated = await diffCommentUpdate(id, body);
+    set((state) => {
+      const buckets = { ...state.diffComments };
+      for (const [wt, list] of Object.entries(buckets)) {
+        const idx = list.findIndex((c) => c.id === id);
+        if (idx !== -1) {
+          buckets[wt] = list.map((c, i) => (i === idx ? updated : c));
+          break;
+        }
+      }
+      return { diffComments: buckets };
+    });
+  },
+
+  deleteComment: async (id) => {
+    await diffCommentDelete(id);
+    set((state) => {
+      const buckets: Record<string, DiffComment[]> = {};
+      for (const [wt, list] of Object.entries(state.diffComments)) {
+        buckets[wt] = list.filter((c) => c.id !== id);
+      }
+      return { diffComments: buckets };
+    });
+  },
+
+  markCommentsSent: async (ids) => {
+    if (ids.length === 0) return;
+    const stamped = await diffCommentsMarkSent(ids);
+    const byId = new Map(stamped.map((c) => [c.id, c]));
+    set((state) => {
+      const buckets: Record<string, DiffComment[]> = {};
+      for (const [wt, list] of Object.entries(state.diffComments)) {
+        buckets[wt] = list.map((c) => byId.get(c.id) ?? c);
+      }
+      return { diffComments: buckets };
+    });
+  },
+
+  sendToSession: async (sessionId, data) => {
+    await ptyWrite(sessionId, data);
   },
 }));
 
