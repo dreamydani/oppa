@@ -11,6 +11,12 @@ pub const CANONICAL_COMMANDS: &[(&str, &[&str])] = &[
             "list", "show", "current", "create", "set", "rm", "purge", "ps", "lineage",
         ],
     ),
+    (
+        "terminal",
+        &[
+            "list", "show", "read", "send", "wait", "create", "close", "switch", "rename", "split",
+        ],
+    ),
 ];
 
 // Parse-level aliasing keeps muscle memory working while the wire/help surface stays canonical.

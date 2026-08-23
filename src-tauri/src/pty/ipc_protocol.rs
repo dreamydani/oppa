@@ -33,6 +33,17 @@ pub struct CreateOrAttachResult {
     pub resume: Option<ResumePlan>,
     #[serde(default)]
     pub resume_declined_reason: Option<String>,
+    // Additive v3 field so `terminal split` can inherit the pane's binding
+    #[serde(default)]
+    pub worktree_id: Option<String>,
+}
+
+// Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WaitCondition {
+    Exit,
+    TuiIdle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +90,16 @@ pub enum DaemonRequest {
     },
     Kill {
         session_id: String,
+    },
+    ReadScreen {
+        session_id: String,
+    },
+    // Long-poll; handled at the client-stream level so the server can emit
+    // keepalive frames while blocked. handle_request only sees it on misuse.
+    WaitFor {
+        session_id: String,
+        cond: WaitCondition,
+        timeout_ms: u64,
     },
     ListSessions,
     Disconnect,
@@ -133,6 +154,17 @@ pub enum DaemonResponse {
     SessionList(Vec<String>),
     Ok,
     Error(String),
+    // Viewport-only plain text (no scrollback, no ANSI); truncated is
+    // reserved for a future raw byte-stream replay mode.
+    ScreenText {
+        text: String,
+        truncated: bool,
+    },
+    WaitResult {
+        satisfied: bool,
+        exit_code: Option<i32>,
+        waited_ms: u64,
+    },
     RepoRecords(Vec<RepoRecord>),
     WorktreeRecords(Vec<WorktreeListEntry>),
     // Single-record replies (show/current/set/create); None means "not found" without erroring
@@ -278,6 +310,12 @@ mod tests {
             DaemonRequest::Kill {
                 session_id: "s1".into(),
             },
+            DaemonRequest::ReadScreen { session_id: "s1".into() },
+            DaemonRequest::WaitFor {
+                session_id: "s1".into(),
+                cond: WaitCondition::TuiIdle,
+                timeout_ms: 5000,
+            },
             DaemonRequest::ListSessions,
             DaemonRequest::Disconnect,
             DaemonRequest::Shutdown,
@@ -301,6 +339,7 @@ mod tests {
             snapshot: Some("\x1b[32mhello\x1b[0m".into()),
             resume: None,
             resume_declined_reason: None,
+            worktree_id: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -326,10 +365,20 @@ mod tests {
                 snapshot: None,
                 resume: None,
                 resume_declined_reason: None,
+                worktree_id: None,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
             DaemonResponse::Error("session not found".into()),
+            DaemonResponse::ScreenText {
+                text: "hello\nworld".into(),
+                truncated: false,
+            },
+            DaemonResponse::WaitResult {
+                satisfied: true,
+                exit_code: Some(0),
+                waited_ms: 812,
+            },
         ];
 
         for res in responses {
@@ -550,10 +599,21 @@ mod tests {
                 kind: ResumeKind::AgentResume,
             }),
             resume_declined_reason: None,
+            worktree_id: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(res, decoded);
+    }
+
+    #[test]
+    fn test_wait_condition_wire_values_are_kebab_case() {
+        let exit = serde_json::to_string(&WaitCondition::Exit).unwrap();
+        assert_eq!(exit, r#""exit""#);
+        let idle = serde_json::to_string(&WaitCondition::TuiIdle).unwrap();
+        assert_eq!(idle, r#""tui-idle""#);
+        let decoded: WaitCondition = serde_json::from_str(idle.as_str()).unwrap();
+        assert_eq!(decoded, WaitCondition::TuiIdle);
     }
 
     #[test]

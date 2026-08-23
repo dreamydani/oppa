@@ -35,6 +35,11 @@ impl ScreenMirror {
         self.rows
     }
 
+    /// Plain viewport text (no ANSI, no scrollback) for ReadScreen.
+    pub fn get_text(&self) -> String {
+        self.parser.screen().contents()
+    }
+
     pub fn get_formatted_snapshot(&self) -> String {
         let screen = self.parser.screen();
         let mut result = String::new();
@@ -123,5 +128,29 @@ mod tests {
         let snapshot = mirror.get_formatted_snapshot();
         assert!(snapshot.contains("PS C:\\Users\\danial>"));
         assert!(!snapshot.contains("\r\n"));
+    }
+
+    #[test]
+    fn test_get_text_strips_ansi_colors() {
+        let mut mirror = ScreenMirror::new(80, 24, 1000);
+        mirror.process(b"\x1b[32mGreen Text\x1b[0m\r\n\x1b[1;31mRed Bold\x1b[0m");
+        let text = mirror.get_text();
+        assert!(text.contains("Green Text"), "got: {text:?}");
+        assert!(text.contains("Red Bold"), "got: {text:?}");
+        assert!(!text.contains('\x1b'), "plain text must have no escapes: {text:?}");
+    }
+
+    #[test]
+    fn test_get_text_is_viewport_only_not_scrollback() {
+        let mut mirror = ScreenMirror::new(80, 4, 1000);
+        for i in 0..10 {
+            mirror.process(format!("scrollback-line-{i:02}\r\n").as_bytes());
+        }
+        let text = mirror.get_text();
+        assert!(text.contains("scrollback-line-09"), "last line visible: {text:?}");
+        assert!(
+            !text.contains("scrollback-line-00"),
+            "scrolled-off lines must stay out of viewport text: {text:?}"
+        );
     }
 }

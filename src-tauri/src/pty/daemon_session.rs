@@ -16,6 +16,18 @@ const LOW_WATERMARK_BYTES: usize = 32 * 1024;
 const READ_CHUNK_SIZE: usize = 8 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SCREEN_SCROLLBACK_LINES: usize = 1000;
+// TuiIdle: prompt-end (OSC133 D) followed by this much silence counts as idle…
+const TUI_IDLE_AFTER_PROMPT_MS: u64 = 800;
+// …otherwise plain output silence for this long is the fallback (cmd.exe etc.)
+const FALLBACK_IDLE_MS: u64 = 1500;
+// Test hook: OPPA_IDLE_MS overrides both thresholds so waits are fast/deterministic
+pub fn idle_thresholds() -> (u64, u64) {
+    match std::env::var("OPPA_IDLE_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        Some(ms) => (ms, ms),
+        None => (TUI_IDLE_AFTER_PROMPT_MS, FALLBACK_IDLE_MS),
+    }
+}
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 // Bootstrap emits this once after prompt hooks install; injection waits for it
 const READY_MARKER_BYTES: &[u8] = b"\x1b]633;oppa-ready\x07";
 // Shells without our bootstrap (e.g. cmd.exe) never emit the marker — inject anyway
@@ -49,6 +61,10 @@ pub struct DaemonSession {
     pub paused: Arc<AtomicBool>,
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
     pub seq: Arc<AtomicU64>,
+    // Output activity tracking for WaitFor::TuiIdle
+    pub last_output_at: Arc<Mutex<Instant>>,
+    // Some(t) while the last OSC133 D marker is still the freshest output
+    pub last_prompt_end_at: Arc<Mutex<Option<Instant>>>,
 }
 
 fn emit_event(
@@ -207,6 +223,8 @@ impl DaemonSession {
             paused: Arc::new(AtomicBool::new(false)),
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
+            last_output_at: Arc::new(Mutex::new(Instant::now())),
+            last_prompt_end_at: Arc::new(Mutex::new(None)),
         });
 
         Self::start_threads(
@@ -237,6 +255,8 @@ impl DaemonSession {
         let screen_mirror = Arc::clone(&session.screen_mirror);
         let subscribers = Arc::clone(&session.subscribers);
         let seq = Arc::clone(&session.seq);
+        let last_output = Arc::clone(&session.last_output_at);
+        let last_prompt_end = Arc::clone(&session.last_prompt_end_at);
 
         let id_watch = id.clone();
         let master_watch = Arc::clone(&master);
@@ -284,6 +304,10 @@ impl DaemonSession {
                             ready_seen.store(true, Ordering::SeqCst);
                         }
 
+                        // Record activity BEFORE osc handling: a D marker in this
+                        // chunk must be fresher than the chunk's own bytes
+                        *last_output.lock() = Instant::now();
+
                         for osc_event in osc_scanner.scan(chunk) {
                             match osc_event {
                                 OscEvent::Cwd(new_cwd) => {
@@ -303,11 +327,13 @@ impl DaemonSession {
                                     // New foreground work invalidates the previous agent session
                                     *agent_ref.lock() = None;
                                     *agent_from_hook.lock() = false;
+                                    *last_prompt_end.lock() = None;
                                 }
                                 OscEvent::CommandEnd => {
                                     *foreground.lock() = None;
                                     // agent_session_ref deliberately kept: a cold boot after
                                     // the agent exits must still be able to resume it
+                                    *last_prompt_end.lock() = Some(Instant::now());
                                 }
                             }
                         }
@@ -453,6 +479,65 @@ impl DaemonSession {
     /// Return an ANSI formatted snapshot of the virtual screen state.
     pub fn get_snapshot(&self) -> String {
         self.screen_mirror.lock().get_formatted_snapshot()
+    }
+
+    /// Plain viewport text for ReadScreen (no ANSI; scrollback excluded).
+    pub fn get_screen_text(&self) -> String {
+        self.screen_mirror.lock().get_text()
+    }
+
+    /// Exit code once the child is gone; None while still running.
+    pub fn exit_code(&self) -> Option<i32> {
+        self.child
+            .lock()
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.exit_code() as i32)
+    }
+
+    /// Pure TuiIdle decision: output silence for `fallback_quiet_ms` normally,
+    /// shortened to `prompt_quiet_ms` once an OSC133 D marker has been seen.
+    /// Output after the marker (next prompt redraw) does not reset the marker,
+    /// only the silence clock; CommandStart clears the marker.
+    fn is_tui_idle(
+        now: Instant,
+        last_output: Instant,
+        prompt_end: Option<Instant>,
+        prompt_quiet: Duration,
+        fallback_quiet: Duration,
+    ) -> bool {
+        let quiet_for = now - last_output;
+        if prompt_end.is_some() {
+            return quiet_for >= prompt_quiet;
+        }
+        quiet_for >= fallback_quiet
+    }
+
+    /// Poll until TuiIdle or deadline; returns true only when satisfied.
+    pub async fn wait_until_idle_with(
+        &self,
+        deadline: Instant,
+        prompt_quiet: Duration,
+        fallback_quiet: Duration,
+    ) -> bool {
+        loop {
+            let now = Instant::now();
+            let (last_output, prompt_end) = (*self.last_output_at.lock(), *self.last_prompt_end_at.lock());
+            if Self::is_tui_idle(now, last_output, prompt_end, prompt_quiet, fallback_quiet) {
+                return true;
+            }
+            if now >= deadline {
+                return false;
+            }
+            tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+        }
+    }
+
+    pub async fn wait_until_idle(&self, deadline: Instant) -> bool {
+        let (prompt_ms, fallback_ms) = idle_thresholds();
+        self.wait_until_idle_with(deadline, Duration::from_millis(prompt_ms), Duration::from_millis(fallback_ms))
+            .await
     }
 
     /// Subscribe to real-time events for this session.
@@ -1040,6 +1125,156 @@ mod tests {
         assert!(session.pid() > 0);
         let kill_result = session.kill();
         assert!(kill_result.is_ok());
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn test_is_tui_idle_prompt_marker_path() {
+        let now = Instant::now();
+        // Marker seen + quiet long enough: OSC path wins even though prompt
+        // redraw output landed after the marker (last_output > marker)
+        assert!(DaemonSession::is_tui_idle(now, now - ms(1000), Some(now - ms(1200)), ms(800), ms(5000)));
+        // Marker seen but not quiet yet
+        assert!(!DaemonSession::is_tui_idle(now, now - ms(300), Some(now - ms(400)), ms(800), ms(1500)));
+        // No marker: fallback threshold governs
+        assert!(!DaemonSession::is_tui_idle(now, now - ms(100), None, ms(800), ms(1500)));
+        assert!(DaemonSession::is_tui_idle(now, now - ms(1600), None, ms(800), ms(1500)));
+    }
+
+    #[tokio::test]
+    async fn test_wait_until_idle_prompt_marker_via_osc133() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "idle-osc".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn idle shell");
+        session
+            .write(b"printf '\\033]133;D\\007'\n")
+            .expect("write D marker");
+
+        // Tiny prompt threshold, huge fallback: only the OSC path can satisfy
+        let started = Instant::now();
+        let satisfied = session
+            .wait_until_idle_with(Instant::now() + Duration::from_secs(5), ms(200), ms(60_000))
+            .await;
+        assert!(satisfied, "OSC133 D marker + silence must read as idle");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "idle must come from the marker path, not the fallback: {:?}",
+            started.elapsed()
+        );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_wait_until_idle_fallback_without_markers() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "idle-fallback".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn fallback shell");
+
+        // Huge prompt threshold (no markers expected), tiny fallback
+        let satisfied = session
+            .wait_until_idle_with(Instant::now() + Duration::from_secs(5), ms(60_000), ms(400))
+            .await;
+        assert!(satisfied, "plain output silence must satisfy the fallback");
+        assert!(session.last_prompt_end_at.lock().is_none());
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_wait_until_idle_times_out_while_output_flows() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "idle-timeout".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn timeout shell");
+        // Continuous output refreshes last_output_at every ~50ms; thresholds
+        // above that period can never be met inside the deadline
+        session
+            .write(b"while true; do echo busy-output; sleep 0.05; done\n")
+            .expect("start output loop");
+
+        // Only measure once output is confirmed flowing: shell startup lag
+        // would otherwise count as pre-loop silence
+        let mut rx = session.subscribe();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                    if data.contains("busy-output") {
+                        break;
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        let satisfied = session
+            .wait_until_idle_with(Instant::now() + Duration::from_millis(900), ms(500), ms(500))
+            .await;
+        assert!(!satisfied, "flowing output must keep the session non-idle");
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_exit_code_after_child_exit_and_get_screen_text() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "exit-code-s".into(),
+            &sh,
+            &["-c".into(), "echo screen_text_probe; exit 7".into()],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn exiting shell");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut code = None;
+        while Instant::now() < deadline {
+            if let Some(c) = session.exit_code() {
+                code = Some(c);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(code, Some(7));
+
+        let text = session.get_screen_text();
+        assert!(
+            text.to_lowercase().contains("screen_text_probe"),
+            "expected probe in screen text: {text:?}"
+        );
+        assert!(!text.contains('\x1b'), "screen text must be plain: {text:?}");
+        let _ = session.kill();
     }
 }
 

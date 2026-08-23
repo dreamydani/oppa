@@ -9,7 +9,7 @@ use crate::pty::agent_resume;
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
     CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, ResumeKind, ResumePlan,
-    WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    WaitCondition, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use crate::pty::runtime_metadata;
 use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
@@ -20,7 +20,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, Notify};
 
@@ -159,6 +159,7 @@ impl DaemonServer {
                         snapshot: Some(snapshot),
                         resume: None,
                         resume_declined_reason: None,
+                        worktree_id: session.worktree_id().map(str::to_string),
                     })
                 } else {
                     // Cold restore: consult the disk checkpoint for agent resume state
@@ -204,6 +205,7 @@ impl DaemonServer {
                             let session_cols = session.cols();
                             let session_rows = session.rows();
                             let session_cwd = session.cwd();
+                            let worktree_id = session.worktree_id().map(str::to_string);
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
                             }
@@ -217,6 +219,7 @@ impl DaemonServer {
                                 snapshot: None,
                                 resume,
                                 resume_declined_reason: declined,
+                                worktree_id,
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),
@@ -268,6 +271,21 @@ impl DaemonServer {
                 } else {
                     DaemonResponse::Error(format!("session {session_id} not found"))
                 }
+            }
+            DaemonRequest::ReadScreen { session_id } => {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => DaemonResponse::ScreenText {
+                        text: session.get_screen_text(),
+                        truncated: false,
+                    },
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
+            // Long-poll waits run at the client-stream level (keepalives need
+            // the writer handle); this arm only catches direct callers.
+            DaemonRequest::WaitFor { .. } => {
+                DaemonResponse::Error("WaitFor requires the client-stream handler".into())
             }
             DaemonRequest::ListSessions => {
                 let sessions = self.sessions.lock();
@@ -718,6 +736,83 @@ impl DaemonServer {
     }
 }
 
+/// Keepalive cadence for long-poll waits (orca parity: clients must see
+/// traffic before their own read timeouts expire).
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2);
+const KEEPALIVE_FRAME: &str = "{\"_keepalive\":true}\n";
+
+/// Handle a WaitFor request inline in the client stream: the wait can block
+/// past the client's read timeout, so keepalive frames are emitted on the
+/// same connection until the wait resolves. Returns the protocol response.
+async fn handle_wait_for(
+    server: &DaemonServer,
+    out_tx: &tokio::sync::mpsc::Sender<String>,
+    session_id: String,
+    cond: WaitCondition,
+    timeout_ms: u64,
+) -> DaemonResponse {
+    let session = {
+        let sessions = server.sessions.lock();
+        sessions.get(&session_id).cloned()
+    };
+    let Some(session) = session else {
+        return DaemonResponse::Error("session not found".into());
+    };
+
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(timeout_ms);
+
+    let keepalive_tx = out_tx.clone();
+    let keepalive = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            if keepalive_tx.send(KEEPALIVE_FRAME.to_string()).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let (satisfied, exit_code) = match cond {
+        WaitCondition::Exit => {
+            // Already-dead children never re-emit Exit, so poll try_wait
+            // alongside the subscriber channel to close that race.
+            let mut rx = session.subscribe();
+            let mut result = (false, None);
+            loop {
+                if let Some(code) = session.exit_code() {
+                    result = (true, Some(code));
+                    break;
+                }
+                let now = Instant::now();
+                if now >= deadline {
+                    break;
+                }
+                match tokio::time::timeout(deadline - now, rx.recv()).await {
+                    Ok(Some(DaemonEvent::Exit { code, .. })) => {
+                        result = (true, code);
+                        break;
+                    }
+                    Ok(Some(_)) => continue,
+                    Ok(None) => break,
+                    Err(_elapsed) => break,
+                }
+            }
+            result
+        }
+        WaitCondition::TuiIdle => (session.wait_until_idle(deadline).await, None),
+    };
+
+    keepalive.abort();
+    let waited_ms = started.elapsed().as_millis() as u64;
+    DaemonResponse::WaitResult {
+        satisfied,
+        exit_code,
+        waited_ms,
+    }
+}
+
 /// Handle bidirectional JSON communication with a single connected client stream.
 pub async fn handle_client_stream<S>(
     stream: S,
@@ -794,7 +889,23 @@ where
                             _ => None,
                         };
 
-                        let resp = server.handle_request(req);
+                        // Inline long-poll: handle_request is sync and would
+                        // stall this select loop (and thus keepalives)
+                        let wait = match &req {
+                            DaemonRequest::WaitFor {
+                                session_id,
+                                cond,
+                                timeout_ms,
+                            } => Some((session_id.clone(), *cond, *timeout_ms)),
+                            _ => None,
+                        };
+                        let resp = match wait {
+                            Some((session_id, cond, timeout_ms)) => {
+                                handle_wait_for(&server, &out_tx, session_id, cond, timeout_ms)
+                                    .await
+                            }
+                            None => server.handle_request(req),
+                        };
 
                         // If CreateOrAttach succeeded, wire up subscriber task if not already streaming to this client
                         if let Some(session_id) = session_to_sub {

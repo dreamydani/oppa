@@ -1,12 +1,16 @@
 use oppa_lib::cli::output::{render_json, render_lineage_tree, render_worktree_list};
 use oppa_lib::cli::{
-    build_repo_add, build_worktree_create, build_worktree_set, decode_ok, decode_ps_entries,
-    decode_repo_records, decode_worktree_list, decode_worktree_many, decode_worktree_one,
-    filter_active_only, CreateArgs, CliError, ParentUpdate, RuntimeConnection,
+    build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
+    build_worktree_set, decode_attached, decode_ok, decode_ps_entries, decode_read_screen,
+    decode_repo_records, decode_wait_result, decode_worktree_list, decode_worktree_many,
+    decode_worktree_one, filter_active_only, CreateArgs, CliError, ParentUpdate,
+    RuntimeConnection,
 };
 use oppa_lib::git::worktree_registry::WorktreeStatus;
 use oppa_lib::pty::daemon_server::{CancellationToken, DaemonServer};
-use oppa_lib::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
+use oppa_lib::pty::ipc_protocol::{
+    DaemonRequest, DaemonResponse, WaitCondition, DAEMON_PROTOCOL_VERSION,
+};
 use oppa_lib::pty::runtime_metadata;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -412,4 +416,335 @@ fn tombstone_lifecycle_with_dup_name_and_blocked_remove() {
     assert!(after.is_empty());
 
     shutdown_daemon((conn, root, listener, cancel));
+}
+
+// ---- task 9: terminal verbs end-to-end over a real pipe ----
+
+const PROBE: &str = "oppa_it_probe_9137";
+
+fn attach_request(session_id: &str) -> DaemonRequest {
+    DaemonRequest::CreateOrAttach {
+        session_id: session_id.into(),
+        cols: 80,
+        rows: 24,
+        cwd: None,
+        shell: None,
+        resume_agents: false,
+        worktree_id: None,
+        extra_env: Vec::new(),
+    }
+}
+
+// cmd.exe has no bootstrap or PSReadLine: typed input is never eaten, so
+// roundtrips stay deterministic; its idles go through the fallback path.
+fn cmd_attach_request(session_id: &str) -> DaemonRequest {
+    DaemonRequest::CreateOrAttach {
+        session_id: session_id.into(),
+        cols: 80,
+        rows: 24,
+        cwd: None,
+        shell: Some("cmd.exe".into()),
+        resume_agents: false,
+        worktree_id: None,
+        extra_env: Vec::new(),
+    }
+}
+
+#[test]
+fn terminal_send_wait_idle_read_screen_roundtrip() {
+    let (mut conn, _root, listener, cancel) = start_registry_daemon("term");
+
+    let attached =
+        decode_attached(conn.request(cmd_attach_request("term-probe-s")).expect("create session"))
+            .expect("session created");
+    assert!(attached.is_new);
+
+    // First wait absorbs shell boot noise so the typed command is not eaten
+    let booted = decode_wait_result(
+        conn.request(DaemonRequest::WaitFor {
+            session_id: "term-probe-s".into(),
+            cond: WaitCondition::TuiIdle,
+            timeout_ms: 20_000,
+        })
+        .expect("boot wait"),
+    )
+    .expect("decode boot wait");
+    assert!(booted.satisfied, "shell must settle after boot");
+    assert_eq!(booted.exit_code, None);
+
+    decode_ok(
+        conn.request(build_terminal_send("term-probe-s", &format!("echo {PROBE}"), true, false))
+            .expect("send roundtrip"),
+    )
+    .unwrap();
+
+    // cmd.exe emits no OSC133 markers: this exercises the fallback idle path
+    let idle = decode_wait_result(
+        conn.request(DaemonRequest::WaitFor {
+            session_id: "term-probe-s".into(),
+            cond: WaitCondition::TuiIdle,
+            timeout_ms: 20_000,
+        })
+        .expect("idle wait"),
+    )
+    .expect("decode idle wait");
+    assert!(idle.satisfied, "echoed command must reach tui-idle");
+
+    let screen = decode_read_screen(
+        conn.request(DaemonRequest::ReadScreen {
+            session_id: "term-probe-s".into(),
+        })
+        .expect("read roundtrip"),
+    )
+    .expect("decode screen");
+    assert!(!screen.truncated);
+    assert!(
+        screen.text.to_lowercase().contains(PROBE),
+        "screen text must contain probe (case/spacing tolerant): {:?}",
+        screen.text
+    );
+
+    decode_ok(
+        conn.request(DaemonRequest::Kill {
+            session_id: "term-probe-s".into(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    cancel.cancel();
+    listener.join().unwrap();
+}
+
+#[test]
+fn wait_for_exit_satisfied_when_session_killed_midwait() {
+    let (mut conn, root, listener, cancel) = start_registry_daemon("exit-wait");
+    decode_attached(conn.request(attach_request("exit-wait-s")).expect("create")).expect("new");
+
+    let waiter_root = root.clone();
+    let waiter = std::thread::spawn(move || {
+        let mut wait_conn =
+            RuntimeConnection::connect_with_data_dir(Some(waiter_root), Duration::from_secs(15))
+                .ok()?;
+        Some(
+            decode_wait_result(
+                wait_conn
+                    .request(DaemonRequest::WaitFor {
+                        session_id: "exit-wait-s".into(),
+                        cond: WaitCondition::Exit,
+                        timeout_ms: 10_000,
+                    })
+                    .expect("exit wait"),
+            )
+            .expect("decode exit wait"),
+        )
+    });
+
+    std::thread::sleep(Duration::from_millis(300));
+    decode_ok(
+        conn.request(DaemonRequest::Kill {
+            session_id: "exit-wait-s".into(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+
+    let result = waiter.join().unwrap().expect("waiter connection succeeded");
+    assert!(result.satisfied, "kill during WaitFor must satisfy Exit");
+    assert!(result.exit_code.is_some(), "kill must surface an exit code");
+    assert!(result.waited_ms < 10_000);
+
+    cancel.cancel();
+    listener.join().unwrap();
+}
+
+#[test]
+fn read_screen_unknown_session_is_daemon_error() {
+    let (mut conn, _root, listener, cancel) = start_registry_daemon("unknown");
+    match conn.request(DaemonRequest::ReadScreen { session_id: "nope".into() }) {
+        Ok(DaemonResponse::Error(msg)) => assert_eq!(msg, "session not found"),
+        other => panic!("expected session-not-found error, got {other:?}"),
+    }
+    drop(conn);
+    cancel.cancel();
+    listener.join().unwrap();
+}
+
+// Raw-pipe client so keepalive frames stay observable (RuntimeConnection hides them).
+#[test]
+fn keepalive_frames_flow_on_long_wait() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[cfg(windows)]
+    fn open_client(pipe: &str) -> Option<tokio::net::windows::named_pipe::NamedPipeClient> {
+        tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(pipe)
+            .ok()
+    }
+    #[cfg(not(windows))]
+    fn open_client(pipe: &str) -> Option<tokio::net::UnixStream> {
+        match std::os::unix::net::UnixStream::connect(pipe) {
+            Ok(stream) => tokio::net::UnixStream::from_std(stream).ok(),
+            Err(_) => None,
+        }
+    }
+
+    let pipe = unique_pipe_path("keepalive");
+    let server = DaemonServer::new();
+    let (listener, cancel) = spawn_listener(Arc::new(server), &pipe);
+    std::thread::sleep(Duration::from_millis(150));
+
+    let observed = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let mut client = None;
+            for _ in 0..40 {
+                if let Some(c) = open_client(&pipe) {
+                    client = Some(c);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let client = client.expect("raw connect");
+            let (read_half, mut write_half) = tokio::io::split(client);
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+
+            async fn send_req<W: tokio::io::AsyncWrite + Unpin>(
+                write_half: &mut W,
+                req: &DaemonRequest,
+            ) {
+                let json = serde_json::to_string(req).unwrap();
+                write_half.write_all(json.as_bytes()).await.unwrap();
+                write_half.write_all(b"\n").await.unwrap();
+                write_half.flush().await.unwrap();
+            }
+
+            send_req(
+                &mut write_half,
+                &DaemonRequest::Hello {
+                    client_version: "test".into(),
+                    protocol_version: DAEMON_PROTOCOL_VERSION,
+                    auth_token: None,
+                },
+            )
+            .await;
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+
+            send_req(&mut write_half, &attach_request("ka-session")).await;
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+            assert!(line.contains("SessionAttached"), "attach first: {line}");
+
+            // Healthy shell never exits on its own: the wait runs to timeout
+            send_req(
+                &mut write_half,
+                &DaemonRequest::WaitFor {
+                    session_id: "ka-session".into(),
+                    cond: WaitCondition::Exit,
+                    timeout_ms: 3_500,
+                },
+            )
+            .await;
+
+            let started = std::time::Instant::now();
+            let mut keepalives = 0u32;
+            loop {
+                line.clear();
+                let n = reader.read_line(&mut line).await.unwrap();
+                assert!(n > 0, "daemon closed mid-wait");
+                // Attach wired per-session forwarding, so output events stream by
+                if line.contains("\"event\"") || line.contains("_keepalive") {
+                    if line.contains("_keepalive") {
+                        keepalives += 1;
+                    }
+                    continue;
+                }
+                match serde_json::from_str::<DaemonResponse>(line.trim()).unwrap() {
+                    DaemonResponse::WaitResult {
+                        satisfied,
+                        waited_ms,
+                        ..
+                    } => break (satisfied, waited_ms, keepalives, started.elapsed()),
+                    other => panic!("unexpected frame during wait: {other:?}"),
+                }
+            }
+        })
+    });
+
+    let (satisfied, waited_ms, keepalives, elapsed) = observed.join().unwrap();
+    assert!(!satisfied, "alive session must time out");
+    assert!(waited_ms >= 3_000, "waited_ms={waited_ms}");
+    assert!(elapsed >= Duration::from_secs(3));
+    assert!(
+        keepalives >= 1,
+        "expected at least one keepalive frame in >2s wait"
+    );
+
+    cancel.cancel();
+    listener.join().unwrap();
+}
+
+#[test]
+fn split_inherits_cwd_over_pipe() {
+    let (mut conn, root, listener, cancel) = start_registry_daemon("split");
+    decode_attached(
+        conn.request(DaemonRequest::CreateOrAttach {
+            session_id: "split-src".into(),
+            cols: 80,
+            rows: 24,
+            cwd: Some(root.to_string_lossy().into_owned()),
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        })
+        .expect("create source"),
+    )
+    .expect("source created");
+
+    // The CLI split does list-check + warm attach + create; exercised here
+    // directly over the wire.
+    let attached = decode_attached(
+        conn.request(DaemonRequest::CreateOrAttach {
+            session_id: "split-src".into(),
+            cols: 0,
+            rows: 0,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        })
+        .expect("attach source"),
+    )
+    .expect("warm attach");
+    assert!(!attached.is_new);
+    assert_eq!(attached.cwd.as_deref(), Some(root.to_string_lossy().as_ref()));
+
+    let new_handle = oppa_lib::cli::new_session_handle();
+    let created = decode_attached(
+        conn.request(build_terminal_create(
+            &new_handle,
+            attached.cwd.as_deref(),
+            attached.worktree_id.as_deref(),
+        ))
+        .expect("split create"),
+    )
+    .expect("split created");
+    assert!(created.is_new);
+    assert_eq!(created.cwd, attached.cwd);
+
+    for id in ["split-src", new_handle.as_str()] {
+        decode_ok(
+            conn.request(DaemonRequest::Kill { session_id: id.into() })
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    cancel.cancel();
+    listener.join().unwrap();
 }

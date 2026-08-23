@@ -1,7 +1,8 @@
 ﻿// CLI-facing runtime discovery + authed connect; the `oppa-cli` binary is a thin wrapper over this module.
 use crate::git::worktree_registry::WorktreeStatus;
 use crate::pty::ipc_protocol::{
-    get_daemon_socket_path, DaemonRequest, DaemonResponse, DAEMON_PROTOCOL_VERSION,
+    get_daemon_socket_path, CreateOrAttachResult, DaemonRequest, DaemonResponse, WaitCondition,
+    DAEMON_PROTOCOL_VERSION,
 };
 use output::{CliRepoRecord, CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord};
 
@@ -170,9 +171,9 @@ impl RuntimeConnection {
                 }
                 let value: serde_json::Value = serde_json::from_str(line.trim())
                     .map_err(|e| CliError::Protocol(format!("bad response line: {e}")))?;
-                // Global broadcasts (worktree mutations) interleave with responses;
-                // event frames carry "event" instead of "type".
-                if value.get("event").is_some() {
+                // Global broadcasts and WaitFor keepalives interleave with
+                // responses; both are non-response frames keyed off "event"/"_keepalive".
+                if value.get("event").is_some() || value.get("_keepalive").is_some() {
                     continue;
                 }
                 return serde_json::from_value(value)
@@ -283,6 +284,65 @@ fn unexpected(context: &str, resp: &DaemonResponse) -> CliError {
     CliError::Protocol(format!("unexpected {context} response: {}", response_kind(resp)))
 }
 
+// CLI-level grace added on top of the daemon-side WaitFor timeout so the
+// daemon's keepalive frames, not the client clock, decide the deadline.
+pub const WAIT_GRACE_MS: u64 = 2000;
+
+// ---- terminal verb builders; pure so tests never spawn a process ----
+
+pub fn build_terminal_create(
+    session_id: &str,
+    cwd: Option<&str>,
+    worktree_id: Option<&str>,
+) -> DaemonRequest {
+    DaemonRequest::CreateOrAttach {
+        session_id: session_id.into(),
+        cols: 80,
+        rows: 24,
+        cwd: cwd.map(Into::into),
+        shell: None,
+        resume_agents: false,
+        worktree_id: worktree_id.map(Into::into),
+        extra_env: Vec::new(),
+    }
+}
+
+pub fn build_terminal_send(
+    session_id: &str,
+    text: &str,
+    enter: bool,
+    interrupt: bool,
+) -> DaemonRequest {
+    // Interrupt is a raw Ctrl-C byte that must precede the typed text
+    let mut data = String::new();
+    if interrupt {
+        data.push('\x03');
+    }
+    data.push_str(text);
+    if enter {
+        data.push('\r');
+    }
+    DaemonRequest::Write {
+        session_id: session_id.into(),
+        data,
+    }
+}
+
+pub fn parse_wait_condition(raw: &str) -> Result<WaitCondition, CliError> {
+    match raw {
+        "exit" => Ok(WaitCondition::Exit),
+        "tui-idle" => Ok(WaitCondition::TuiIdle),
+        _ => Err(CliError::Usage(format!(
+            "invalid --for '{raw}'; expected exit | tui-idle"
+        ))),
+    }
+}
+
+/// Session handle for `terminal create`/`split` when --name is absent.
+pub fn new_session_handle() -> String {
+    format!("cli-{}", uuid::Uuid::new_v4())
+}
+
 pub fn decode_repo_records(resp: DaemonResponse) -> Result<Vec<CliRepoRecord>, CliError> {
     match resp {
         DaemonResponse::RepoRecords(records) => Ok(records.iter().map(Into::into).collect()),
@@ -343,6 +403,48 @@ pub fn decode_ok(resp: DaemonResponse) -> Result<(), CliError> {
     }
 }
 
+pub fn decode_session_ids(resp: DaemonResponse) -> Result<Vec<String>, CliError> {
+    match resp {
+        DaemonResponse::SessionList(ids) => Ok(ids),
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg)),
+        other => Err(unexpected("session list", &other)),
+    }
+}
+
+pub fn decode_attached(resp: DaemonResponse) -> Result<CreateOrAttachResult, CliError> {
+    match resp {
+        DaemonResponse::SessionAttached(result) => Ok(result),
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg)),
+        other => Err(unexpected("attach", &other)),
+    }
+}
+
+pub fn decode_read_screen(resp: DaemonResponse) -> Result<output::CliScreenText, CliError> {
+    match resp {
+        DaemonResponse::ScreenText { text, truncated } => {
+            Ok(output::CliScreenText { text, truncated })
+        }
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg)),
+        other => Err(unexpected("read screen", &other)),
+    }
+}
+
+pub fn decode_wait_result(resp: DaemonResponse) -> Result<output::CliWaitResult, CliError> {
+    match resp {
+        DaemonResponse::WaitResult {
+            satisfied,
+            exit_code,
+            waited_ms,
+        } => Ok(output::CliWaitResult {
+            satisfied,
+            exit_code,
+            waited_ms,
+        }),
+        DaemonResponse::Error(msg) => Err(CliError::Daemon(msg)),
+        other => Err(unexpected("wait", &other)),
+    }
+}
+
 // Default `worktree list` hides retired tombstones; --all keeps them.
 pub fn filter_active_only(entries: Vec<CliWorktreeListEntry>) -> Vec<CliWorktreeListEntry> {
     entries
@@ -385,6 +487,8 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::WorktreeRecordOne(_) => "WorktreeRecordOne".into(),
         DaemonResponse::WorktreeRecordsList(_) => "WorktreeRecordsList".into(),
         DaemonResponse::WorktreePsEntries(_) => "WorktreePsEntries".into(),
+        DaemonResponse::ScreenText { .. } => "ScreenText".into(),
+        DaemonResponse::WaitResult { .. } => "WaitResult".into(),
     }
 }
 

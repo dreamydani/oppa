@@ -83,6 +83,47 @@ pub struct OkPayload {
     pub ok: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliScreenText {
+    pub text: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliWaitResult {
+    pub satisfied: bool,
+    pub exit_code: Option<i32>,
+    pub waited_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliSessionDetail {
+    pub id: String,
+    pub pid: u32,
+    pub cols: u16,
+    pub rows: u16,
+    pub cwd: Option<String>,
+    pub worktree_id: Option<String>,
+}
+
+// Honest no-op verbs (switch in M1) carry their deviation note into JSON too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliActionNote {
+    pub ok: bool,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliSessionHandle {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CliSplitHandles {
+    pub primary: String,
+    pub secondary: String,
+}
+
 pub fn render_json<T: Serialize + ?Sized>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
 }
@@ -276,4 +317,48 @@ pub fn render_lineage_tree(records: &[CliWorktreeRecord]) -> String {
     }
     lines.join("\n")
 }
+
+// ---- terminal verb renderers ----
+
+pub fn render_session_list(ids: &[String]) -> String {
+    if ids.is_empty() {
+        return "no sessions".into();
+    }
+    ids.join("\n")
+}
+
+pub fn render_screen_text(text: &str) -> String {
+    // Normalize CR line endings so pipes/grep see clean LF text
+    let normalized = text.replace("\r\n", "\n");
+    let trimmed = normalized.trim_end_matches(['\n', '\r']);
+    format!("{trimmed}\n")
+}
+
+pub fn render_session_detail(detail: &CliSessionDetail) -> String {
+    let mut lines = vec![
+        ("id".to_string(), detail.id.clone()),
+        ("pid".to_string(), detail.pid.to_string()),
+        ("size".to_string(), format!("{}x{}", detail.cols, detail.rows)),
+    ];
+    lines.push((
+        "cwd".to_string(),
+        detail.cwd.clone().unwrap_or_else(|| "-".into()),
+    ));
+    lines.push((
+        "worktree".to_string(),
+        detail.worktree_id.clone().unwrap_or_else(|| "-".into()),
+    ));
+    render_kv(lines)
+}
+
+pub fn render_wait_result(result: &CliWaitResult) -> String {
+    let status = if result.satisfied { "satisfied" } else { "not satisfied" };
+    match result.exit_code {
+        Some(code) => format!("{status} · exit {code} · {}ms", result.waited_ms),
+        None => format!("{status} · {}ms", result.waited_ms),
+    }
+}
+
+pub const SWITCH_M1_NOTE: &str =
+    "M1 validates the session only; GUI focus switching arrives with tab-title sync";
 

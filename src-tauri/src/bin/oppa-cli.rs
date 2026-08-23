@@ -1,13 +1,17 @@
 use clap::{Parser, Subcommand};
 use oppa_lib::cli::output::{
     render_json, render_lineage_tree, render_ps_rows, render_repo_detail, render_repo_table,
-    render_worktree_list, render_worktree_show, OkPayload,
+    render_screen_text, render_session_detail, render_session_list, render_wait_result,
+    render_worktree_list, render_worktree_show, CliActionNote, CliScreenText, CliSessionDetail,
+    CliSessionHandle, CliSplitHandles, CliWaitResult, OkPayload, SWITCH_M1_NOTE,
 };
 use oppa_lib::cli::{
-    build_repo_add, build_worktree_create, build_worktree_set, decode_ok, decode_ps_entries,
-    decode_repo_records, decode_worktree_list, decode_worktree_many, decode_worktree_one,
-    filter_active_only, parse_status, CreateArgs, CliError, ParentUpdate, RuntimeConnection,
-    RUNTIME_UNAVAILABLE_HINT,
+    build_repo_add, build_terminal_create, build_terminal_send, build_worktree_create,
+    build_worktree_set, decode_attached, decode_ok, decode_ps_entries, decode_read_screen,
+    decode_repo_records, decode_session_ids, decode_wait_result, decode_worktree_list,
+    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle, parse_status,
+    parse_wait_condition, CreateArgs, CliError, ParentUpdate, RuntimeConnection,
+    RUNTIME_UNAVAILABLE_HINT, WAIT_GRACE_MS,
 };
 use oppa_lib::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
 use std::path::PathBuf;
@@ -43,6 +47,11 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         action: WorktreeAction,
+    },
+    /// Drive terminal sessions managed by the daemon
+    Terminal {
+        #[command(subcommand)]
+        action: TerminalAction,
     },
 }
 
@@ -112,6 +121,62 @@ enum WorktreeAction {
     Lineage { id: String },
 }
 
+#[derive(Subcommand)]
+enum TerminalAction {
+    /// List live session ids
+    List,
+    /// Show one session's pid, size, cwd, and worktree binding
+    Show { id: String },
+    /// Print the session's current screen text (plain, viewport only)
+    Read {
+        id: String,
+        // M1 default IS the rendered screen; kept for forward compatibility
+        #[arg(long)]
+        screen: bool,
+    },
+    /// Send text to a session's input
+    Send {
+        id: String,
+        #[arg(long)]
+        text: String,
+        #[arg(long)]
+        enter: bool,
+        /// Prefix a Ctrl-C byte before the text
+        #[arg(long)]
+        interrupt: bool,
+    },
+    /// Long-poll until a condition holds (exit | tui-idle)
+    Wait {
+        id: String,
+        #[arg(long = "for")]
+        for_cond: String,
+        #[arg(long = "timeout-ms", default_value_t = 30_000)]
+        timeout_ms: u64,
+    },
+    /// Create a new session and print its handle
+    Create {
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        worktree: Option<String>,
+        /// Session id; a fresh uuid handle is generated when omitted
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Close (kill) a session
+    Close { id: String },
+    /// Focus a session in the GUI (M1: existence validation only)
+    Switch { id: String },
+    /// Unsupported in M1: arrives with tab-title sync
+    Rename {
+        id: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Second session sharing the source's cwd and worktree; prints both handles
+    Split { id: String },
+}
+
 fn main() {
     let cli = Cli::parse();
     let timeout = Duration::from_millis(cli.timeout_ms);
@@ -132,6 +197,7 @@ fn run(command: &Command, json: bool, timeout: Duration) -> Result<(), CliError>
         Command::AgentContext => run_agent_context(json),
         Command::Repo { action } => run_repo(action, json, timeout),
         Command::Worktree { action } => run_worktree(action, json, timeout),
+        Command::Terminal { action } => run_terminal(action, json, timeout),
     }
 }
 
@@ -305,6 +371,168 @@ fn run_worktree(action: &WorktreeAction, json: bool, timeout: Duration) -> Resul
             emit(json, &records, || render_lineage_tree(&records))
         }
     }
+}
+
+fn run_terminal(action: &TerminalAction, json: bool, timeout: Duration) -> Result<(), CliError> {
+    match action {
+        TerminalAction::List => {
+            let ids = decode_session_ids(send(DaemonRequest::ListSessions, timeout)?)?;
+            emit(json, &ids, || render_session_list(&ids))
+        }
+        TerminalAction::Show { id } => {
+            let attached = attach_existing(id, timeout)?;
+            let detail = CliSessionDetail {
+                id: id.clone(),
+                pid: attached.pid,
+                cols: attached.cols,
+                rows: attached.rows,
+                cwd: attached.cwd,
+                worktree_id: attached.worktree_id,
+            };
+            emit(json, &detail, || render_session_detail(&detail))
+        }
+        TerminalAction::Read { id, .. } => {
+            let screen: CliScreenText =
+                decode_read_screen(send(DaemonRequest::ReadScreen { session_id: id.clone() }, timeout)?)?;
+            let text = screen.text.clone();
+            emit(json, &screen, || render_screen_text(&text))
+        }
+        TerminalAction::Send {
+            id,
+            text,
+            enter,
+            interrupt,
+        } => run_unit(
+            send(
+                build_terminal_send(id, text, *enter, *interrupt),
+                timeout,
+            )?,
+            json,
+            || format!("sent to {id}"),
+        ),
+        TerminalAction::Wait {
+            id,
+            for_cond,
+            timeout_ms,
+        } => {
+            let cond = parse_wait_condition(for_cond)?;
+            // The connection must outlive the daemon-side wait; keepalive
+            // frames reset each read, so only the grace needs headroom
+            let conn_timeout = Duration::from_millis(
+                (*timeout_ms).max(timeout.as_millis() as u64) + WAIT_GRACE_MS,
+            );
+            let mut conn = RuntimeConnection::connect(conn_timeout)?;
+            let resp = conn.request(DaemonRequest::WaitFor {
+                session_id: id.clone(),
+                cond,
+                timeout_ms: *timeout_ms,
+            });
+            drop(conn);
+            let result: CliWaitResult = decode_wait_result(resp?)?;
+            emit(json, &result, || render_wait_result(&result))
+        }
+        TerminalAction::Create {
+            cwd,
+            worktree,
+            name,
+        } => {
+            let handle = name.clone().unwrap_or_else(new_session_handle);
+            decode_attached(send(
+                build_terminal_create(&handle, cwd.as_deref(), worktree.as_deref()),
+                timeout,
+            )?)?;
+            emit(
+                json,
+                &CliSessionHandle {
+                    session_id: handle.clone(),
+                },
+                || format!("session {handle}"),
+            )
+        }
+        TerminalAction::Close { id } => run_unit(
+            send(
+                DaemonRequest::Kill {
+                    session_id: id.clone(),
+                },
+                timeout,
+            )?,
+            json,
+            || format!("closed {id}"),
+        ),
+        TerminalAction::Switch { id } => {
+            require_existing(id, timeout)?;
+            emit(
+                json,
+                &CliActionNote {
+                    ok: true,
+                    note: SWITCH_M1_NOTE.into(),
+                },
+                || format!("switched to {id}\nnote: {SWITCH_M1_NOTE}"),
+            )
+        }
+        TerminalAction::Rename { .. } => Err(CliError::Usage(
+            "rename arrives with tab-title sync".into(),
+        )),
+        TerminalAction::Split { id } => {
+            require_existing(id, timeout)?;
+            let source = attach_existing(id, timeout)?;
+            let new_id = new_session_handle();
+            decode_attached(send(
+                build_terminal_create(&new_id, source.cwd.as_deref(), source.worktree_id.as_deref()),
+                timeout,
+            )?)?;
+            emit(
+                json,
+                &CliSplitHandles {
+                    primary: id.clone(),
+                    secondary: new_id.clone(),
+                },
+                || format!("{id}\n{new_id}"),
+            )
+        }
+    }
+}
+
+fn session_exists(id: &str, timeout: Duration) -> Result<bool, CliError> {
+    let ids = decode_session_ids(send(DaemonRequest::ListSessions, timeout)?)?;
+    Ok(ids.iter().any(|existing| existing == id))
+}
+
+fn require_existing(id: &str, timeout: Duration) -> Result<(), CliError> {
+    if session_exists(id, timeout)? {
+        Ok(())
+    } else {
+        Err(CliError::Daemon(format!("session {id} not found")))
+    }
+}
+
+// cols=0 skips the resize-on-attach path. A true spawn here means the
+// session vanished between list and attach: kill it and report honestly.
+fn attach_existing(id: &str, timeout: Duration) -> Result<oppa_lib::pty::ipc_protocol::CreateOrAttachResult, CliError> {
+    require_existing(id, timeout)?;
+    let attached = decode_attached(send(
+        DaemonRequest::CreateOrAttach {
+            session_id: id.into(),
+            cols: 0,
+            rows: 0,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        },
+        timeout,
+    )?)?;
+    if attached.is_new {
+        let _ = send(
+            DaemonRequest::Kill {
+                session_id: id.into(),
+            },
+            timeout,
+        );
+        return Err(CliError::Daemon(format!("session {id} not found")));
+    }
+    Ok(attached)
 }
 
 fn run_status(json: bool, timeout: Duration) -> Result<(), CliError> {

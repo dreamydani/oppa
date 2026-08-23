@@ -86,14 +86,17 @@ fn status_report_type_shape_roundtrips_json() {
 
 use super::output::{
     render_json, render_lineage_tree, render_ps_rows, render_repo_detail, render_repo_table,
-    render_worktree_list, render_worktree_show, CliRepoRecord, CliWorktreeListEntry,
-    CliWorktreePsEntry, CliWorktreeRecord,
+    render_screen_text, render_session_detail, render_session_list, render_wait_result,
+    render_worktree_list, render_worktree_show, CliActionNote, CliRepoRecord,
+    CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord, SWITCH_M1_NOTE,
 };
 use super::vocabulary::{normalize_verb, validate_verb, CANONICAL_COMMANDS};
 use super::{
-    build_worktree_create, build_worktree_set, decode_ps_entries, decode_repo_records,
-    decode_ok, decode_worktree_list, decode_worktree_many, decode_worktree_one,
-    filter_active_only, parse_status, CreateArgs, ParentUpdate,
+    build_terminal_create, build_terminal_send, build_worktree_create, build_worktree_set,
+    decode_attached, decode_ok, decode_ps_entries, decode_read_screen, decode_repo_records,
+    decode_session_ids, decode_wait_result, decode_worktree_list,
+    decode_worktree_many, decode_worktree_one, filter_active_only, new_session_handle,
+    parse_status, parse_wait_condition, CreateArgs, ParentUpdate, WAIT_GRACE_MS,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
@@ -530,4 +533,228 @@ fn filter_active_only_drops_retired_tombstones() {
     let active = filter_active_only(entries);
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].record.name, "alpha");
+}
+
+// ---- task 9: terminal verb builders, decoders, renderers ----
+
+use super::output::{CliScreenText, CliSessionDetail, CliSplitHandles, CliWaitResult};
+use crate::pty::ipc_protocol::{CreateOrAttachResult, WaitCondition};
+
+#[test]
+fn vocabulary_covers_terminal_family() {
+    let terminal = CANONICAL_COMMANDS
+        .iter()
+        .find(|(f, _)| *f == "terminal")
+        .expect("terminal family registered")
+        .1;
+    assert_eq!(
+        terminal,
+        &[
+            "list", "show", "read", "send", "wait", "create", "close", "switch", "rename",
+            "split"
+        ][..]
+    );
+    for verb in terminal {
+        assert_eq!(validate_verb("terminal", verb), Ok(()));
+    }
+    assert!(validate_verb("terminal", "kill").is_err());
+}
+
+#[test]
+fn wait_condition_parsing_maps_cli_words_and_lists_valid_on_error() {
+    assert_eq!(parse_wait_condition("exit"), Ok(WaitCondition::Exit));
+    assert_eq!(parse_wait_condition("tui-idle"), Ok(WaitCondition::TuiIdle));
+    let err = parse_wait_condition("forever").unwrap_err();
+    for expected in ["exit", "tui-idle"] {
+        assert!(err.to_string().contains(expected), "error must list {expected}: {err}");
+    }
+}
+
+#[test]
+fn terminal_send_builder_encodes_interrupt_prefix_and_enter_suffix() {
+    match build_terminal_send("s1", "echo hi", true, false) {
+        DaemonRequest::Write { session_id, data } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(data, "echo hi\r");
+        }
+        other => panic!("expected Write, got {other:?}"),
+    }
+
+    match build_terminal_send("s1", "echo hi", false, true) {
+        DaemonRequest::Write { data, .. } => {
+            assert!(data.starts_with('\x03'), "interrupt must precede text: {data:?}");
+            assert!(!data.ends_with('\r'));
+        }
+        other => panic!("expected Write, got {other:?}"),
+    }
+
+    match build_terminal_send("s1", "q", true, true) {
+        DaemonRequest::Write { data, .. } => assert_eq!(data, "\x03q\r"),
+        other => panic!("expected Write, got {other:?}"),
+    }
+
+    match build_terminal_send("s1", "ls", false, false) {
+        DaemonRequest::Write { data, .. } => assert_eq!(data, "ls"),
+        other => panic!("expected Write, got {other:?}"),
+    }
+}
+
+#[test]
+fn terminal_create_builder_defaults_size_and_maps_flags() {
+    match build_terminal_create("abc", Some("/tmp/ws"), Some("wt-1")) {
+        DaemonRequest::CreateOrAttach {
+            session_id,
+            cols,
+            rows,
+            cwd,
+            shell,
+            resume_agents,
+            worktree_id,
+            extra_env,
+        } => {
+            assert_eq!(session_id, "abc");
+            assert_eq!((cols, rows), (80, 24));
+            assert_eq!(cwd.as_deref(), Some("/tmp/ws"));
+            assert_eq!(shell, None);
+            assert!(!resume_agents);
+            assert_eq!(worktree_id.as_deref(), Some("wt-1"));
+            assert!(extra_env.is_empty());
+        }
+        other => panic!("expected CreateOrAttach, got {other:?}"),
+    }
+
+    match build_terminal_create("abc", None, None) {
+        DaemonRequest::CreateOrAttach { cwd, worktree_id, .. } => {
+            assert_eq!(cwd, None);
+            assert_eq!(worktree_id, None);
+        }
+        other => panic!("expected CreateOrAttach, got {other:?}"),
+    }
+}
+
+#[test]
+fn new_session_handle_is_prefixed_and_unique() {
+    let a = new_session_handle();
+    let b = new_session_handle();
+    assert!(a.starts_with("cli-"));
+    assert_ne!(a, b, "generated handles must be unique");
+}
+
+#[test]
+fn terminal_decoders_map_payloads_errors_and_wrong_variants() {
+    let ids =
+        decode_session_ids(DaemonResponse::SessionList(vec!["a".into(), "b".into()])).unwrap();
+    assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    match decode_session_ids(DaemonResponse::Error("session not found".into())) {
+        Err(CliError::Daemon(msg)) => assert_eq!(msg, "session not found"),
+        other => panic!("expected Daemon error, got {other:?}"),
+    }
+    match decode_session_ids(DaemonResponse::Ok) {
+        Err(CliError::Protocol(msg)) => assert!(msg.contains("unexpected session list"), "{msg}"),
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+
+    let screen = decode_read_screen(DaemonResponse::ScreenText {
+        text: "hello\nworld".into(),
+        truncated: false,
+    })
+    .unwrap();
+    assert_eq!(
+        screen,
+        CliScreenText {
+            text: "hello\nworld".into(),
+            truncated: false
+        }
+    );
+    match decode_read_screen(DaemonResponse::Error("session not found".into())) {
+        Err(CliError::Daemon(msg)) => assert_eq!(msg, "session not found"),
+        other => panic!("expected Daemon error, got {other:?}"),
+    }
+
+    let wait = decode_wait_result(DaemonResponse::WaitResult {
+        satisfied: true,
+        exit_code: Some(7),
+        waited_ms: 812,
+    })
+    .unwrap();
+    assert_eq!(
+        wait,
+        CliWaitResult {
+            satisfied: true,
+            exit_code: Some(7),
+            waited_ms: 812
+        }
+    );
+    match decode_wait_result(DaemonResponse::Ok) {
+        Err(CliError::Protocol(msg)) => assert!(msg.contains("unexpected wait"), "{msg}"),
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+
+    let attached = decode_attached(DaemonResponse::SessionAttached(sample_attached())).unwrap();
+    assert_eq!(attached.pid, 42);
+    match decode_attached(DaemonResponse::Ok) {
+        Err(CliError::Protocol(msg)) => assert!(msg.contains("unexpected attach"), "{msg}"),
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+}
+
+fn sample_attached() -> CreateOrAttachResult {
+    CreateOrAttachResult {
+        is_new: false,
+        pid: 42,
+        cols: 80,
+        rows: 24,
+        cwd: Some("C:\\ws".into()),
+        snapshot: None,
+        resume: None,
+        resume_declined_reason: None,
+        worktree_id: Some("repo::C:/ws/feat-a".into()),
+    }
+}
+
+#[test]
+fn terminal_renderers_are_stable() {
+    assert_eq!(render_session_list(&[]), "no sessions");
+    assert_eq!(
+        render_session_list(&["a".into(), "b".into()]),
+        "a\nb"
+    );
+
+    assert_eq!(render_screen_text("hello\r\nworld"), "hello\nworld\n");
+    assert_eq!(render_screen_text(""), "\n");
+
+    let detail = CliSessionDetail {
+        id: "cli-x".into(),
+        pid: 9,
+        cols: 120,
+        rows: 40,
+        cwd: Some("C:\\ws".into()),
+        worktree_id: None,
+    };
+    let rendered = render_session_detail(&detail);
+    for expected in ["id:       cli-x", "pid:      9", "size:     120x40", "cwd:      C:\\ws", "worktree: -"] {
+        assert!(rendered.contains(expected), "missing '{expected}' in:\n{rendered}");
+    }
+
+    assert_eq!(
+        render_wait_result(&CliWaitResult { satisfied: true, exit_code: Some(0), waited_ms: 1234 }),
+        "satisfied · exit 0 · 1234ms"
+    );
+    assert_eq!(
+        render_wait_result(&CliWaitResult { satisfied: false, exit_code: None, waited_ms: 30000 }),
+        "not satisfied · 30000ms"
+    );
+    assert_eq!(
+        render_json(&CliActionNote { ok: true, note: SWITCH_M1_NOTE.into() }),
+        format!(r#"{{"ok":true,"note":"{SWITCH_M1_NOTE}"}}"#)
+    );
+    assert_eq!(
+        render_json(&CliSplitHandles { primary: "p".into(), secondary: "s".into() }),
+        r#"{"primary":"p","secondary":"s"}"#
+    );
+}
+
+#[test]
+fn wait_grace_gives_keepalives_headroom_over_daemon_deadline() {
+    assert_eq!(WAIT_GRACE_MS, 2000);
 }
