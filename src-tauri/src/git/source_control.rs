@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const STATUS_ENTRY_LIMIT: usize = 2000;
+const DIFF_SIDE_CAP_BYTES: usize = 512 * 1024;
+const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+const HISTORY_MAX_LIMIT: usize = 200;
+const HISTORY_DEFAULT_LIMIT: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -57,6 +61,61 @@ pub struct SourceControlStatus {
 pub struct LocalBranches {
     pub branches: Vec<String>,
     pub current: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffKind {
+    Text,
+    Binary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffContent {
+    pub kind: DiffKind,
+    pub original_content: String,
+    pub modified_content: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitStats {
+    pub files: u32,
+    pub insertions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryItem {
+    pub id: String,
+    pub parent_ids: Vec<String>,
+    pub subject: String,
+    pub message_body: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp_secs: u64,
+    pub stats: CommitStats,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryResult {
+    pub items: Vec<HistoryItem>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompareEntry {
+    pub path: String,
+    pub change_kind: String,
+    pub old_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchCompare {
+    pub base_ref: String,
+    pub ahead: u32,
+    pub behind: u32,
+    pub changed_files: Vec<CompareEntry>,
 }
 
 pub fn sc_status(cwd: &Path) -> Result<SourceControlStatus, String> {
@@ -166,6 +225,246 @@ pub fn sc_local_branches(cwd: &Path) -> Result<LocalBranches, String> {
 pub fn sc_checkout(cwd: &Path, branch: &str) -> Result<(), String> {
     validate_ref_name(branch)?;
     git_ok(cwd, &["checkout", "-q", branch]).map(|_| ())
+}
+
+// Side-resolution table (task 7 UI wires buttons to this):
+//   unstaged (staged=false, head=false): original=index (:0:), modified=worktree disk
+//   staged   (staged=true,  head=false): original=HEAD ("" on unborn/added), modified=index
+//   vs-head  (compare_against_head=true): original=HEAD, modified=worktree — overrides staged
+// Deleted side ⇒ empty string; path absent from index+HEAD+disk ⇒ Err.
+pub fn sc_file_diff(
+    cwd: &Path,
+    path: &str,
+    staged: bool,
+    compare_against_head: bool,
+) -> Result<DiffContent, String> {
+    let head_exists = run_git(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"])?
+        .status
+        .success();
+    let index_bytes = git_blob(cwd, format!(":0:{path}"));
+    let head_bytes = if head_exists {
+        git_blob(cwd, format!("HEAD:{path}"))
+    } else {
+        None
+    };
+    let disk_bytes = std::fs::read(cwd.join(path)).ok();
+    if index_bytes.is_none() && head_bytes.is_none() && disk_bytes.is_none() {
+        return Err("path not found in git".into());
+    }
+
+    let (original, modified) = if compare_against_head {
+        (head_bytes.clone(), disk_bytes)
+    } else if staged {
+        (head_bytes, index_bytes)
+    } else {
+        (index_bytes, disk_bytes)
+    };
+
+    // NUL in the first sniff window of EITHER side makes the whole pair binary.
+    let side_is_binary =
+        |side: &Option<Vec<u8>>| side.as_deref().is_some_and(is_binary_sniff);
+    let kind = if side_is_binary(&original) || side_is_binary(&modified) {
+        DiffKind::Binary
+    } else {
+        DiffKind::Text
+    };
+    let (original_content, modified_content, truncated) = if kind == DiffKind::Binary {
+        (String::new(), String::new(), false)
+    } else {
+        let (oc, ot) = capped_text(original.as_deref().unwrap_or(b""));
+        let (mc, mt) = capped_text(modified.as_deref().unwrap_or(b""));
+        (oc, mc, ot || mt)
+    };
+    Ok(DiffContent {
+        kind,
+        original_content,
+        modified_content,
+        truncated,
+    })
+}
+
+fn git_blob(cwd: &Path, rev_path: String) -> Option<Vec<u8>> {
+    let output = run_git(cwd, &["show", &rev_path]).ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
+fn is_binary_sniff(bytes: &[u8]) -> bool {
+    bytes.iter().take(BINARY_SNIFF_BYTES).any(|&b| b == 0)
+}
+
+// Cut at a char boundary so lossy decoding never emits U+FFFD for valid UTF-8 input.
+fn capped_text(bytes: &[u8]) -> (String, bool) {
+    let truncated = bytes.len() > DIFF_SIDE_CAP_BYTES;
+    let mut end = DIFF_SIDE_CAP_BYTES.min(bytes.len());
+    // Boundary at `end` is valid unless bytes[end] continues a multi-byte char.
+    while end > 0 && end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    (
+        String::from_utf8_lossy(&bytes[..end]).into_owned(),
+        truncated,
+    )
+}
+
+pub fn sc_history(cwd: &Path, limit: usize) -> Result<HistoryResult, String> {
+    let limit = if limit == 0 {
+        HISTORY_DEFAULT_LIMIT
+    } else {
+        limit.clamp(1, HISTORY_MAX_LIMIT)
+    };
+    // Fetch one extra commit so has_more is knowable without a second walk.
+    let fetch_count = limit + 1;
+    // Single walk feeds both items and per-commit numstat stats; NUL/NUL/\x01 framing survives arbitrary bodies.
+    let output = git_ok(
+        cwd,
+        &[
+            "log",
+            &format!("--max-count={fetch_count}"),
+            "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b%x01",
+            "--numstat",
+        ],
+    )?;
+    let mut items = parse_log_records(&output);
+    let has_more = items.len() > limit;
+    items.truncate(limit);
+    Ok(HistoryResult { items, has_more })
+}
+
+fn parse_log_records(output: &str) -> Vec<HistoryItem> {
+    let mut items = Vec::new();
+    let mut rest = output;
+    while !rest.is_empty() {
+        let Some((id, after_id)) = rest.split_once('\0') else {
+            break;
+        };
+        let Some((parents_raw, after_parents)) = after_id.split_once('\0') else {
+            break;
+        };
+        let Some((author_name, after_name)) = after_parents.split_once('\0') else {
+            break;
+        };
+        let Some((author_email, after_email)) = after_name.split_once('\0') else {
+            break;
+        };
+        let Some((timestamp, after_time)) = after_email.split_once('\0') else {
+            break;
+        };
+        let Some((subject, after_subject)) = after_time.split_once('\0') else {
+            break;
+        };
+        let Some(body_end) = after_subject.find('\x01') else {
+            break;
+        };
+        let message_body = after_subject[..body_end].trim_end().to_string();
+        let mut tail = &after_subject[body_end + 1..];
+        let mut numstat_lines = Vec::new();
+        while !tail.is_empty() {
+            let (line, remainder) = match tail.split_once('\n') {
+                Some((l, r)) => (l, r),
+                None => (tail, ""),
+            };
+            if is_log_record_start(line) {
+                break;
+            }
+            numstat_lines.push(line);
+            tail = remainder;
+        }
+        rest = tail;
+
+        let parent_ids = parents_raw.split_whitespace().map(str::to_string).collect();
+        let mut stats = CommitStats {
+            files: 0,
+            insertions: 0,
+            deletions: 0,
+        };
+        for line in numstat_lines {
+            let mut fields = line.split('\t');
+            let (Some(inserted), Some(deleted), Some(_path)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            // "-\t-" marks a binary file: counts toward files only.
+            stats.files += 1;
+            if inserted != "-" {
+                stats.insertions += inserted.parse().unwrap_or(0);
+            }
+            if deleted != "-" {
+                stats.deletions += deleted.parse().unwrap_or(0);
+            }
+        }
+        items.push(HistoryItem {
+            id: id.to_string(),
+            parent_ids,
+            subject: subject.to_string(),
+            message_body,
+            author_name: author_name.to_string(),
+            author_email: author_email.to_string(),
+            timestamp_secs: timestamp.parse().unwrap_or(0),
+            stats,
+        });
+    }
+    items
+}
+
+fn is_log_record_start(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    bytes.len() > 40 && bytes[..40].iter().all(|b| b.is_ascii_hexdigit()) && bytes[40] == b'\0'
+}
+
+// ahead = HEAD-only commits, behind = base-only; file list is merge-base→HEAD.
+pub fn sc_branch_compare(cwd: &Path, base_ref: &str) -> Result<BranchCompare, String> {
+    validate_ref_name(base_ref)?;
+    let merge_base = git_ok(cwd, &["merge-base", "HEAD", base_ref])?.trim().to_string();
+    let ahead_out = git_ok(cwd, &["rev-list", "--count", &format!("{base_ref}..HEAD")])?;
+    let behind_out = git_ok(cwd, &["rev-list", "--count", &format!("HEAD..{base_ref}")])?;
+    let name_status = git_ok(cwd, &[
+        "diff",
+        "--name-status",
+        "-z",
+        &format!("{merge_base}..HEAD"),
+    ])?;
+    Ok(BranchCompare {
+        base_ref: base_ref.to_string(),
+        ahead: name_status_count(&ahead_out),
+        behind: name_status_count(&behind_out),
+        changed_files: parse_name_status_z(&name_status),
+    })
+}
+
+fn name_status_count(out: &str) -> u32 {
+    out.trim().parse().unwrap_or(0)
+}
+
+// -z keeps paths verbatim; R/C entries carry TWO paths: origPath then newPath.
+fn parse_name_status_z(output: &str) -> Vec<CompareEntry> {
+    let mut fields = output.split('\0');
+    let mut entries = Vec::new();
+    while let Some(status) = fields.next() {
+        if status.is_empty() {
+            continue;
+        }
+        let Some(first_path) = fields.next() else {
+            break;
+        };
+        // Score digits ride along in -z ("R100"); keep only the letter.
+        let change_kind = status.chars().next().unwrap_or('M').to_string();
+        let renamed_copied = change_kind == "R" || change_kind == "C";
+        let (path, old_path) = if renamed_copied {
+            match fields.next() {
+                Some(new_path) => (new_path, Some(first_path.to_string())),
+                None => break,
+            }
+        } else {
+            (first_path, None)
+        };
+        entries.push(CompareEntry {
+            path: path.to_string(),
+            change_kind,
+            old_path,
+        });
+    }
+    entries
 }
 
 // argv-only exec still option-parses leading dashes; whitespace/control refs never resolve.
@@ -624,5 +923,283 @@ mod tests {
         }
         let lb = sc_local_branches(&s.repo).unwrap();
         assert_eq!(lb.current.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn diff_kind_serializes_kebab_case_for_ipc() {
+        assert_eq!(
+            serde_json::to_string(&DiffKind::Text).unwrap(),
+            "\"text\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DiffKind::Binary).unwrap(),
+            "\"binary\""
+        );
+    }
+
+    fn binary_file(repo: &Path, name: &str, bytes: &[u8]) {
+        std::fs::write(repo.join(name), bytes).unwrap();
+    }
+
+    #[test]
+    fn file_diff_unstaged_pairs_index_original_with_worktree_modified() {
+        let s = sandbox("diff-unstaged");
+        commit_file(&s.repo, "t.txt", "v0", "seed t");
+        write_file(&s.repo, "t.txt", "v1");
+
+        let d = sc_file_diff(&s.repo, "t.txt", false, false).unwrap();
+        assert_eq!(d.kind, DiffKind::Text);
+        assert_eq!(d.original_content, "v0");
+        assert_eq!(d.modified_content, "v1");
+        assert!(!d.truncated);
+    }
+
+    #[test]
+    fn file_diff_staged_pairs_head_original_with_index_modified() {
+        let s = sandbox("diff-staged");
+        commit_file(&s.repo, "t.txt", "v0", "seed t");
+        write_file(&s.repo, "t.txt", "v1");
+        sc_stage(&s.repo, &one_path("t.txt")).unwrap();
+
+        let d = sc_file_diff(&s.repo, "t.txt", true, false).unwrap();
+        assert_eq!(d.kind, DiffKind::Text);
+        assert_eq!(d.original_content, "v0");
+        assert_eq!(d.modified_content, "v1");
+    }
+
+    #[test]
+    fn file_diff_added_file_staged_has_empty_original_even_on_unborn_head() {
+        let s = sandbox_without_commits("diff-added-unborn");
+        write_file(&s.repo, "new.txt", "fresh");
+        sc_stage(&s.repo, &one_path("new.txt")).unwrap();
+
+        let d = sc_file_diff(&s.repo, "new.txt", true, false).unwrap();
+        assert_eq!(d.original_content, "");
+        assert_eq!(d.modified_content, "fresh");
+    }
+
+    #[test]
+    fn file_diff_compare_against_head_uses_worktree_as_modified_side() {
+        let s = sandbox("diff-vs-head");
+        commit_file(&s.repo, "t.txt", "v0", "seed t");
+        write_file(&s.repo, "t.txt", "v1");
+        sc_stage(&s.repo, &one_path("t.txt")).unwrap();
+        write_file(&s.repo, "t.txt", "v2");
+
+        let d = sc_file_diff(&s.repo, "t.txt", false, true).unwrap();
+        assert_eq!(d.original_content, "v0");
+        assert_eq!(d.modified_content, "v2");
+    }
+
+    #[test]
+    fn file_diff_untracked_file_gets_empty_original_and_disk_modified() {
+        let s = sandbox("diff-untracked");
+        write_file(&s.repo, "brand.txt", "untracked bytes");
+
+        let d = sc_file_diff(&s.repo, "brand.txt", false, false).unwrap();
+        assert_eq!(d.original_content, "");
+        assert_eq!(d.modified_content, "untracked bytes");
+    }
+
+    #[test]
+    fn file_diff_deleted_worktree_file_has_empty_modified_side() {
+        let s = sandbox("diff-deleted");
+        commit_file(&s.repo, "gone.txt", "was here", "seed gone");
+        std::fs::remove_file(s.repo.join("gone.txt")).unwrap();
+
+        let d = sc_file_diff(&s.repo, "gone.txt", false, false).unwrap();
+        assert_eq!(d.original_content, "was here");
+        assert_eq!(d.modified_content, "");
+    }
+
+    #[test]
+    fn file_diff_binary_when_only_modified_side_has_nul() {
+        let s = sandbox("diff-binary-modified");
+        commit_file(&s.repo, "mix.bin", "plain text seed", "seed mix");
+        binary_file(&s.repo, "mix.bin", b"text then \x00 nul");
+
+        let d = sc_file_diff(&s.repo, "mix.bin", false, false).unwrap();
+        assert_eq!(d.kind, DiffKind::Binary);
+        assert_eq!(d.original_content, "");
+        assert_eq!(d.modified_content, "");
+    }
+
+    #[test]
+    fn file_diff_binary_when_only_original_side_has_nul() {
+        let s = sandbox("diff-binary-original");
+        binary_file(&s.repo, "o.dat", b"\x00OLD");
+        git(&s.repo, &["add", "-A"]);
+        git(&s.repo, &["commit", "-m", "seed binary original"]);
+        write_file(&s.repo, "o.dat", "now plain text");
+
+        let d = sc_file_diff(&s.repo, "o.dat", false, false).unwrap();
+        assert_eq!(d.kind, DiffKind::Binary);
+        assert_eq!(d.original_content, "");
+        assert_eq!(d.modified_content, "");
+    }
+
+    #[test]
+    fn file_diff_truncates_oversized_text_at_char_boundary() {
+        let s = sandbox("diff-truncate");
+        // 3-byte cycle guarantees the 512KB cap lands mid-char.
+        let big: String = "aé".repeat(200_001);
+        assert_eq!(big.len(), 600_003);
+        commit_file(&s.repo, "big.txt", &big, "seed big");
+
+        let d = sc_file_diff(&s.repo, "big.txt", false, false).unwrap();
+        let cap_bytes = 512 * 1024;
+        assert!(d.truncated);
+        assert!(d.original_content.len() <= cap_bytes);
+        assert!(!d.original_content.contains('\u{FFFD}'));
+        assert!(d.original_content.starts_with("aé"));
+        // Modified side equals committed content and must also be capped.
+        assert!(d.modified_content.len() <= cap_bytes);
+        assert!(!d.modified_content.contains('\u{FFFD}'));
+        let last = d.original_content.chars().last().unwrap();
+        assert!(last == 'a' || last == 'é', "cut must land on a whole char, got {last:?}");
+    }
+
+    #[test]
+    fn file_diff_unknown_path_errors_with_not_found_message() {
+        let s = sandbox("diff-unknown");
+        let err = sc_file_diff(&s.repo, "never/known.txt", false, false).unwrap_err();
+        assert!(err.contains("path not found in git"), "got: {err}");
+    }
+
+    #[test]
+    fn history_walks_newest_first_with_parent_chain_stats_and_body_split() {
+        let s = sandbox("history-chain");
+        commit_file(&s.repo, "a.txt", "l1\nl2\nl3\n", "second subject\n\nbody detail here");
+        binary_file(&s.repo, "blob.dat", b"\x00\x01BIN");
+        git(&s.repo, &["add", "-A"]);
+        git(&s.repo, &["commit", "-m", "third adds binary"]);
+
+        let result = sc_history(&s.repo, 10).unwrap();
+        assert!(!result.has_more);
+        assert_eq!(result.items.len(), 3);
+
+        let third = &result.items[0];
+        let second = &result.items[1];
+        let first = &result.items[2];
+        assert_eq!(third.subject, "third adds binary");
+        assert_eq!(second.subject, "second subject");
+        assert_eq!(second.message_body.trim(), "body detail here");
+        assert_eq!(first.subject, "initial");
+
+        assert_eq!(second.parent_ids, vec![first.id.clone()]);
+        assert_eq!(third.parent_ids, vec![second.id.clone()]);
+        assert!(first.parent_ids.is_empty());
+        assert!(first.timestamp_secs > 0);
+        assert_eq!(first.author_email, "test@oppa.dev");
+        assert_eq!(first.author_name, "Oppa Test");
+
+        assert_eq!(first.stats.files, 1);
+        assert_eq!(first.stats.insertions, 1);
+        assert_eq!(second.stats.files, 1);
+        assert_eq!(second.stats.insertions, 3);
+        assert_eq!(second.stats.deletions, 0);
+        assert_eq!(third.stats.files, 1, "binary file counts as file only");
+        assert_eq!(third.stats.insertions, 0);
+        assert_eq!(third.stats.deletions, 0);
+    }
+
+    #[test]
+    fn history_counts_deletions_from_numstat() {
+        let s = sandbox("history-deletes");
+        commit_file(&s.repo, "README.md", "replaced line\n", "edit rewrites readme");
+        let result = sc_history(&s.repo, 10).unwrap();
+        let newest = &result.items[0];
+        assert_eq!(newest.stats.files, 1);
+        assert_eq!(newest.stats.insertions, 1);
+        assert_eq!(newest.stats.deletions, 1, "1-line file fully rewritten");
+    }
+
+    #[test]
+    fn history_has_more_true_when_extra_commits_exist_beyond_limit() {
+        let s = sandbox("history-more");
+        commit_file(&s.repo, "two.txt", "2", "second");
+        commit_file(&s.repo, "three.txt", "3", "third");
+
+        let limited = sc_history(&s.repo, 1).unwrap();
+        assert!(limited.has_more);
+        assert_eq!(limited.items.len(), 1);
+        assert_eq!(limited.items[0].subject, "third");
+
+        let full = sc_history(&s.repo, 10).unwrap();
+        assert_eq!(limited.items[0].id, full.items[0].id);
+
+        assert_eq!(sc_history(&s.repo, 0).unwrap().items.len(), 3, "limit 0 falls back to default 50");
+    }
+
+    #[test]
+    fn branch_compare_reports_ahead_changed_files_and_rename_old_path() {
+        let s = sandbox("compare-feature");
+        commit_file(&s.repo, "extra.txt", "stable content here", "seed extra");
+        git(&s.repo, &["checkout", "-b", "feature"]);
+        commit_file(&s.repo, "README.md", "# init changed", "edit readme");
+        commit_file(&s.repo, "new.txt", "brand new", "add new file");
+        git(&s.repo, &["mv", "extra.txt", "moved.txt"]);
+        git(&s.repo, &["commit", "-m", "move extra"]);
+
+        let cmp = sc_branch_compare(&s.repo, "main").unwrap();
+        assert_eq!(cmp.base_ref, "main");
+        assert_eq!(cmp.ahead, 3);
+        assert_eq!(cmp.behind, 0);
+        assert_eq!(cmp.changed_files.len(), 3);
+
+        let readme = cmp
+            .changed_files
+            .iter()
+            .find(|e| e.path == "README.md")
+            .expect("readme entry");
+        assert_eq!(readme.change_kind, "M");
+        assert_eq!(readme.old_path, None);
+        let added = cmp
+            .changed_files
+            .iter()
+            .find(|e| e.path == "new.txt")
+            .expect("added entry");
+        assert_eq!(added.change_kind, "A");
+        let renamed = cmp
+            .changed_files
+            .iter()
+            .find(|e| e.path == "moved.txt")
+            .expect("renamed entry");
+        assert_eq!(renamed.change_kind, "R");
+        assert_eq!(renamed.old_path.as_deref(), Some("extra.txt"));
+    }
+
+    #[test]
+    fn branch_compare_is_symmetric_from_the_other_direction() {
+        let s = sandbox("compare-main-view");
+        commit_file(&s.repo, "extra.txt", "stable content here", "seed extra");
+        git(&s.repo, &["checkout", "-b", "feature"]);
+        commit_file(&s.repo, "README.md", "# init changed", "edit readme");
+        commit_file(&s.repo, "new.txt", "brand new", "add new file");
+        git(&s.repo, &["checkout", "main"]);
+
+        let cmp = sc_branch_compare(&s.repo, "feature").unwrap();
+        assert_eq!(cmp.ahead, 0);
+        assert_eq!(cmp.behind, 2);
+        assert!(cmp.changed_files.is_empty());
+    }
+
+    #[test]
+    fn branch_compare_rejects_invalid_base_before_spawning_git() {
+        let s = sandbox("compare-invalid-base");
+        for bad in ["-evil", "a..b"] {
+            let err = sc_branch_compare(&s.repo, bad).unwrap_err();
+            assert!(
+                err.starts_with("invalid branch name"),
+                "{bad:?} must hit validator, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn branch_compare_unknown_base_propagates_git_error() {
+        let s = sandbox("compare-ghost-base");
+        let err = sc_branch_compare(&s.repo, "no-such-ref").unwrap_err();
+        assert!(err.contains("no-such-ref"), "stderr must surface base name: {err}");
     }
 }
