@@ -11,8 +11,23 @@ import {
   loadScrollback,
   deleteScrollback,
   cleanupStaleScrollbacks,
+  worktreeCreate,
+  worktreeList,
+  worktreeSet,
+  worktreeRemove,
+  worktreePurge,
+  worktreePs,
+  repoAdd,
+  repoList,
+  onWorktreeChanged,
 } from "../lib/pty/transport";
-import type { PtySpawnOptions } from "../lib/pty/transport";
+import type {
+  PtySpawnOptions,
+  WorktreeListEntry,
+  WorktreeRecord,
+  RepoRecord,
+  WorktreeStatus,
+} from "../lib/pty/transport";
 import {
   split,
   remove,
@@ -217,6 +232,14 @@ export interface SessionInfo {
 
 export type TerminalSession = SessionInfo;
 
+export interface WorktreeCreateInput {
+  repoPath: string;
+  name?: string;
+  branch?: string;
+  baseRef?: string;
+  parentWorktreeId?: string;
+}
+
 
 export interface TabState {
   id: string;
@@ -323,6 +346,7 @@ export interface TerminalState {
     shell?: string,
     existingId?: string,
     geometry?: { cols?: number; rows?: number },
+    worktreeId?: string,
   ) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
@@ -333,7 +357,7 @@ export interface TerminalState {
 
   renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
-  createTab: (cwd?: string) => Promise<string>;
+  createTab: (cwd?: string, worktreeId?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
   selectTab: (tabId: string) => void;
   wakeTab: (tabId: string) => Promise<void>;
@@ -416,6 +440,22 @@ export interface TerminalState {
   updateAppearanceSettings: (partial: Partial<AppearanceSettings>) => void;
   resolveDefaultCwd: () => string | undefined;
   loadSettingsData: () => Promise<void>;
+  worktrees: WorktreeListEntry[];
+  worktreeLiveSessions: Record<string, number>;
+  repos: RepoRecord[];
+  leftSidebarView: "tabs" | "worktrees";
+  isWorktreeCreateOpen: boolean;
+  loadWorktrees: () => Promise<void>;
+  loadRepos: () => Promise<void>;
+  addRepo: (path: string) => Promise<RepoRecord>;
+  createWorktree: (input: WorktreeCreateInput) => Promise<WorktreeRecord | null>;
+  setWorktreeStatus: (id: string, status: WorktreeStatus) => Promise<void>;
+  renameWorktree: (id: string, displayName: string) => Promise<void>;
+  removeWorktree: (id: string, force?: boolean, deleteBranch?: boolean) => Promise<void>;
+  purgeWorktree: (id: string) => Promise<void>;
+  setLeftSidebarView: (view: "tabs" | "worktrees") => void;
+  openWorktreeCreate: () => void;
+  closeWorktreeCreate: () => void;
 }
 
 function isNonEmptyLayout(layout?: Layout): boolean {
@@ -494,6 +534,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   isSettingsOpen: false,
   activeSettingsTab: "general",
   tabFocusHistory: [],
+  worktrees: [],
+  worktreeLiveSessions: {},
+  repos: [],
+  leftSidebarView: "tabs",
+  isWorktreeCreateOpen: false,
 
   registerSerializer: (id, fn) =>
     set((state) => ({
@@ -524,7 +569,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { restoredScrollbacks };
     }),
 
-  spawnSession: async (cwd, shell, existingId, geometry) => {
+  spawnSession: async (cwd, shell, existingId, geometry, worktreeId) => {
     try {
       const targetCwd = cwd ?? (existingId ? undefined : get().resolveDefaultCwd());
       const opts: PtySpawnOptions = {};
@@ -533,6 +578,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       if (shell) opts.shell = shell;
       if (geometry?.cols !== undefined) opts.cols = geometry.cols;
       if (geometry?.rows !== undefined) opts.rows = geometry.rows;
+      if (worktreeId) opts.worktreeId = worktreeId;
       // Rust defaults to resume-on; only ever send the explicit opt-out
       const autoResume = get().settings.general.autoResumeAgents;
       if (autoResume === false) opts.resumeAgents = false;
@@ -735,9 +781,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
-  createTab: async (cwd) => {
+  createTab: async (cwd, worktreeId) => {
     const resolvedCwd = cwd ?? get().resolveDefaultCwd();
-    const sessionId = await get().spawnSession(resolvedCwd);
+    const sessionId = await get().spawnSession(resolvedCwd, undefined, undefined, undefined, worktreeId);
     const currentTabs = getSyncedTabs(get());
     const tabId = generateNextTabId(currentTabs);
     const newTab: TabState = {
@@ -2224,4 +2270,78 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       // Keep default settings on error
     }
   },
+
+  loadWorktrees: async () => {
+    // Both reads fail soft so a stopped daemon never blanks the cards.
+    const [entries, psEntries] = await Promise.all([
+      worktreeList().catch(() => null),
+      worktreePs().catch(() => null),
+    ]);
+    if (!entries) return;
+    const liveSessions: Record<string, number> = {};
+    for (const entry of psEntries ?? []) {
+      liveSessions[entry.record.id] = entry.live_sessions;
+    }
+    set({ worktrees: entries, worktreeLiveSessions: liveSessions });
+  },
+
+  loadRepos: async () => {
+    try {
+      set({ repos: await repoList() });
+    } catch {
+      // Keep previous repos on failure
+    }
+  },
+
+  addRepo: async (path) => {
+    const records = await repoAdd(path);
+    const record = records[0];
+    if (!record) throw new Error(`repo_add returned no record for ${path}`);
+    await get().loadRepos();
+    return record;
+  },
+
+  createWorktree: async (input) => {
+    const record = await worktreeCreate(input);
+    await Promise.all([get().loadWorktrees(), get().loadRepos()]);
+    return record;
+  },
+
+  setWorktreeStatus: async (id, status) => {
+    await worktreeSet(id, { workspaceStatus: status });
+    await get().loadWorktrees();
+  },
+
+  renameWorktree: async (id, displayName) => {
+    await worktreeSet(id, { displayName });
+    await get().loadWorktrees();
+  },
+
+  removeWorktree: async (id, force = false, deleteBranch = false) => {
+    await worktreeRemove(id, force, deleteBranch);
+    await get().loadWorktrees();
+  },
+
+  purgeWorktree: async (id) => {
+    await worktreePurge(id);
+    await get().loadWorktrees();
+  },
+
+  setLeftSidebarView: (view) => {
+    set({ leftSidebarView: view });
+  },
+
+  openWorktreeCreate: () => set({ isWorktreeCreateOpen: true }),
+  closeWorktreeCreate: () => set({ isWorktreeCreateOpen: false }),
 }));
+
+// Daemon-side mutations from any client must refresh the cards; debounced so a
+// burst of events triggers one reload.
+let worktreeReloadTimer: ReturnType<typeof setTimeout> | null = null;
+void onWorktreeChanged(() => {
+  if (worktreeReloadTimer) clearTimeout(worktreeReloadTimer);
+  worktreeReloadTimer = setTimeout(() => {
+    worktreeReloadTimer = null;
+    void useTerminalStore.getState().loadWorktrees().catch(() => {});
+  }, 300);
+});

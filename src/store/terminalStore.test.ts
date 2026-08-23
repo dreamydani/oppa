@@ -19,6 +19,15 @@ vi.mock("../lib/pty/transport", () => ({
   loadScrollback: vi.fn().mockResolvedValue(null),
   deleteScrollback: vi.fn().mockResolvedValue(undefined),
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  worktreeList: vi.fn().mockResolvedValue([]),
+  worktreePs: vi.fn().mockResolvedValue([]),
+  worktreeCreate: vi.fn(),
+  worktreeSet: vi.fn().mockResolvedValue(null),
+  worktreeRemove: vi.fn().mockResolvedValue(undefined),
+  worktreePurge: vi.fn().mockResolvedValue(undefined),
+  repoAdd: vi.fn().mockResolvedValue([]),
+  repoList: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../lib/workspace/transport", () => ({
@@ -64,6 +73,33 @@ const saveSettingsMock = vi.mocked(settingsTransport.saveSettings);
 const loadSettingsMock = vi.mocked(settingsTransport.loadSettings);
 const getSavedWindowStateMock = vi.mocked(windowTransport.getSavedWindowState);
 const applyWindowStateMock = vi.mocked(windowTransport.applyWindowState);
+const worktreeListMock = vi.mocked(transport.worktreeList);
+const worktreePsMock = vi.mocked(transport.worktreePs);
+const worktreeCreateMock = vi.mocked(transport.worktreeCreate);
+const worktreeSetMock = vi.mocked(transport.worktreeSet);
+const worktreeRemoveMock = vi.mocked(transport.worktreeRemove);
+const worktreePurgeMock = vi.mocked(transport.worktreePurge);
+const repoAddMock = vi.mocked(transport.repoAdd);
+const repoListMock = vi.mocked(transport.repoList);
+
+function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): transport.WorktreeRecord {
+  return {
+    id: "demo::C:/ws/feat-a",
+    repo_id: "demo",
+    name: "feat-a",
+    display_name: null,
+    branch: "feat-a",
+    path: "C:/ws/feat-a",
+    base_ref: "main",
+    parent_worktree_id: null,
+    child_worktree_ids: [],
+    workspace_status: "todo",
+    retired: false,
+    created_at_ms: 1723900000000,
+    linked_pr_url: null,
+    ...overrides,
+  };
+}
 
 function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
@@ -3787,6 +3823,127 @@ describe("terminalStore", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("worktree slice", () => {
+    it("loadWorktrees merges list entries with live session counts from ps", async () => {
+      worktreeListMock.mockResolvedValue([
+        { record: worktreeRecord(), missing_on_disk: false },
+      ]);
+      worktreePsMock.mockResolvedValue([
+        { record: worktreeRecord(), live_sessions: 2 },
+      ]);
+
+      await useTerminalStore.getState().loadWorktrees();
+
+      const state = useTerminalStore.getState();
+      expect(state.worktrees).toHaveLength(1);
+      expect(state.worktrees[0].record.id).toBe("demo::C:/ws/feat-a");
+      expect(state.worktreeLiveSessions["demo::C:/ws/feat-a"]).toBe(2);
+    });
+
+    it("createWorktree calls transport and refreshes the worktree list", async () => {
+      worktreeCreateMock.mockResolvedValue(worktreeRecord());
+      worktreeListMock.mockResolvedValue([
+        { record: worktreeRecord(), missing_on_disk: false },
+      ]);
+      repoListMock.mockResolvedValue([]);
+
+      const created = await useTerminalStore.getState().createWorktree({
+        repoPath: "C:/repos/demo",
+        name: "feat-a",
+        baseRef: "main",
+      });
+
+      expect(created?.id).toBe("demo::C:/ws/feat-a");
+      expect(worktreeCreateMock).toHaveBeenCalledWith({
+        repoPath: "C:/repos/demo",
+        name: "feat-a",
+        baseRef: "main",
+      });
+      await vi.waitFor(() => {
+        expect(useTerminalStore.getState().worktrees).toHaveLength(1);
+      });
+    });
+
+    it("setWorktreeStatus forwards the status and refreshes", async () => {
+      worktreeSetMock.mockResolvedValue(
+        worktreeRecord({ workspace_status: "completed" }),
+      );
+      worktreeListMock.mockResolvedValue([]);
+      worktreePsMock.mockResolvedValue([]);
+
+      await useTerminalStore
+        .getState()
+        .setWorktreeStatus("demo::C:/ws/feat-a", "completed");
+
+      expect(worktreeSetMock).toHaveBeenCalledWith("demo::C:/ws/feat-a", {
+        workspaceStatus: "completed",
+      });
+      expect(worktreeListMock).toHaveBeenCalled();
+    });
+
+    it("removeWorktree surfaces the teardown-refusal reason on failure", async () => {
+      worktreeRemoveMock.mockRejectedValue(
+        "cannot remove worktree demo::C:/ws/feat-a: live sessions present: s-1 (cwd inside worktree)",
+      );
+
+      await expect(
+        useTerminalStore.getState().removeWorktree("demo::C:/ws/feat-a"),
+      ).rejects.toThrow(/live sessions present/);
+      // A refused removal must not wipe the visible card.
+      expect(worktreeListMock).not.toHaveBeenCalled();
+    });
+
+    it("removeWorktree refreshes the list after a successful removal", async () => {
+      worktreeRemoveMock.mockResolvedValue(undefined);
+      worktreeListMock.mockResolvedValue([]);
+
+      await useTerminalStore.getState().removeWorktree("demo::C:/ws/feat-a");
+
+      expect(worktreeRemoveMock).toHaveBeenCalledWith(
+        "demo::C:/ws/feat-a",
+        false,
+        false,
+      );
+      expect(worktreeListMock).toHaveBeenCalled();
+    });
+
+    it("purgeWorktree drops a tombstone and refreshes", async () => {
+      worktreePurgeMock.mockResolvedValue(undefined);
+      worktreeListMock.mockResolvedValue([]);
+
+      await useTerminalStore.getState().purgeWorktree("demo::C:/ws/feat-a");
+
+      expect(worktreePurgeMock).toHaveBeenCalledWith("demo::C:/ws/feat-a");
+      expect(worktreeListMock).toHaveBeenCalled();
+    });
+
+    it("loadRepopulates repos via repo_list", async () => {
+      repoListMock.mockResolvedValue([
+        { repo_id: "demo", path: "C:/repos/demo", default_base_ref: null, worktree_base_path: null },
+      ]);
+
+      await useTerminalStore.getState().loadRepos();
+
+      expect(useTerminalStore.getState().repos[0].repo_id).toBe("demo");
+    });
+
+    it("addRepo registers a repo and refreshes the repo list", async () => {
+      repoAddMock.mockResolvedValue([
+        { repo_id: "fresh", path: "C:/repos/fresh", default_base_ref: null, worktree_base_path: null },
+      ]);
+      repoListMock.mockResolvedValue([
+        { repo_id: "fresh", path: "C:/repos/fresh", default_base_ref: null, worktree_base_path: null },
+      ]);
+
+      const added = await useTerminalStore.getState().addRepo("C:/repos/fresh");
+
+      expect(added.repo_id).toBe("fresh");
+      await vi.waitFor(() => {
+        expect(useTerminalStore.getState().repos).toHaveLength(1);
+      });
     });
   });
 });

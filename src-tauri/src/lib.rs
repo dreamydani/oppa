@@ -1,6 +1,6 @@
 mod browser;
 mod fs;
-mod git;
+pub mod git;
 mod layout;
 pub mod pty;
 pub mod settings;
@@ -110,6 +110,17 @@ pub fn run() {
             pty::commands::load_scrollback,
             pty::commands::delete_scrollback,
             pty::commands::cleanup_stale_scrollbacks,
+            pty::commands::repo_add,
+            pty::commands::repo_list,
+            pty::commands::worktree_create,
+            pty::commands::worktree_list,
+            pty::commands::worktree_show,
+            pty::commands::worktree_current,
+            pty::commands::worktree_set,
+            pty::commands::worktree_remove,
+            pty::commands::worktree_purge,
+            pty::commands::worktree_ps,
+            pty::commands::worktree_lineage,
             layout::save_layout,
             layout::load_layout,
             settings::save_settings,
@@ -144,6 +155,11 @@ pub fn run() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 if let Some(manager) = app_handle.try_state::<PtyManager>() {
+                    // Set before get_client so the forwarder is re-applied to
+                    // every client the manager creates.
+                    manager.set_worktree_changed_callback(
+                        pty::commands::worktree_changed_forwarder(&app_handle),
+                    );
                     let _ = manager.get_client();
                 }
             });

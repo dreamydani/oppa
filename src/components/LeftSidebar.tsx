@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, GitBranch } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
+import { WorktreePane } from "./worktree/WorktreePane";
 import {
   SearchIcon,
   PlusIcon,
@@ -26,6 +27,9 @@ export function LeftSidebar(): React.ReactElement | null {
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
   const openSettings = useTerminalStore((s) => s.openSettings);
+  const leftSidebarView = useTerminalStore((s) => s.leftSidebarView);
+  const setLeftSidebarView = useTerminalStore((s) => s.setLeftSidebarView);
+  const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -139,27 +143,64 @@ export function LeftSidebar(): React.ReactElement | null {
             <SearchIcon size={14} className="sidebar-search-icon" />
             <input
               type="text"
-              placeholder="Search tabs..."
+              placeholder={leftSidebarView === "worktrees" ? "Search worktrees..." : "Search tabs..."}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Search tabs"
+              aria-label={
+                leftSidebarView === "worktrees" ? "Search worktrees" : "Search tabs"
+              }
               className="sidebar-search-input"
             />
           </div>
+          {leftSidebarView === "worktrees" ? (
+            <button
+              type="button"
+              className="sidebar-icon-btn"
+              title="New Worktree"
+              aria-label="New Worktree"
+              onClick={openWorktreeCreate}
+            >
+              <PlusIcon size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-icon-btn"
+              title="New Tab"
+              aria-label="New Tab"
+              onClick={() => createWizardTab()}
+            >
+              <PlusIcon size={14} />
+            </button>
+          )}
+        </div>
+        <div className="sidebar-view-toggle" role="tablist" aria-label="Sidebar view">
           <button
             type="button"
-            className="sidebar-icon-btn"
-            title="New Tab"
-            aria-label="New Tab"
-            onClick={() => createWizardTab()}
+            role="tab"
+            aria-selected={leftSidebarView === "tabs"}
+            className={`sidebar-view-btn ${leftSidebarView === "tabs" ? "active" : ""}`}
+            onClick={() => setLeftSidebarView("tabs")}
           >
-            <PlusIcon size={14} />
+            <TerminalIcon size={12} /> Sessions
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={leftSidebarView === "worktrees"}
+            className={`sidebar-view-btn ${leftSidebarView === "worktrees" ? "active" : ""}`}
+            onClick={() => setLeftSidebarView("worktrees")}
+          >
+            <GitBranch size={12} /> Worktrees
           </button>
         </div>
       </div>
 
       <div className="left-sidebar-body">
-        <div className="tab-list" role="list">
+        {leftSidebarView === "worktrees" ? (
+          <WorktreePane filter={searchQuery} />
+        ) : (
+          <div className="tab-list" role="list">
           {tabs.length === 0 ? (
             <div className="sidebar-empty-state">
               <span className="sidebar-empty-title">No Workspaces</span>
@@ -249,6 +290,7 @@ export function LeftSidebar(): React.ReactElement | null {
           })
         )}
         </div>
+        )}
       </div>
 
       <div className="left-sidebar-footer">

@@ -1,0 +1,415 @@
+/* ==========================================================================
+   Worktree pane + create modal — mirrors the sidebar card language
+   (LeftSidebar.css) and the launcher modal surfaces (WorkspaceLauncherModal.css).
+   ========================================================================== */
+
+.worktree-pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.worktree-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  position: relative;
+  user-select: none;
+}
+
+.worktree-card:hover {
+  background-color: var(--bg-card-hover);
+}
+
+.worktree-card.retired {
+  opacity: 0.55;
+}
+
+.worktree-card-avatar {
+  color: var(--text-muted);
+}
+
+.worktree-card-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.worktree-card-row-top {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.worktree-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worktree-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.worktree-chip,
+.worktree-status-chip,
+.worktree-retired-chip,
+.worktree-missing-chip,
+.worktree-live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.worktree-chip.branch {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="light"] .worktree-chip.branch {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--text-faint, #707070);
+  flex-shrink: 0;
+}
+
+.status-dot.dot-todo { background: #8a8f98; }
+.status-dot.dot-in-progress { background: #d29922; }
+.status-dot.dot-in-review { background: #58a6ff; }
+.status-dot.dot-completed { background: #3fb950; }
+
+.worktree-status-chip.status-todo { color: #b9bec6; }
+.worktree-status-chip.status-in-progress { color: #d29922; }
+.worktree-status-chip.status-in-review { color: #58a6ff; }
+.worktree-status-chip.status-completed { color: #3fb950; }
+
+[data-theme="light"] .worktree-status-chip.status-todo { color: #57606a; }
+
+.worktree-retired-chip {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="light"] .worktree-retired-chip {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.worktree-missing-chip {
+  color: #f0883e;
+  border: 1px solid rgba(240, 136, 62, 0.35);
+}
+
+.worktree-live-chip {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.worktree-card-menu-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.worktree-card:hover .worktree-card-menu-btn,
+.worktree-card-menu-btn[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.worktree-card-menu-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .worktree-card-menu-btn:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+/* Floating kebab menu (anchored to the card row) */
+.worktree-card-menu {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 6px;
+  z-index: 40;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background-color: var(--card, #282827);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="light"] .worktree-card-menu {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+}
+
+.worktree-card-menu button[role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.worktree-card-menu button[role="menuitem"]:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="light"] .worktree-card-menu button[role="menuitem"]:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.worktree-card-menu button[role="menuitem"].danger:hover {
+  color: var(--destructive, #f85149);
+}
+
+.worktree-card-menu button[role="menuitem"].active {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.worktree-menu-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint, #707070);
+  padding: 4px 8px 2px;
+}
+
+.worktree-menu-divider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-divider, rgba(255, 255, 255, 0.08));
+}
+
+/* Confirm dialog — same surface recipe as the launcher modal */
+.wt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+
+.wt-confirm-card,
+.wt-create-card {
+  width: 420px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--card, #282827);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  animation: wtCardIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wt-create-card {
+  width: 480px;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 18px;
+  gap: 12px;
+}
+
+@keyframes wtCardIn {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.wt-confirm-card {
+  padding: 16px;
+  gap: 8px;
+}
+
+.wt-confirm-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wt-confirm-desc {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.wt-error {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--destructive, #f85149);
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.25);
+  border-radius: 6px;
+  padding: 7px 9px;
+  word-break: break-word;
+}
+
+.wt-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.wt-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.wt-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="light"] .wt-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.wt-btn.danger {
+  border-color: rgba(248, 81, 73, 0.4);
+  color: var(--destructive, #f85149);
+}
+
+.wt-btn.danger:hover {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.wt-btn.primary {
+  background: var(--bg-card-active, rgba(255, 255, 255, 0.1));
+  border-color: var(--border-active, rgba(255, 255, 255, 0.2));
+}
+
+.wt-btn.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Create form */
+.wt-create-header h3 {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wt-create-header p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.wt-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wt-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.wt-input,
+.wt-select {
+  background-color: var(--bg-terminal, #171717);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.09));
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+}
+
+.wt-input:focus,
+.wt-select:focus {
+  border-color: var(--border-active, rgba(255, 255, 255, 0.25));
+}
+
+.wt-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wt-add-repo-row {
+  display: flex;
+  gap: 6px;
+}
+
+.wt-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}

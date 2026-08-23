@@ -18,6 +18,19 @@ vi.mock("../lib/pty/transport", () => ({
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
+  onPtyCwd: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  worktreeList: vi.fn().mockResolvedValue([]),
+  worktreePs: vi.fn().mockResolvedValue([]),
+  worktreeCreate: vi.fn(),
+  worktreeSet: vi.fn().mockResolvedValue(null),
+  worktreeShow: vi.fn().mockResolvedValue(null),
+  worktreeCurrent: vi.fn().mockResolvedValue(null),
+  worktreeRemove: vi.fn().mockResolvedValue(undefined),
+  worktreePurge: vi.fn().mockResolvedValue(undefined),
+  worktreeLineage: vi.fn().mockResolvedValue([]),
+  repoAdd: vi.fn().mockResolvedValue([]),
+  repoList: vi.fn().mockResolvedValue([]),
 }));
 
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
@@ -265,5 +278,41 @@ describe("LeftSidebar", () => {
     const state = useTerminalStore.getState();
     expect(state.isSettingsOpen).toBe(true);
     expect(state.activeSettingsTab).toBe("shortcuts");
+  });
+
+  it("toggles to the worktrees view and renders worktree cards", () => {
+    useTerminalStore.setState({
+      leftSidebarView: "tabs",
+      worktrees: [
+        {
+          record: {
+            id: "demo::C:/ws/feat-a",
+            repo_id: "demo",
+            name: "feat-a",
+            display_name: null,
+            branch: "feat-a",
+            path: "C:/ws/feat-a",
+            base_ref: "main",
+            parent_worktree_id: null,
+            child_worktree_ids: [],
+            workspace_status: "todo",
+            retired: false,
+            created_at_ms: 1723900000000,
+            linked_pr_url: null,
+          },
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: {},
+    });
+
+    render(<LeftSidebar />);
+
+    expect(screen.queryByText("feat-a")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /worktrees/i }));
+
+    expect(useTerminalStore.getState().leftSidebarView).toBe("worktrees");
+    expect(screen.getAllByText("feat-a").length).toBeGreaterThan(0);
+    expect(screen.getByText("Todo")).toBeDefined();
   });
 });

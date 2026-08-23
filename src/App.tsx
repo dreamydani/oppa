@@ -7,6 +7,7 @@ import { RightSidebar } from "./components/right-sidebar/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
 import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
+import { WorktreeCreateModal } from "./components/worktree/WorktreeCreateModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
@@ -403,6 +404,7 @@ function App() {
       )}
       {showStatusBar && <StatusBar />}
       <WorkspaceLauncherModal />
+      <WorktreeCreateModal />
     </div>
   );
 }

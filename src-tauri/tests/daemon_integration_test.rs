@@ -21,7 +21,13 @@ fn generate_test_socket_path(label: &str) -> String {
     }
 }
 
-fn start_test_daemon(socket_path: &str) -> (Arc<DaemonServer>, CancellationToken, std::thread::JoinHandle<()>) {
+fn start_test_daemon(
+    socket_path: &str,
+) -> (
+    Arc<DaemonServer>,
+    CancellationToken,
+    std::thread::JoinHandle<()>,
+) {
     let server = Arc::new(DaemonServer::new());
     let cancel_token = CancellationToken::new();
     let srv_clone = Arc::clone(&server);
@@ -64,10 +70,13 @@ fn test_e2e_daemon_spawn_and_data_flow() {
     );
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("create_or_attach failed");
 
-    assert!(attach_res.is_new, "expected new session to have is_new = true");
+    assert!(
+        attach_res.is_new,
+        "expected new session to have is_new = true"
+    );
     assert_eq!(attach_res.cols, 80);
     assert_eq!(attach_res.rows, 24);
 
@@ -119,7 +128,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     );
 
     let attach1 = client1
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("client 1 create_or_attach failed");
     assert!(attach1.is_new, "first connection must be a new session");
 
@@ -154,7 +163,7 @@ fn test_e2e_daemon_warm_reattach_and_snapshot() {
     // 2. Second client connects and reattaches to the existing session
     let client2 = DaemonClient::connect(&socket_path).expect("connect client 2 failed");
     let attach2 = client2
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("client 2 reattach failed");
 
     assert!(
@@ -188,7 +197,7 @@ fn test_e2e_daemon_session_kill_lifecycle() {
     let session_id = "e2e-kill-session";
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
@@ -243,6 +252,7 @@ fn test_e2e_daemon_cwd_env_injection() {
             Some("test_ws_cwd".into()),
             None,
             false,
+            None,
         )
         .expect("create_or_attach with cwd failed");
     assert!(attach_res.is_new);
@@ -300,7 +310,7 @@ fn test_e2e_daemon_high_throughput_zero_drop_stream() {
     );
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
@@ -361,14 +371,17 @@ fn test_e2e_daemon_session_kill_process_tree() {
     let session_id = "e2e-kill-tree-session";
 
     let attach_res = client
-        .create_or_attach(session_id, 80, 24, None, None, false)
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
         .expect("create_or_attach failed");
     assert!(attach_res.is_new);
 
     // Spawn a background subprocess inside the shell
     #[cfg(target_os = "windows")]
     client
-        .write(session_id, "powershell -Command \"Start-Sleep -Seconds 30\"\r\n")
+        .write(
+            session_id,
+            "powershell -Command \"Start-Sleep -Seconds 30\"\r\n",
+        )
         .expect("write failed");
 
     #[cfg(not(target_os = "windows"))]
@@ -394,4 +407,137 @@ fn test_e2e_daemon_session_kill_process_tree() {
     let _ = server_thread.join();
 }
 
+fn run_git_in(dir: &std::path::Path, args: &[&str]) {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(args).current_dir(dir);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = cmd.output().expect("git spawn");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
+#[test]
+fn test_e2e_daemon_worktree_changed_event_and_client_requests() {
+    use oppa_lib::git::worktree_registry::WorktreeStatus;
+
+    let repo_dir = tempfile::tempdir().expect("temp repo dir");
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    run_git_in(repo_dir.path(), &["init"]);
+    run_git_in(repo_dir.path(), &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(repo_dir.path(), &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_dir.path().join("README.md"), "seed").expect("write seed file");
+    run_git_in(repo_dir.path(), &["add", "."]);
+    run_git_in(repo_dir.path(), &["commit", "-m", "init"]);
+
+    let socket_path = generate_test_socket_path("worktree");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    // Client A listens for global worktree events; client B performs mutations.
+    let listener = DaemonClient::connect(&socket_path).expect("connect listener client");
+    let (wt_tx, wt_rx) = channel::<Option<String>>();
+    listener.set_worktree_changed_callback(Arc::new(move |id| {
+        let _ = wt_tx.send(id.map(str::to_string));
+    }));
+
+    let mutator = DaemonClient::connect(&socket_path).expect("connect mutator client");
+
+    let repo_path = repo_dir.path().to_string_lossy().into_owned();
+    let repos = mutator.repo_add(&repo_path).expect("repo_add");
+    assert_eq!(repos.len(), 1);
+
+    let created = mutator
+        .worktree_create(
+            &repo_path,
+            Some("feat-card".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("worktree_create");
+    assert!(created.id.contains("feat-card"), "got id: {}", created.id);
+    assert_eq!(created.name, "feat-card");
+
+    let changed_id = wt_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("WorktreeChanged callback must fire after create");
+    assert_eq!(changed_id.as_deref(), Some(created.id.as_str()));
+
+    let entries = listener.worktree_list().expect("worktree_list");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].record.id, created.id);
+    assert!(!entries[0].missing_on_disk);
+
+    let ps_entries = listener.worktree_ps().expect("worktree_ps");
+    assert_eq!(ps_entries.len(), 1);
+    assert_eq!(ps_entries[0].live_sessions, 0);
+
+    let lineage = listener
+        .worktree_lineage(&created.id)
+        .expect("worktree_lineage");
+    assert_eq!(lineage.len(), 1);
+
+    let updated = listener
+        .worktree_set(
+            &created.id,
+            false,
+            None,
+            Some(WorktreeStatus::InProgress),
+            None,
+        )
+        .expect("worktree_set");
+    assert_eq!(updated.workspace_status, WorktreeStatus::InProgress);
+    let set_event = wt_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("WorktreeChanged callback must fire after set");
+    assert_eq!(set_event.as_deref(), Some(created.id.as_str()));
+
+    let current = listener
+        .worktree_current(&created.path.to_string_lossy())
+        .expect("worktree_current");
+    assert_eq!(current.map(|r| r.id), Some(created.id.clone()));
+
+    mutator
+        .worktree_remove(&created.id, false, false)
+        .expect("worktree_remove");
+    let removed_event = wt_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("WorktreeChanged callback must fire after remove");
+    assert_eq!(removed_event.as_deref(), Some(created.id.as_str()));
+    mutator.worktree_purge(&created.id).expect("worktree_purge");
+
+    let shown = listener.worktree_show(&created.id);
+    // Purged record is gone; engine answers "not found" which must surface as Err.
+    assert!(shown.is_err(), "expected error after purge, got {shown:?}");
+
+    listener.disconnect().expect("disconnect listener");
+    mutator.disconnect().expect("disconnect mutator");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}

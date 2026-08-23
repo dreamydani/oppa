@@ -1,6 +1,8 @@
+use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
+use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
-    DAEMON_PROTOCOL_VERSION,
+    WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -12,6 +14,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 pub type OnData = Box<dyn Fn(&str, &[u8]) + Send + Sync + 'static>;
 pub type OnExit = Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static>;
 pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
+// Arc-shared so one forwarder can be installed on every reconnecting client.
+pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 
 #[derive(Default)]
 struct SessionCallbacks {
@@ -30,6 +34,7 @@ pub struct DaemonClient {
     out_rx_map: Arc<Mutex<HashMap<String, Receiver<Vec<u8>>>>>,
     exit_rx_map: Arc<Mutex<HashMap<String, Receiver<Option<i32>>>>>,
     pending_response: Arc<Mutex<Option<Sender<DaemonResponse>>>>,
+    worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -53,6 +58,7 @@ impl DaemonClient {
         let out_rx_map = Arc::new(Mutex::new(HashMap::<String, Receiver<Vec<u8>>>::new()));
         let exit_rx_map = Arc::new(Mutex::new(HashMap::<String, Receiver<Option<i32>>>::new()));
         let pending_response = Arc::new(Mutex::new(None::<Sender<DaemonResponse>>));
+        let worktree_changed_cb: Arc<Mutex<Option<OnWorktreeChanged>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -66,7 +72,9 @@ impl DaemonClient {
                     Ok(client) => break client,
                     Err(e) => {
                         if std::time::Instant::now() >= deadline {
-                            return Err(format!("failed to connect to named pipe {socket_path_str}: {e}"));
+                            return Err(format!(
+                                "failed to connect to named pipe {socket_path_str}: {e}"
+                            ));
                         }
                         std::thread::sleep(Duration::from_millis(50));
                     }
@@ -83,7 +91,9 @@ impl DaemonClient {
                     Ok(stream) => break stream,
                     Err(e) => {
                         if std::time::Instant::now() >= deadline {
-                            return Err(format!("failed to connect to unix socket {socket_path_str}: {e}"));
+                            return Err(format!(
+                                "failed to connect to unix socket {socket_path_str}: {e}"
+                            ));
                         }
                         std::thread::sleep(Duration::from_millis(50));
                     }
@@ -116,6 +126,7 @@ impl DaemonClient {
         let out_rx_map_clone = Arc::clone(&out_rx_map);
         let exit_rx_map_clone = Arc::clone(&exit_rx_map);
         let pending_response_clone = Arc::clone(&pending_response);
+        let worktree_changed_cb_clone = Arc::clone(&worktree_changed_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -134,9 +145,7 @@ impl DaemonClient {
                         if let Ok(event) = serde_json::from_str::<DaemonEvent>(trimmed) {
                             match event {
                                 DaemonEvent::Data {
-                                    session_id,
-                                    data,
-                                    ..
+                                    session_id, data, ..
                                 } => {
                                     let bytes = data.as_bytes();
                                     if let Some(cb) = callbacks_clone.lock().get(&session_id) {
@@ -168,8 +177,11 @@ impl DaemonClient {
                                         }
                                     }
                                 }
-                                // Global worktree events get a client-side hook in task 9
-                                DaemonEvent::WorktreeChanged { .. } => {}
+                                DaemonEvent::WorktreeChanged { id } => {
+                                    if let Some(cb) = worktree_changed_cb_clone.lock().as_ref() {
+                                        cb(id.as_deref());
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -187,7 +199,9 @@ impl DaemonClient {
             }
 
             if let Some(sender) = pending_response_clone.lock().take() {
-                let _ = sender.send(DaemonResponse::Error("connection closed by daemon".to_string()));
+                let _ = sender.send(DaemonResponse::Error(
+                    "connection closed by daemon".to_string(),
+                ));
             }
             out_rx_map_clone.lock().clear();
             exit_rx_map_clone.lock().clear();
@@ -202,6 +216,7 @@ impl DaemonClient {
             out_rx_map,
             exit_rx_map,
             pending_response,
+            worktree_changed_cb,
             _runtime: rt,
         };
 
@@ -247,22 +262,25 @@ impl DaemonClient {
         let (tx, rx) = channel();
         *self.pending_response.lock() = Some(tx);
 
-        let mut json = serde_json::to_string(&req)
-            .map_err(|e| format!("failed to serialize request: {e}"))?;
+        let mut json =
+            serde_json::to_string(&req).map_err(|e| format!("failed to serialize request: {e}"))?;
         json.push('\n');
 
         self.write_tx
             .send(json)
             .map_err(|e| format!("failed to queue request: {e}"))?;
 
-        let resp = rx
-            .recv_timeout(Duration::from_secs(5))
-            .map_err(|e| {
-                *self.pending_response.lock() = None;
-                format!("timed out waiting for daemon response: {e}")
-            })?;
+        let resp = rx.recv_timeout(Duration::from_secs(5)).map_err(|e| {
+            *self.pending_response.lock() = None;
+            format!("timed out waiting for daemon response: {e}")
+        })?;
 
         Ok(resp)
+    }
+
+    /// Register a global hook fired whenever any client mutates a worktree.
+    pub fn set_worktree_changed_callback(&self, cb: OnWorktreeChanged) {
+        *self.worktree_changed_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.
@@ -289,11 +307,15 @@ impl DaemonClient {
         let (out_tx, out_rx) = channel::<Vec<u8>>();
         let (exit_tx, exit_rx) = channel::<Option<i32>>();
 
-        self.out_tx_map.lock().insert(session_id.to_string(), out_tx);
+        self.out_tx_map
+            .lock()
+            .insert(session_id.to_string(), out_tx);
         self.exit_tx_map
             .lock()
             .insert(session_id.to_string(), exit_tx);
-        self.out_rx_map.lock().insert(session_id.to_string(), out_rx);
+        self.out_rx_map
+            .lock()
+            .insert(session_id.to_string(), out_rx);
         self.exit_rx_map
             .lock()
             .insert(session_id.to_string(), exit_rx);
@@ -312,6 +334,7 @@ impl DaemonClient {
     }
 
     /// Create a new session or reattach to an existing one in the daemon.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_or_attach(
         &self,
         session_id: &str,
@@ -320,6 +343,7 @@ impl DaemonClient {
         cwd: Option<String>,
         shell: Option<String>,
         resume_agents: bool,
+        worktree_id: Option<String>,
     ) -> Result<CreateOrAttachResult, String> {
         let req = DaemonRequest::CreateOrAttach {
             session_id: session_id.to_string(),
@@ -328,7 +352,7 @@ impl DaemonClient {
             cwd,
             shell,
             resume_agents,
-            worktree_id: None,
+            worktree_id,
             extra_env: Vec::new(),
         };
         match self.send_request(req)? {
@@ -371,8 +395,8 @@ impl DaemonClient {
             session_id: session_id.to_string(),
             chars,
         };
-        let mut json = serde_json::to_string(&req)
-            .map_err(|e| format!("failed to serialize ack: {e}"))?;
+        let mut json =
+            serde_json::to_string(&req).map_err(|e| format!("failed to serialize ack: {e}"))?;
         json.push('\n');
         self.write_tx
             .send(json)
@@ -426,6 +450,152 @@ impl DaemonClient {
             Err(e) if e.contains("connection closed") => Ok(()),
             Ok(other) => Err(format!("unexpected response for Shutdown: {other:?}")),
             Err(e) => Err(e),
+        }
+    }
+
+    /// Register a repo in the worktree registry (idempotent per canonical path).
+    pub fn repo_add(&self, path: &str) -> Result<Vec<RepoRecord>, String> {
+        match self.send_request(DaemonRequest::RepoAdd { path: path.into() })? {
+            DaemonResponse::RepoRecords(repos) => Ok(repos),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for RepoAdd: {other:?}")),
+        }
+    }
+
+    pub fn repo_list(&self) -> Result<Vec<RepoRecord>, String> {
+        match self.send_request(DaemonRequest::RepoList)? {
+            DaemonResponse::RepoRecords(repos) => Ok(repos),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for RepoList: {other:?}")),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn worktree_create(
+        &self,
+        repo_path: &str,
+        name: Option<String>,
+        branch: Option<String>,
+        base_ref: Option<String>,
+        parent_worktree_id: Option<String>,
+        workspace_dir: Option<String>,
+        nest_workspaces: Option<bool>,
+    ) -> Result<WorktreeRecord, String> {
+        let req = DaemonRequest::WorktreeCreate {
+            repo_path: repo_path.into(),
+            name,
+            branch,
+            base_ref,
+            parent_worktree_id,
+            workspace_dir,
+            nest_workspaces,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::WorktreeRecordOne(Some(record)) => Ok(record),
+            DaemonResponse::WorktreeRecordOne(None) => {
+                Err("worktree create returned no record".into())
+            }
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeCreate: {other:?}")),
+        }
+    }
+
+    pub fn worktree_list(&self) -> Result<Vec<WorktreeListEntry>, String> {
+        match self.send_request(DaemonRequest::WorktreeList)? {
+            DaemonResponse::WorktreeRecords(entries) => Ok(entries),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeList: {other:?}")),
+        }
+    }
+
+    // Show keeps the Option so a purged id reads as "gone", not a transport error.
+    pub fn worktree_show(&self, id: &str) -> Result<Option<WorktreeRecord>, String> {
+        let req = DaemonRequest::WorktreeShow { id: id.into() };
+        match self.send_request(req)? {
+            DaemonResponse::WorktreeRecordOne(record) => Ok(record),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeShow: {other:?}")),
+        }
+    }
+
+    pub fn worktree_current(&self, cwd: &str) -> Result<Option<WorktreeRecord>, String> {
+        let req = DaemonRequest::WorktreeCurrent { cwd: cwd.into() };
+        match self.send_request(req)? {
+            DaemonResponse::WorktreeRecordOne(record) => Ok(record),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for WorktreeCurrent: {other:?}"
+            )),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn worktree_set(
+        &self,
+        id: &str,
+        set_parent: bool,
+        parent_worktree_id: Option<String>,
+        workspace_status: Option<WorktreeStatus>,
+        display_name: Option<String>,
+    ) -> Result<WorktreeRecord, String> {
+        let req = DaemonRequest::WorktreeSet {
+            id: id.into(),
+            set_parent,
+            parent_worktree_id,
+            workspace_status,
+            display_name,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::WorktreeRecordOne(Some(record)) => Ok(record),
+            DaemonResponse::WorktreeRecordOne(None) => Err(format!("worktree not found: {id}")),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeSet: {other:?}")),
+        }
+    }
+
+    pub fn worktree_remove(
+        &self,
+        id: &str,
+        force: bool,
+        delete_branch: bool,
+    ) -> Result<(), String> {
+        let req = DaemonRequest::WorktreeRemove {
+            id: id.into(),
+            force,
+            delete_branch,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeRemove: {other:?}")),
+        }
+    }
+
+    pub fn worktree_purge(&self, id: &str) -> Result<(), String> {
+        let req = DaemonRequest::WorktreePurge { id: id.into() };
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreePurge: {other:?}")),
+        }
+    }
+
+    pub fn worktree_ps(&self) -> Result<Vec<WorktreePsEntry>, String> {
+        match self.send_request(DaemonRequest::WorktreePs)? {
+            DaemonResponse::WorktreePsEntries(entries) => Ok(entries),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreePs: {other:?}")),
+        }
+    }
+
+    pub fn worktree_lineage(&self, id: &str) -> Result<Vec<WorktreeRecord>, String> {
+        let req = DaemonRequest::WorktreeLineage { id: id.into() };
+        match self.send_request(req)? {
+            DaemonResponse::WorktreeRecordsList(records) => Ok(records),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for WorktreeLineage: {other:?}"
+            )),
         }
     }
 }
@@ -517,7 +687,7 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("client-session-1", 80, 24, None, Some(sh), false)
+            .create_or_attach("client-session-1", 80, 24, None, Some(sh), false, None)
             .expect("create_or_attach");
 
         assert!(attach_res.is_new);
@@ -549,14 +719,12 @@ mod tests {
         assert!(sessions.contains(&"client-session-1".to_string()));
 
         // 4. Resize and ack
-        client
-            .resize("client-session-1", 100, 30)
-            .expect("resize");
+        client.resize("client-session-1", 100, 30).expect("resize");
         client.ack("client-session-1", 100).expect("ack");
 
         // 5. Reattach to session
         let reattach_res = client
-            .create_or_attach("client-session-1", 100, 30, None, None, false)
+            .create_or_attach("client-session-1", 100, 30, None, None, false, None)
             .expect("reattach");
         assert!(!reattach_res.is_new);
         assert!(reattach_res.snapshot.is_some());
@@ -613,16 +781,21 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("ack-test-session", 80, 24, None, Some(sh), false)
+            .create_or_attach("ack-test-session", 80, 24, None, Some(sh), false, None)
             .expect("create_or_attach");
         assert!(attach_res.is_new);
 
         let start = std::time::Instant::now();
         for _ in 0..1000 {
-            client.ack("ack-test-session", 1024).expect("async ack should succeed");
+            client
+                .ack("ack-test-session", 1024)
+                .expect("async ack should succeed");
         }
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(1), "1000 ACKs took too long: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "1000 ACKs took too long: {elapsed:?}"
+        );
 
         let sessions = client.list_sessions().expect("list_sessions after acks");
         assert!(sessions.contains(&"ack-test-session".to_string()));

@@ -173,6 +173,19 @@ vi.mock("../lib/pty/transport", () => ({
   saveScrollback: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
+  onPtyCwd: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  worktreeList: vi.fn().mockResolvedValue([]),
+  worktreePs: vi.fn().mockResolvedValue([]),
+  worktreeCreate: vi.fn(),
+  worktreeSet: vi.fn().mockResolvedValue(null),
+  worktreeShow: vi.fn().mockResolvedValue(null),
+  worktreeCurrent: vi.fn().mockResolvedValue(null),
+  worktreeRemove: vi.fn().mockResolvedValue(undefined),
+  worktreePurge: vi.fn().mockResolvedValue(undefined),
+  worktreeLineage: vi.fn().mockResolvedValue([]),
+  repoAdd: vi.fn().mockResolvedValue([]),
+  repoList: vi.fn().mockResolvedValue([]),
 }));
 
 const ptySpawnMock = vi.mocked(transport.ptySpawn);

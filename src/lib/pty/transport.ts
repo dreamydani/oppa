@@ -46,6 +46,7 @@ export type PtySpawnOptions = {
   cols?: number;
   rows?: number;
   resumeAgents?: boolean;
+  worktreeId?: string;
 };
 
 export async function ptySpawn(opts?: PtySpawnOptions): Promise<PtySpawnResult> {
@@ -103,4 +104,106 @@ export async function onPtyExit(cb: (p: PtyExitPayload) => void) {
 }
 export async function onPtyCwd(cb: (p: PtyCwdPayload) => void) {
   return listen<PtyCwdPayload>("pty:cwd", (e) => cb(e.payload));
+}
+
+// Worktree engine shapes mirror the serde structs in ipc_protocol v3 exactly
+// (default serde naming, so JSON keys stay snake_case).
+export type WorktreeStatus = "todo" | "in-progress" | "in-review" | "completed";
+
+export interface WorktreeRecord {
+  id: string;
+  repo_id: string;
+  name: string;
+  display_name: string | null;
+  branch: string;
+  path: string;
+  base_ref: string;
+  parent_worktree_id: string | null;
+  child_worktree_ids: string[];
+  workspace_status: WorktreeStatus;
+  retired: boolean;
+  created_at_ms: number;
+  linked_pr_url: string | null;
+}
+
+export interface WorktreeListEntry {
+  record: WorktreeRecord;
+  missing_on_disk: boolean;
+}
+
+export interface WorktreePsEntry {
+  record: WorktreeRecord;
+  live_sessions: number;
+}
+
+export interface RepoRecord {
+  repo_id: string;
+  path: string;
+  default_base_ref: string | null;
+  worktree_base_path: string | null;
+}
+
+export interface WorktreeChangedPayload {
+  id: string | null;
+}
+
+export type WorktreeCreateOptions = {
+  repoPath: string;
+  name?: string;
+  branch?: string;
+  baseRef?: string;
+  parentWorktreeId?: string;
+  workspaceDir?: string;
+  nestWorkspaces?: boolean;
+};
+
+// setParent disambiguates "clear parent" from "leave parent untouched".
+export type WorktreeSetOptions = {
+  parentWorktreeId?: string | null;
+  workspaceStatus?: WorktreeStatus;
+  displayName?: string | null;
+};
+
+export function worktreeCreate(opts: WorktreeCreateOptions): Promise<WorktreeRecord | null> {
+  return invoke("worktree_create", opts as unknown as Record<string, unknown>);
+}
+export function worktreeList(): Promise<WorktreeListEntry[]> {
+  return invoke("worktree_list");
+}
+export function worktreeShow(id: string): Promise<WorktreeRecord | null> {
+  return invoke("worktree_show", { id });
+}
+export function worktreeCurrent(cwd: string): Promise<WorktreeRecord | null> {
+  return invoke("worktree_current", { cwd });
+}
+export function worktreeSet(
+  id: string,
+  opts: WorktreeSetOptions,
+): Promise<WorktreeRecord | null> {
+  const args: Record<string, unknown> = { id, setParent: "parentWorktreeId" in opts };
+  if ("parentWorktreeId" in opts) args.parentWorktreeId = opts.parentWorktreeId ?? null;
+  if (opts.workspaceStatus !== undefined) args.workspaceStatus = opts.workspaceStatus;
+  if ("displayName" in opts) args.displayName = opts.displayName ?? null;
+  return invoke("worktree_set", args);
+}
+export function worktreeRemove(id: string, force: boolean, deleteBranch: boolean): Promise<void> {
+  return invoke("worktree_remove", { id, force, deleteBranch });
+}
+export function worktreePurge(id: string): Promise<void> {
+  return invoke("worktree_purge", { id });
+}
+export function worktreePs(): Promise<WorktreePsEntry[]> {
+  return invoke("worktree_ps");
+}
+export function worktreeLineage(id: string): Promise<WorktreeRecord[]> {
+  return invoke("worktree_lineage", { id });
+}
+export function repoAdd(path: string): Promise<RepoRecord[]> {
+  return invoke("repo_add", { path });
+}
+export function repoList(): Promise<RepoRecord[]> {
+  return invoke("repo_list");
+}
+export async function onWorktreeChanged(cb: (p: WorktreeChangedPayload) => void) {
+  return listen<WorktreeChangedPayload>("worktree-changed", (e) => cb(e.payload));
 }

@@ -1,4 +1,4 @@
-use crate::pty::daemon_client::{DaemonClient, OnCwd, OnData, OnExit};
+use crate::pty::daemon_client::{DaemonClient, OnCwd, OnData, OnExit, OnWorktreeChanged};
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,6 +8,7 @@ use std::sync::Arc;
 /// Registry and Tauri managed state adapter delegating PTY operations to the detached daemon.
 pub struct PtyManager {
     client: Arc<Mutex<Option<Arc<DaemonClient>>>>,
+    worktree_changed_cb: Mutex<Option<OnWorktreeChanged>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -22,6 +23,7 @@ impl PtyManager {
     pub fn new() -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
+            worktree_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -31,6 +33,7 @@ impl PtyManager {
     pub fn with_socket_path(socket_path: &str) -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
+            worktree_changed_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -49,8 +52,17 @@ impl PtyManager {
     pub fn with_client(client: Arc<DaemonClient>) -> Self {
         Self {
             client: Arc::new(Mutex::new(Some(client))),
+            worktree_changed_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
+        }
+    }
+
+    /// Install the global worktree-event forwarder; re-applied on every reconnect.
+    pub fn set_worktree_changed_callback(&self, cb: OnWorktreeChanged) {
+        *self.worktree_changed_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_worktree_changed_callback(cb);
         }
     }
 
@@ -84,6 +96,9 @@ impl PtyManager {
             }
         });
         *client_guard = Some(Arc::clone(&client));
+        if let Some(cb) = self.worktree_changed_cb.lock().as_ref() {
+            client.set_worktree_changed_callback(Arc::clone(cb));
+        }
         Ok(client)
     }
 
@@ -100,11 +115,20 @@ impl PtyManager {
         on_exit: Option<OnExit>,
         on_cwd: Option<OnCwd>,
         resume_agents: bool,
+        worktree_id: Option<String>,
     ) -> Result<CreateOrAttachResult, String> {
         let client = self.get_client()?;
         client.register_callbacks(session_id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(session_id);
-        client.create_or_attach(session_id, cols, rows, cwd, shell, resume_agents)
+        client.create_or_attach(
+            session_id,
+            cols,
+            rows,
+            cwd,
+            shell,
+            resume_agents,
+            worktree_id,
+        )
     }
 
     /// Spawn a new shell session and return its id.
@@ -125,7 +149,7 @@ impl PtyManager {
         client.register_callbacks(&id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(&id);
 
-        client.create_or_attach(&id, cols, rows, cwd, shell, false)?;
+        client.create_or_attach(&id, cols, rows, cwd, shell, false, None)?;
         Ok(id)
     }
 
@@ -253,7 +277,8 @@ pub(crate) mod tests {
         collected
     }
 
-    pub(crate) fn setup_test_server_and_manager() -> (PtyManager, CancellationToken, std::thread::JoinHandle<()>) {
+    pub(crate) fn setup_test_server_and_manager(
+    ) -> (PtyManager, CancellationToken, std::thread::JoinHandle<()>) {
         let server = Arc::new(DaemonServer::new());
         let cancel_token = CancellationToken::new();
 
@@ -335,14 +360,19 @@ pub(crate) mod tests {
                 None,
                 None,
                 false,
+                None,
             )
             .expect("create");
         assert!(res.is_new);
         assert_eq!(res.cols, 80);
         assert_eq!(res.rows, 24);
 
-        let rx = manager.take_output("session-mgr-1").expect("output channel");
-        manager.write("session-mgr-1", b"echo persistent_val\n").expect("write");
+        let rx = manager
+            .take_output("session-mgr-1")
+            .expect("output channel");
+        manager
+            .write("session-mgr-1", b"echo persistent_val\n")
+            .expect("write");
 
         let _ = drain_until(rx, "persistent_val", Duration::from_secs(5));
 
@@ -358,6 +388,7 @@ pub(crate) mod tests {
                 None,
                 None,
                 false,
+                None,
             )
             .expect("reattach");
         assert!(!reattach.is_new);

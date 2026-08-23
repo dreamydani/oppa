@@ -19,6 +19,15 @@ import {
   onPtyData,
   onPtyExit,
   onPtyCwd,
+  worktreeCreate,
+  worktreeList,
+  worktreeSet,
+  worktreeRemove,
+  worktreePurge,
+  worktreePs,
+  repoAdd,
+  repoList,
+  onWorktreeChanged,
 } from "./transport";
 import type { PtySpawnResult } from "./transport";
 
@@ -217,6 +226,87 @@ describe("pty transport", () => {
     expect(result).toEqual(mockResult);
     expect(result.is_warm).toBe(false);
     expect(result.cold_scrollback).toBe("persisted terminal scrollback\n");
+  });
+
+  it("worktreeCreate invokes worktree_create with camelCase args mapped from options", async () => {
+    invokeMock.mockResolvedValue(null);
+    await worktreeCreate({ repoPath: "/repos/demo", name: "feat-a", baseRef: "main" });
+    expect(invokeMock).toHaveBeenCalledWith("worktree_create", {
+      repoPath: "/repos/demo",
+      name: "feat-a",
+      baseRef: "main",
+    });
+  });
+
+  it("worktreeList invokes worktree_list and resolves entries", async () => {
+    const entries = [{ record: { id: "wt-1" }, missing_on_disk: false }];
+    invokeMock.mockResolvedValue(entries);
+    await expect(worktreeList()).resolves.toEqual(entries);
+    expect(invokeMock).toHaveBeenCalledWith("worktree_list");
+  });
+
+  it("worktreeSet invokes worktree_set including setParent for clear-vs-untouched", async () => {
+    invokeMock.mockResolvedValue(null);
+    await worktreeSet("wt-1", { workspaceStatus: "completed" });
+    expect(invokeMock).toHaveBeenCalledWith("worktree_set", {
+      id: "wt-1",
+      setParent: false,
+      workspaceStatus: "completed",
+    });
+
+    invokeMock.mockClear();
+    await worktreeSet("wt-2", { parentWorktreeId: null });
+    expect(invokeMock).toHaveBeenCalledWith("worktree_set", {
+      id: "wt-2",
+      setParent: true,
+      parentWorktreeId: null,
+    });
+  });
+
+  it("worktreeRemove and worktreePurge forward flags to their commands", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await worktreeRemove("wt-1", true, false);
+    expect(invokeMock).toHaveBeenCalledWith("worktree_remove", {
+      id: "wt-1",
+      force: true,
+      deleteBranch: false,
+    });
+
+    await worktreePurge("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("worktree_purge", { id: "wt-1" });
+  });
+
+  it("worktreePs resolves live session counts per record", async () => {
+    const entries = [{ record: { id: "wt-1" }, live_sessions: 2 }];
+    invokeMock.mockResolvedValue(entries);
+    await expect(worktreePs()).resolves.toEqual(entries);
+    expect(invokeMock).toHaveBeenCalledWith("worktree_ps");
+  });
+
+  it("repoAdd and repoList resolve registry repo records", async () => {
+    const repos = [{ repo_id: "demo", path: "/repos/demo" }];
+    invokeMock.mockResolvedValue(repos);
+    await expect(repoAdd("/repos/demo")).resolves.toEqual(repos);
+    expect(invokeMock).toHaveBeenCalledWith("repo_add", { path: "/repos/demo" });
+
+    await expect(repoList()).resolves.toEqual(repos);
+    expect(invokeMock).toHaveBeenCalledWith("repo_list");
+  });
+
+  it("onWorktreeChanged subscribes to worktree-changed and forwards the payload", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onWorktreeChanged(cb);
+    expect(listenMock).toHaveBeenCalledWith("worktree-changed", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { id: string | null };
+    }) => void;
+    handler({ payload: { id: "wt-1" } });
+    handler({ payload: { id: null } });
+    expect(cb).toHaveBeenNthCalledWith(1, { id: "wt-1" });
+    expect(cb).toHaveBeenNthCalledWith(2, { id: null });
+    expect(result).toBe(unlisten);
   });
 });
 

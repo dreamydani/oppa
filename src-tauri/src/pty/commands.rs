@@ -1,6 +1,10 @@
+use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
+use crate::git::worktrees::WorktreeListEntry;
+use crate::pty::ipc_protocol::WorktreePsEntry;
 use crate::pty::manager::PtyManager;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 /// Payload emitted on the `pty:data` event for each output chunk.
@@ -25,6 +29,26 @@ pub struct PtyExitPayload {
 pub struct PtyCwdPayload {
     pub id: String,
     pub cwd: String,
+}
+
+/// Payload emitted on the `worktree-changed` event when any client mutates a worktree.
+#[derive(Clone, Serialize)]
+pub struct WorktreeChangedPayload {
+    pub id: Option<String>,
+}
+
+/// Builds the webview forwarder installed on the manager; survives reconnects
+/// because PtyManager re-applies it to every client it creates.
+pub fn worktree_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id| {
+        let _ = emitter.emit(
+            "worktree-changed",
+            WorktreeChangedPayload {
+                id: id.map(str::to_string),
+            },
+        );
+    })
 }
 
 /// Resume plan surfaced to the frontend when a cold-restored session relaunches work.
@@ -65,6 +89,7 @@ pub fn pty_spawn(
     cols: Option<u16>,
     rows: Option<u16>,
     resume_agents: Option<bool>,
+    worktree_id: Option<String>,
 ) -> Result<PtySpawnResultPayload, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -119,6 +144,7 @@ pub fn pty_spawn(
         Some(on_exit),
         Some(on_cwd),
         resume_agents.unwrap_or(true),
+        worktree_id,
     )?;
 
     let (is_warm, cold_scrollback) = if !attach_res.is_new {
@@ -127,7 +153,11 @@ pub fn pty_spawn(
         use tauri::Manager;
         let scrollback = app.path().app_data_dir().ok().and_then(|dir| {
             let storage = crate::pty::snapshot::SnapshotStorage::new(dir);
-            storage.load_snapshot(&session_id).ok().flatten().map(|s| s.scrollback)
+            storage
+                .load_snapshot(&session_id)
+                .ok()
+                .flatten()
+                .map(|s| s.scrollback)
         });
         (false, scrollback)
     };
@@ -154,12 +184,10 @@ pub fn pty_spawn(
 }
 
 #[tauri::command]
-pub fn pty_write(
-    manager: State<'_, PtyManager>,
-    id: String,
-    data: String,
-) -> Result<(), String> {
-    manager.write(&id, data.as_bytes()).map_err(|e| e.to_string())
+pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
+    manager
+        .write(&id, data.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -178,11 +206,7 @@ pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn pty_ack(
-    manager: State<'_, PtyManager>,
-    id: String,
-    chars: usize,
-) -> Result<(), String> {
+pub fn pty_ack(manager: State<'_, PtyManager>, id: String, chars: usize) -> Result<(), String> {
     manager.ack(&id, chars)
 }
 
@@ -199,6 +223,117 @@ pub fn pty_disconnect(manager: State<'_, PtyManager>) -> Result<(), String> {
 #[tauri::command]
 pub fn pty_shutdown(manager: State<'_, PtyManager>) -> Result<(), String> {
     manager.shutdown()
+}
+
+// Worktree/repo commands: thin forwarders so the daemon stays the single owner
+// of the registry (the GUI process never touches worktrees.json directly).
+
+#[tauri::command]
+pub fn repo_add(manager: State<'_, PtyManager>, path: String) -> Result<Vec<RepoRecord>, String> {
+    manager.get_client()?.repo_add(&path)
+}
+
+#[tauri::command]
+pub fn repo_list(manager: State<'_, PtyManager>) -> Result<Vec<RepoRecord>, String> {
+    manager.get_client()?.repo_list()
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn worktree_create(
+    manager: State<'_, PtyManager>,
+    repo_path: String,
+    name: Option<String>,
+    branch: Option<String>,
+    base_ref: Option<String>,
+    parent_worktree_id: Option<String>,
+    workspace_dir: Option<String>,
+    nest_workspaces: Option<bool>,
+) -> Result<Option<WorktreeRecord>, String> {
+    let client = manager.get_client()?;
+    client
+        .worktree_create(
+            &repo_path,
+            name,
+            branch,
+            base_ref,
+            parent_worktree_id,
+            workspace_dir,
+            nest_workspaces,
+        )
+        .map(Some)
+}
+
+#[tauri::command]
+pub fn worktree_list(manager: State<'_, PtyManager>) -> Result<Vec<WorktreeListEntry>, String> {
+    manager.get_client()?.worktree_list()
+}
+
+#[tauri::command]
+pub fn worktree_show(
+    manager: State<'_, PtyManager>,
+    id: String,
+) -> Result<Option<WorktreeRecord>, String> {
+    manager.get_client()?.worktree_show(&id)
+}
+
+#[tauri::command]
+pub fn worktree_current(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+) -> Result<Option<WorktreeRecord>, String> {
+    manager.get_client()?.worktree_current(&cwd)
+}
+
+#[tauri::command]
+pub fn worktree_set(
+    manager: State<'_, PtyManager>,
+    id: String,
+    set_parent: bool,
+    parent_worktree_id: Option<String>,
+    workspace_status: Option<WorktreeStatus>,
+    display_name: Option<String>,
+) -> Result<Option<WorktreeRecord>, String> {
+    let client = manager.get_client()?;
+    client
+        .worktree_set(
+            &id,
+            set_parent,
+            parent_worktree_id,
+            workspace_status,
+            display_name,
+        )
+        .map(Some)
+}
+
+#[tauri::command]
+pub fn worktree_remove(
+    manager: State<'_, PtyManager>,
+    id: String,
+    force: bool,
+    delete_branch: bool,
+) -> Result<(), String> {
+    manager
+        .get_client()?
+        .worktree_remove(&id, force, delete_branch)
+}
+
+#[tauri::command]
+pub fn worktree_purge(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+    manager.get_client()?.worktree_purge(&id)
+}
+
+#[tauri::command]
+pub fn worktree_ps(manager: State<'_, PtyManager>) -> Result<Vec<WorktreePsEntry>, String> {
+    manager.get_client()?.worktree_ps()
+}
+
+#[tauri::command]
+pub fn worktree_lineage(
+    manager: State<'_, PtyManager>,
+    id: String,
+) -> Result<Vec<WorktreeRecord>, String> {
+    manager.get_client()?.worktree_lineage(&id)
 }
 
 #[tauri::command]
@@ -230,7 +365,9 @@ pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Res
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
-    storage.cleanup_stale(&active_ids).map_err(|e| e.to_string())
+    storage
+        .cleanup_stale(&active_ids)
+        .map_err(|e| e.to_string())
 }
 
 /// Shared body of `pty_list`: the session ids in registration order. Kept as
@@ -315,5 +452,17 @@ mod tests {
         assert!(json.contains("\"cols\":80"));
         assert!(json.contains("\"rows\":24"));
         assert!(json.contains("\"cwd\":\"/test/cwd\""));
+    }
+
+    #[test]
+    fn worktree_changed_payload_serializes() {
+        let with_id = serde_json::to_string(&WorktreeChangedPayload {
+            id: Some("repo::C:/ws/feat-a".into()),
+        })
+        .unwrap();
+        assert!(with_id.contains("\"id\":\"repo::C:/ws/feat-a\""));
+
+        let without_id = serde_json::to_string(&WorktreeChangedPayload { id: None }).unwrap();
+        assert!(without_id.contains("\"id\":null"));
     }
 }
