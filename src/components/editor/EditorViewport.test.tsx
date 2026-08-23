@@ -81,6 +81,37 @@ describe("EditorViewport", () => {
     expect(screen.getByText("Add world to console log")).toBeInTheDocument();
   });
 
+  it("renders the view-only diff bar and read-only diff when viewOnlyDiff is set", () => {
+    useTerminalStore.setState({
+      viewOnlyDiff: {
+        path: "/workspace/src/main.ts",
+        original: "console.log('hello');",
+        modified: "console.log('changed');",
+      },
+    });
+
+    render(<EditorViewport />);
+
+    expect(screen.getByTestId("view-only-diff-bar")).toHaveTextContent(
+      "Viewing diff — Esc to close",
+    );
+    expect(screen.getByTestId("monaco-diff-mock")).toBeInTheDocument();
+    expect(screen.queryByText(/AI Proposed Changes/i)).toBeNull();
+  });
+
+  it("Escape clears the view-only diff", () => {
+    useTerminalStore.setState({
+      viewOnlyDiff: { path: "/workspace/src/main.ts", original: "a", modified: "b" },
+    });
+
+    render(<EditorViewport />);
+    expect(screen.getByTestId("view-only-diff-bar")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(useTerminalStore.getState().viewOnlyDiff).toBeNull();
+  });
+
   it("renders MarkdownViewer when editorViewMode is 'markdown-preview'", () => {
     useTerminalStore.setState({
       editorTabs: [

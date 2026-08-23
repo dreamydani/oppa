@@ -55,6 +55,12 @@ vi.mock("../lib/pty/transport", () => ({
   }),
   scFetch: vi.fn().mockResolvedValue(undefined),
   scHistory: vi.fn().mockResolvedValue({ items: [], has_more: false }),
+  scFileDiff: vi.fn().mockResolvedValue({
+    kind: "text",
+    original_content: "",
+    modified_content: "",
+    truncated: false,
+  }),
   scPull: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
   scFastForward: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
   scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/main", was_publish: false }),
@@ -3098,6 +3104,123 @@ describe("terminalStore", () => {
     it("supports setting appMode to editor", () => {
       useTerminalStore.getState().setAppMode("editor");
       expect(useTerminalStore.getState().activeAppMode).toBe("editor");
+    });
+  });
+
+  describe("view-only diff slice", () => {
+    const scFileDiffMock = vi.mocked(transport.scFileDiff);
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "s1",
+            status: "running",
+            cwd: "/mock/repo",
+            cols: 80,
+            rows: 24,
+          },
+        },
+        tabs: [{ id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+        viewOnlyDiff: null,
+        pendingAiDiff: null,
+      });
+    });
+
+    it("openDiffView stores the pair, focuses the editor, and never arms the AI banner", () => {
+      useTerminalStore.getState().stageAiDiff("stale.ts", "a", "b");
+      useTerminalStore.getState().openDiffView("src/a.rs", "old", "new");
+
+      const state = useTerminalStore.getState();
+      expect(state.viewOnlyDiff).toEqual({ path: "src/a.rs", original: "old", modified: "new" });
+      expect(state.pendingAiDiff).toBeNull();
+      expect(state.activeAppMode).toBe("editor");
+    });
+
+    it("clearViewOnlyDiff resets the review and restores edit mode", () => {
+      useTerminalStore.getState().openDiffView("src/a.rs", "old", "new");
+      useTerminalStore.getState().clearViewOnlyDiff();
+
+      expect(useTerminalStore.getState().viewOnlyDiff).toBeNull();
+      expect(useTerminalStore.getState().editorViewMode).toBe("edit");
+    });
+
+    it("openGitDiff unstaged compares worktree against index", async () => {
+      scFileDiffMock.mockResolvedValue({
+        kind: "text",
+        original_content: "a",
+        modified_content: "b",
+        truncated: false,
+      });
+
+      await useTerminalStore.getState().openGitDiff("f.rs", "unstaged");
+
+      expect(scFileDiffMock).toHaveBeenCalledWith("/mock/repo", "f.rs", false, false);
+      expect(useTerminalStore.getState().viewOnlyDiff).toEqual({
+        path: "f.rs",
+        original: "a",
+        modified: "b",
+      });
+    });
+
+    it("openGitDiff staged compares index against HEAD", async () => {
+      scFileDiffMock.mockResolvedValue({
+        kind: "text",
+        original_content: "a",
+        modified_content: "b",
+        truncated: false,
+      });
+
+      await useTerminalStore.getState().openGitDiff("f.rs", "staged");
+
+      expect(scFileDiffMock).toHaveBeenCalledWith("/mock/repo", "f.rs", true, false);
+    });
+
+    it("openGitDiff untracked compares worktree against empty HEAD so additions show", async () => {
+      scFileDiffMock.mockResolvedValue({
+        kind: "text",
+        original_content: "",
+        modified_content: "brand new",
+        truncated: false,
+      });
+
+      await useTerminalStore.getState().openGitDiff("new.ts", "untracked");
+
+      expect(scFileDiffMock).toHaveBeenCalledWith("/mock/repo", "new.ts", false, true);
+      expect(useTerminalStore.getState().viewOnlyDiff?.modified).toBe("brand new");
+    });
+
+    it("openGitDiff binary diffs show a placeholder in the modified pane", async () => {
+      scFileDiffMock.mockResolvedValue({
+        kind: "binary",
+        original_content: "",
+        modified_content: "",
+        truncated: false,
+      });
+
+      await useTerminalStore.getState().openGitDiff("img.png", "unstaged");
+
+      expect(useTerminalStore.getState().viewOnlyDiff?.modified).toBe("<binary file>");
+    });
+
+    it("openGitDiff truncated diffs show a truncation notice in the modified pane", async () => {
+      scFileDiffMock.mockResolvedValue({
+        kind: "text",
+        original_content: "partial",
+        modified_content: "partial",
+        truncated: true,
+      });
+
+      await useTerminalStore.getState().openGitDiff("big.log", "unstaged");
+
+      expect(useTerminalStore.getState().viewOnlyDiff?.modified).toBe(
+        "<diff too large — truncated>",
+      );
     });
   });
 

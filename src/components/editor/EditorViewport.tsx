@@ -5,6 +5,7 @@ import { EditorTabBar } from "./EditorTabBar";
 import { EditorBreadcrumbs } from "./EditorBreadcrumbs";
 import { CodeEditor } from "./CodeEditor";
 import { AiDiffBanner } from "./AiDiffBanner";
+import { ViewOnlyDiffBar } from "./ViewOnlyDiffBar";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { FileIcon, PlusIcon } from "../icons/MinimalIcons";
 import { PanelRight } from "lucide-react";
@@ -15,6 +16,7 @@ export function EditorViewport(): ReactElement {
   const activeEditorPath = useTerminalStore((s) => s.activeEditorPath);
   const editorViewMode = useTerminalStore((s) => s.editorViewMode);
   const pendingAiDiff = useTerminalStore((s) => s.pendingAiDiff);
+  const viewOnlyDiff = useTerminalStore((s) => s.viewOnlyDiff);
   const openFileInEditor = useTerminalStore((s) => s.openFileInEditor);
   const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleRightSidebar = useTerminalStore((s) => s.toggleRightSidebar);
@@ -111,7 +113,7 @@ export function EditorViewport(): ReactElement {
       );
     }
 
-    if (editorViewMode === "diff" || pendingAiDiff) {
+    if (editorViewMode === "diff" || pendingAiDiff || viewOnlyDiff) {
       return <CodeEditor diffMode isInlineDiff={isInlineDiff} />;
     }
 
@@ -143,6 +145,7 @@ export function EditorViewport(): ReactElement {
       {pendingAiDiff && (
         <AiDiffBanner isInline={isInlineDiff} onToggleInline={setIsInlineDiff} />
       )}
+      <ViewOnlyDiffBar />
       <div className="editor-main-canvas">{renderContent()}</div>
     </div>
   );

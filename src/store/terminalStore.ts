@@ -38,6 +38,7 @@ import {
   scPull,
   scFastForward,
   scPush,
+  scFileDiff,
 } from "../lib/pty/transport";
 import type {
   PtySpawnOptions,
@@ -52,6 +53,7 @@ import type {
   BranchCompare,
   PullOutcome,
   PushOutcome,
+  GitArea,
 } from "../lib/pty/transport";
 import {
   split,
@@ -161,6 +163,12 @@ export interface PendingAiDiff {
   modified: string;
   summary?: string;
   isInline?: boolean;
+}
+
+export interface ViewOnlyDiff {
+  path: string;
+  original: string;
+  modified: string;
 }
 
 export function detectEditorLanguage(filePath: string): string {
@@ -457,6 +465,10 @@ export interface TerminalState {
   acceptAiDiff: () => Promise<void>;
   rejectAiDiff: () => void;
   setEditorViewMode: (mode: EditorViewMode) => void;
+  viewOnlyDiff: ViewOnlyDiff | null;
+  openDiffView: (path: string, original: string, modified: string) => void;
+  clearViewOnlyDiff: () => void;
+  openGitDiff: (path: string, area: GitArea) => Promise<void>;
   settings: AppSettings;
   isSettingsOpen: boolean;
   activeSettingsTab: SettingsTabId;
@@ -585,6 +597,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   activeEditorPath: null,
   editorViewMode: "edit",
   pendingAiDiff: null,
+  viewOnlyDiff: null,
   settings: DEFAULT_APP_SETTINGS,
   isSettingsOpen: false,
   activeSettingsTab: "general",
@@ -2101,6 +2114,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       set({
         activeEditorPath: path,
         editorViewMode: existing.isMarkdown ? "markdown-split" : "edit",
+        viewOnlyDiff: null,
       });
       return;
     }
@@ -2125,6 +2139,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       editorTabs: [...s.editorTabs, newTab],
       activeEditorPath: path,
       editorViewMode: isMarkdown ? "markdown-split" : "edit",
+      viewOnlyDiff: null,
     }));
   },
 
@@ -2222,6 +2237,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activeEditorPath: path,
       pendingAiDiff: { path, original, modified, summary },
       editorViewMode: "diff",
+      // Review-only diffs never mix with the AI accept/reject flow
+      viewOnlyDiff: null,
     });
   },
 
@@ -2256,6 +2273,36 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   setEditorViewMode: (mode: EditorViewMode) => set({ editorViewMode: mode }),
+
+  openDiffView: (path: string, original: string, modified: string) => {
+    set({
+      viewOnlyDiff: { path, original, modified },
+      pendingAiDiff: null,
+      activeAppMode: "editor",
+    });
+  },
+
+  clearViewOnlyDiff: () =>
+    set((s) => ({
+      viewOnlyDiff: null,
+      editorViewMode: s.pendingAiDiff ? s.editorViewMode : "edit",
+    })),
+
+  openGitDiff: async (path: string, area: GitArea) => {
+    const dir = get().getActiveCwd();
+    if (!dir) return;
+    // Untracked has no HEAD version, so compare worktree against empty base
+    const staged = area === "staged";
+    const compareAgainstHead = area === "untracked";
+    const diff = await scFileDiff(dir, path, staged, compareAgainstHead);
+    const modified =
+      diff.kind === "binary"
+        ? "<binary file>"
+        : diff.truncated
+          ? "<diff too large — truncated>"
+          : diff.modified_content;
+    get().openDiffView(path, diff.original_content, modified);
+  },
 
   openSettings: (tab?: SettingsTabId) =>
     set({ isSettingsOpen: true, activeSettingsTab: tab || "general" }),

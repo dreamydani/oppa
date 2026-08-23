@@ -79,4 +79,19 @@ describe("CodeEditor", () => {
     expect(screen.getByTestId("diff-original")).toHaveTextContent("fn old() {}");
     expect(screen.getByTestId("diff-modified")).toHaveTextContent("fn new() {}");
   });
+
+  it("renders a read-only DiffEditor from viewOnlyDiff", () => {
+    useTerminalStore.setState({
+      viewOnlyDiff: {
+        path: "src/lib/mod.rs",
+        original: "old line",
+        modified: "new line",
+      },
+    });
+
+    render(<CodeEditor />);
+    expect(screen.getByTestId("monaco-diff-mock")).toBeInTheDocument();
+    expect(screen.getByTestId("diff-original")).toHaveTextContent("old line");
+    expect(screen.getByTestId("diff-modified")).toHaveTextContent("new line");
+  });
 });

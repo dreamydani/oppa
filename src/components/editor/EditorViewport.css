@@ -428,6 +428,63 @@
    4. Code Editor Canvas
    ========================================================================== */
 
+.view-only-diff-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  background-color: var(--sidebar, #141416);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  z-index: 10;
+}
+
+.view-only-diff-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-blue, #58a6ff);
+  white-space: nowrap;
+}
+
+.view-only-diff-path {
+  font-size: 11px;
+  color: var(--muted-foreground, #9e9e9a);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.view-only-diff-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground, #9e9e9a);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.view-only-diff-close:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: var(--foreground, #ededec);
+}
+
+[data-theme="light"] .view-only-diff-bar {
+  background-color: var(--bg-sidebar, #f4f4f2);
+  border-bottom-color: var(--border-divider, rgba(0, 0, 0, 0.08));
+}
+
+[data-theme="light"] .view-only-diff-close:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  color: #18181b;
+}
+
 .editor-main-canvas {
   flex: 1;
   width: 100%;

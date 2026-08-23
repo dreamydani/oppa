@@ -3,19 +3,39 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RightSidebar } from "./RightSidebar";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as fsTransport from "../../lib/fs/transport";
-import * as gitTransport from "../../lib/git/transport";
+import * as ptyTransport from "../../lib/pty/transport";
+import type { SourceControlStatus } from "../../lib/pty/transport";
 
 vi.mock("../../lib/fs/transport", () => ({
   readDir: vi.fn(),
   readFile: vi.fn().mockResolvedValue(""),
 }));
 
-vi.mock("../../lib/git/transport", () => ({
-  getGitStatus: vi.fn(),
+vi.mock("../../lib/pty/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+  scStatus: vi.fn(),
+  scLocalBranches: vi
+    .fn()
+    .mockResolvedValue({ branches: ["main"], current: "main" }),
 }));
 
 const readDirMock = vi.mocked(fsTransport.readDir);
-const getGitStatusMock = vi.mocked(gitTransport.getGitStatus);
+const scStatusMock = vi.mocked(ptyTransport.scStatus);
+
+function makeGitStatus(): SourceControlStatus {
+  return {
+    entries: [
+      { path: "src/App.tsx", index_status: "M", worktree_status: " ", area: "staged", old_path: null },
+      { path: "src/lib/mod.rs", index_status: " ", worktree_status: "M", area: "unstaged", old_path: null },
+      { path: "untracked.ts", index_status: "?", worktree_status: "?", area: "untracked", old_path: null },
+    ],
+    conflict_state: "none",
+    branch: "main",
+    upstream: { has_upstream: true, ahead: 1, behind: 0, remote_branch: "origin/main" },
+    did_hit_limit: false,
+    status_length: 3,
+  };
+}
 
 describe("RightSidebar", () => {
   beforeEach(() => {
@@ -51,17 +71,12 @@ describe("RightSidebar", () => {
       { name: "package.json", path: "/mock/workspace/package.json", is_dir: false, size: 1024 },
     ]);
 
-    getGitStatusMock.mockResolvedValue({
-      is_git: true,
-      branch: "main",
-      ahead: 1,
-      behind: 0,
-      files: [
-        { path: "src/App.tsx", status: "M" },
-        { path: "src/components/New.tsx", status: "A" },
-        { path: "deleted.txt", status: "D" },
-        { path: "untracked.ts", status: "??" },
-      ],
+    scStatusMock.mockResolvedValue(makeGitStatus());
+
+    useTerminalStore.setState({
+      gitStatus: null,
+      gitBranches: null,
+      gitHistory: null,
     });
   });
 
@@ -141,48 +156,43 @@ describe("RightSidebar", () => {
     });
   });
 
-  it("renders Git Source Control branch, ahead/behind count, and changed files with status badges", async () => {
+  it("renders Git Source Control branch, upstream badge, and sectioned changes from store status", async () => {
     useTerminalStore.setState({ rightSidebarTab: "git" });
     render(<RightSidebar />);
 
     await waitFor(() => {
-      expect(screen.getByText("main")).toBeDefined();
-      expect(screen.getByText(/src\/App\.tsx/)).toBeDefined();
-      expect(screen.getByText(/src\/components\/New\.tsx/)).toBeDefined();
-      expect(screen.getByText(/deleted\.txt/)).toBeDefined();
-      expect(screen.getByText(/untracked\.ts/)).toBeDefined();
-      expect(screen.getByText("M")).toBeDefined();
-      expect(screen.getByText("A")).toBeDefined();
-      expect(screen.getByText("D")).toBeDefined();
-      expect(screen.getByText("U")).toBeDefined();
+      expect(screen.getByText("main")).toBeInTheDocument();
+      expect(screen.getByText("↑1 ↓0")).toBeInTheDocument();
+      expect(screen.getByText("App.tsx")).toBeInTheDocument();
+      expect(screen.getByText("mod.rs")).toBeInTheDocument();
+      expect(screen.getByText("untracked.ts")).toBeInTheDocument();
+      const counts = Array.from(document.querySelectorAll(".git-count-badge")).map(
+        (el) => el.textContent,
+      );
+      expect(counts).toEqual(["1", "1", "1"]);
     });
   });
 
   it("renders clean working tree message when git has no changes", async () => {
-    getGitStatusMock.mockResolvedValue({
-      is_git: true,
+    scStatusMock.mockResolvedValue({
+      entries: [],
+      conflict_state: "none",
       branch: "main",
-      ahead: 0,
-      behind: 0,
-      files: [],
+      upstream: { has_upstream: false, ahead: 0, behind: 0, remote_branch: null },
+      did_hit_limit: false,
+      status_length: 0,
     });
 
     useTerminalStore.setState({ rightSidebarTab: "git" });
     render(<RightSidebar />);
 
     await waitFor(() => {
-      expect(screen.getByText(/no changes/i)).toBeDefined();
+      expect(screen.getByText(/working tree clean/i)).toBeDefined();
     });
   });
 
   it("renders non-git repository message when path is not a git repo", async () => {
-    getGitStatusMock.mockResolvedValue({
-      is_git: false,
-      branch: "",
-      ahead: 0,
-      behind: 0,
-      files: [],
-    });
+    scStatusMock.mockRejectedValue(new Error("not a git repository"));
 
     useTerminalStore.setState({ rightSidebarTab: "git" });
     render(<RightSidebar />);

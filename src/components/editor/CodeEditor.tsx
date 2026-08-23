@@ -39,12 +39,14 @@ export function CodeEditor({
   const updateEditorContent = useTerminalStore((s) => s.updateEditorContent);
   const saveActiveFile = useTerminalStore((s) => s.saveActiveFile);
   const pendingAiDiff = useTerminalStore((s) => s.pendingAiDiff);
+  const viewOnlyDiff = useTerminalStore((s) => s.viewOnlyDiff);
   const editorWordWrap = useTerminalStore((s) => s.settings.general.editorWordWrap);
   const appTheme = useTerminalStore((s) => s.settings.appearance.appTheme);
 
   const activeTab = editorTabs.find((t) => t.path === activeEditorPath);
   const content = value !== undefined ? value : activeTab ? activeTab.content : "";
-  const currentLang = mapToMonacoLanguage(activeEditorPath || "", language || activeTab?.language);
+  const langSourcePath = viewOnlyDiff?.path ?? activeEditorPath ?? "";
+  const currentLang = mapToMonacoLanguage(langSourcePath, language || activeTab?.language);
   const monacoTheme = appTheme === "light" ? OPPA_LIGHT_THEME : OPPA_DARK_THEME;
 
   const editorRef = useRef<any>(null);
@@ -86,9 +88,9 @@ export function CodeEditor({
     [onChange, activeEditorPath, updateEditorContent],
   );
 
-  const isDiff = diffMode || !!pendingAiDiff;
-  const origContent = original ?? pendingAiDiff?.original ?? "";
-  const modContent = modified ?? pendingAiDiff?.modified ?? content;
+  const isDiff = diffMode || !!pendingAiDiff || !!viewOnlyDiff;
+  const origContent = original ?? pendingAiDiff?.original ?? viewOnlyDiff?.original ?? "";
+  const modContent = modified ?? pendingAiDiff?.modified ?? viewOnlyDiff?.modified ?? content;
 
   if (isDiff) {
     return (
