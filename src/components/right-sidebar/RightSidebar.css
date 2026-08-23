@@ -12,7 +12,66 @@
   user-select: none;
   overflow: hidden;
   z-index: 15;
-  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  /* Width lives on a custom property (set inline) so the closed-state rule
+     can override it; base rule carries the OPEN duration, .closed carries
+     the close duration — transitions always use the destination's timing. */
+  width: var(--sidebar-w, 280px);
+  transition:
+    width var(--dur-panel-open) var(--ease-dolly),
+    margin var(--dur-panel-open) var(--ease-dolly),
+    opacity var(--dur-panel-open) ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    visibility 0s linear 0s;
+}
+
+/* Slide-out toward the right edge; visibility flips after the fade. */
+.right-sidebar.closed {
+  width: 0;
+  margin-left: 0;
+  margin-right: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width var(--dur-panel-close) var(--ease-dolly),
+    margin var(--dur-panel-close) var(--ease-dolly),
+    opacity var(--dur-panel-close) ease,
+    visibility 0s linear var(--dur-panel-close);
+}
+
+/* Drag-resize must track the cursor exactly; no easing on width updates. */
+.right-sidebar.is-resizing,
+.right-sidebar.is-resizing .sidebar-slide-inner {
+  transition: none !important;
+}
+
+.sidebar-slide-inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  transition:
+    transform var(--dur-panel-open) var(--ease-dolly),
+    opacity var(--dur-panel-open) ease;
+}
+
+.right-sidebar.closed .sidebar-slide-inner {
+  transform: translateX(24px);
+  transition:
+    transform var(--dur-panel-close) var(--ease-dolly),
+    opacity var(--dur-panel-close) ease;
+}
+
+.right-sidebar-inner-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
 }
 
 [data-theme="light"] .right-sidebar {

@@ -8,16 +8,15 @@ import "./RightSidebar.css";
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
 
-export function RightSidebar(): React.ReactElement | null {
+export function RightSidebar(): React.ReactElement {
   const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const rightSidebarWidth = useTerminalStore((s) => s.rightSidebarWidth);
   const rightSidebarTab = useTerminalStore((s) => s.rightSidebarTab);
   const setRightSidebarWidth = useTerminalStore((s) => s.setRightSidebarWidth);
+  // Disables width transitions while drag-resizing so the panel tracks the
+  // cursor 1:1 instead of easing behind it.
+  const [isResizing, setIsResizing] = useState(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
-
-  if (!rightSidebarOpen) {
-    return null;
-  }
 
   const handleRefresh = () => {
     setRefreshKey((prev) => prev + 1);
@@ -25,6 +24,7 @@ export function RightSidebar(): React.ReactElement | null {
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
+    setIsResizing(true);
     const startX = e.clientX;
     const startWidth = rightSidebarWidth;
 
@@ -38,6 +38,7 @@ export function RightSidebar(): React.ReactElement | null {
     };
 
     const handleMouseUp = () => {
+      setIsResizing(false);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -47,21 +48,28 @@ export function RightSidebar(): React.ReactElement | null {
   };
 
   return (
-    <aside className="right-sidebar" style={{ width: rightSidebarWidth }}>
+    <aside
+      className={`right-sidebar${rightSidebarOpen ? "" : " closed"}${isResizing ? " is-resizing" : ""}`}
+      style={{ "--sidebar-w": `${rightSidebarWidth}px` } as React.CSSProperties}
+    >
+      <div className="sidebar-slide-inner">
+        <div className="right-sidebar-inner-row">
+          <ActivityBar onRefresh={handleRefresh} />
+          <div className="right-sidebar-content">
+            {rightSidebarTab === "explorer" ? (
+              <FileExplorer refreshKey={refreshKey} />
+            ) : (
+              <GitSourceControl refreshKey={refreshKey} />
+            )}
+          </div>
+        </div>
+      </div>
       <div
         className="resize-handle-left"
         onMouseDown={handleMouseDown}
         role="separator"
         aria-orientation="vertical"
       />
-      <ActivityBar onRefresh={handleRefresh} />
-      <div className="right-sidebar-content">
-        {rightSidebarTab === "explorer" ? (
-          <FileExplorer refreshKey={refreshKey} />
-        ) : (
-          <GitSourceControl refreshKey={refreshKey} />
-        )}
-      </div>
     </aside>
   );
 }

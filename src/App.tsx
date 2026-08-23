@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { PlusIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
@@ -42,8 +42,6 @@ function App() {
   const swapFocusedPane = useTerminalStore((s) => s.swapFocusedPane);
   const createTab = useTerminalStore((s) => s.createTab);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
-  const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
-  const rightSidebarOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleLeftSidebar = useTerminalStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useTerminalStore((s) => s.toggleRightSidebar);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
@@ -60,6 +58,15 @@ function App() {
   const showStatusBar = useTerminalStore((s) => s.settings.appearance.showStatusBar);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  // Suppress sidebar/panel transitions until shortly after startup so the
+  // sidebarOnLaunch flip applies silently instead of animating on first paint.
+  const [booted, setBooted] = useState(false);
+  useEffect(() => {
+    if (!ready || booted) return;
+    const timer = window.setTimeout(() => setBooted(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [ready, booted]);
 
   // Dynamically apply app theme, UI zoom scale, and font family to the root document.
   useEffect(() => {
@@ -324,7 +331,7 @@ function App() {
   // shell that loadLayout then replaces (an orphaned pty).
   if (!ready) return null;
   return (
-    <div className="app-container">
+    <div className={`app-container${booted ? " app-booted" : ""}`}>
       <TitleBar />
       {isSettingsOpen ? (
         <SettingsView />
@@ -332,9 +339,7 @@ function App() {
         <div className="workspace-container">
           <div className="soft-edge-left" />
           <div className="soft-edge-right" />
-          {leftSidebarOpen && activeAppMode !== "browser" && (
-            <LeftSidebar />
-          )}
+          {activeAppMode !== "browser" && <LeftSidebar />}
           <main className="main-viewport">
             <div
               className="viewport-view terminal-viewport-view"
@@ -397,9 +402,7 @@ function App() {
               <EditorViewport />
             </div>
           </main>
-          {rightSidebarOpen && activeAppMode !== "browser" && (
-            <RightSidebar />
-          )}
+          {activeAppMode !== "browser" && <RightSidebar />}
         </div>
       )}
       {showStatusBar && <StatusBar />}

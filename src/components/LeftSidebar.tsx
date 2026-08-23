@@ -16,7 +16,7 @@ import "./LeftSidebar.css";
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 420;
 
-export function LeftSidebar(): React.ReactElement | null {
+export function LeftSidebar(): React.ReactElement {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const sessions = useTerminalStore((s) => s.sessions);
@@ -26,6 +26,7 @@ export function LeftSidebar(): React.ReactElement | null {
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
+  const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
   const openSettings = useTerminalStore((s) => s.openSettings);
   const leftSidebarView = useTerminalStore((s) => s.leftSidebarView);
   const setLeftSidebarView = useTerminalStore((s) => s.setLeftSidebarView);
@@ -34,6 +35,9 @@ export function LeftSidebar(): React.ReactElement | null {
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  // Disables width transitions while drag-resizing so the panel tracks the
+  // cursor 1:1 instead of easing behind it.
+  const [isResizing, setIsResizing] = useState(false);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -115,6 +119,7 @@ export function LeftSidebar(): React.ReactElement | null {
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
+    setIsResizing(true);
     const sidebarEl = (e.currentTarget as HTMLElement).closest(".left-sidebar");
     const sidebarLeft = sidebarEl?.getBoundingClientRect().left ?? 0;
 
@@ -127,6 +132,7 @@ export function LeftSidebar(): React.ReactElement | null {
     };
 
     const handleMouseUp = () => {
+      setIsResizing(false);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -136,8 +142,12 @@ export function LeftSidebar(): React.ReactElement | null {
   };
 
   return (
-    <aside className="left-sidebar" style={{ width: leftSidebarWidth }}>
-      <div className="left-sidebar-top">
+    <aside
+      className={`left-sidebar${leftSidebarOpen ? "" : " closed"}${isResizing ? " is-resizing" : ""}`}
+      style={{ "--sidebar-w": `${leftSidebarWidth}px` } as React.CSSProperties}
+    >
+      <div className="sidebar-slide-inner">
+        <div className="left-sidebar-top">
         <div className="sidebar-search-strip">
           <div className="sidebar-search-box">
             <SearchIcon size={14} className="sidebar-search-icon" />
@@ -312,6 +322,7 @@ export function LeftSidebar(): React.ReactElement | null {
         >
           <HelpIcon size={14} />
         </button>
+      </div>
       </div>
 
       <div

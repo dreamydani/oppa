@@ -147,7 +147,7 @@ describe("App", () => {
     expect(container.querySelector(".soft-edge-right")).not.toBeNull();
   });
 
-  it("conditionally renders LeftSidebar and RightSidebar based on store state", () => {
+  it("keeps sidebars mounted but marked closed when store says closed", () => {
     useTerminalStore.setState({
       leftSidebarOpen: false,
       rightSidebarOpen: false,
@@ -158,10 +158,14 @@ describe("App", () => {
     expect(container.querySelector(".app-container")).not.toBeNull();
     expect(container.querySelector(".title-bar")).not.toBeNull();
     expect(container.querySelector(".workspace-container")).not.toBeNull();
-    expect(container.querySelector(".left-sidebar")).toBeNull();
+    const left = container.querySelector(".left-sidebar");
+    expect(left).not.toBeNull();
+    expect(left!.className).toContain("closed");
     expect(container.querySelector(".main-viewport")).not.toBeNull();
     expect(container.querySelector(".pane-root")).not.toBeNull();
-    expect(container.querySelector(".right-sidebar")).toBeNull();
+    const right = container.querySelector(".right-sidebar");
+    expect(right).not.toBeNull();
+    expect(right!.className).toContain("closed");
   });
 
   it("toggles left sidebar with Ctrl+B shortcut", () => {

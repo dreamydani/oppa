@@ -9,6 +9,10 @@
   border-radius: 10px;
   margin: 4px 0 4px 4px;
   height: calc(100% - 8px);
+  /* Width lives on a custom property (set inline) so the closed-state rule
+     can override it; base rule carries the OPEN duration, .closed carries
+     the close duration — transitions always use the destination's timing. */
+  width: var(--sidebar-w, 240px);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -17,7 +21,56 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
   overflow: hidden;
   z-index: 15;
-  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    width var(--dur-panel-open) var(--ease-dolly),
+    margin var(--dur-panel-open) var(--ease-dolly),
+    opacity var(--dur-panel-open) ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    visibility 0s linear 0s;
+}
+
+/* Slide-out: panel collapses toward its edge while content parallaxes away.
+   Visibility flips only after the fade completes. */
+.left-sidebar.closed {
+  width: 0;
+  margin-left: 0;
+  margin-right: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width var(--dur-panel-close) var(--ease-dolly),
+    margin var(--dur-panel-close) var(--ease-dolly),
+    opacity var(--dur-panel-close) ease,
+    visibility 0s linear var(--dur-panel-close);
+}
+
+/* Drag-resize must track the cursor exactly; no easing on width updates. */
+.left-sidebar.is-resizing,
+.left-sidebar.is-resizing .sidebar-slide-inner {
+  transition: none !important;
+}
+
+.sidebar-slide-inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  transition:
+    transform var(--dur-panel-open) var(--ease-dolly),
+    opacity var(--dur-panel-open) ease;
+}
+
+/* Parallax: content drifts toward the exit edge while fading inside the
+   clipped panel. */
+.left-sidebar.closed .sidebar-slide-inner {
+  transform: translateX(-24px);
+  transition:
+    transform var(--dur-panel-close) var(--ease-dolly),
+    opacity var(--dur-panel-close) ease;
 }
 
 [data-theme="light"] .left-sidebar {

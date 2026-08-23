@@ -325,4 +325,30 @@ describe("LeftSidebar", () => {
     expect(screen.getAllByText("feat-a").length).toBeGreaterThan(0);
     expect(screen.getByText("Todo")).toBeDefined();
   });
+
+  it("renders with the closed class instead of unmounting when leftSidebarOpen is false", () => {
+    useTerminalStore.setState({ leftSidebarOpen: false });
+    const { container } = render(<LeftSidebar />);
+    const aside = container.querySelector("aside.left-sidebar");
+    expect(aside).not.toBeNull();
+    expect(aside!.className).toContain("closed");
+  });
+
+  it("exposes the store width via the --sidebar-w custom property", () => {
+    const { container } = render(<LeftSidebar />);
+    const aside = container.querySelector<HTMLElement>("aside.left-sidebar")!;
+    expect(aside.style.getPropertyValue("--sidebar-w")).toBe("240px");
+  });
+
+  it("marks the sidebar as resizing during a drag and clears it on release", () => {
+    const { container } = render(<LeftSidebar />);
+    const aside = container.querySelector<HTMLElement>("aside.left-sidebar")!;
+    const resizeHandle = container.querySelector(".resize-handle-right")!;
+
+    fireEvent.mouseDown(resizeHandle, { clientX: 300, button: 0 });
+    expect(aside.className).toContain("is-resizing");
+
+    fireEvent.mouseUp(window);
+    expect(aside.className).not.toContain("is-resizing");
+  });
 });

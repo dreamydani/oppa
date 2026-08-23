@@ -87,10 +87,30 @@ describe("RightSidebar", () => {
     expect(screen.getByTitle("Refresh")).toBeDefined();
   });
 
-  it("does not render when rightSidebarOpen is false", () => {
+  it("renders with the closed class instead of unmounting when rightSidebarOpen is false", () => {
     useTerminalStore.setState({ rightSidebarOpen: false });
     const { container } = render(<RightSidebar />);
-    expect(container.firstChild).toBeNull();
+    const aside = container.querySelector("aside.right-sidebar");
+    expect(aside).not.toBeNull();
+    expect(aside!.className).toContain("closed");
+  });
+
+  it("exposes the store width via the --sidebar-w custom property", () => {
+    const { container } = render(<RightSidebar />);
+    const aside = container.querySelector<HTMLElement>("aside.right-sidebar")!;
+    expect(aside.style.getPropertyValue("--sidebar-w")).toBe("280px");
+  });
+
+  it("marks the sidebar as resizing during a drag and clears it on release", () => {
+    const { container } = render(<RightSidebar />);
+    const aside = container.querySelector<HTMLElement>("aside.right-sidebar")!;
+    const resizeHandle = container.querySelector(".resize-handle-left")!;
+
+    fireEvent.mouseDown(resizeHandle, { clientX: 800, button: 0 });
+    expect(aside.className).toContain("is-resizing");
+
+    fireEvent.mouseUp(window);
+    expect(aside.className).not.toContain("is-resizing");
   });
 
   it("switches tabs between Explorer and Git", async () => {
