@@ -27,6 +27,13 @@ export default defineConfig(async () => ({
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
+      // Windows file locks: non-atomic saves (PowerShell Set-Content, some
+      // editors) race Vite's transform read and surface EBUSY overlays.
+      // Hold the change event until writes settle.
+      awaitWriteFinish: {
+        stabilityThreshold: 100,
+        pollInterval: 20,
+      },
     },
   },
 }));
