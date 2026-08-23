@@ -1,5 +1,6 @@
 [package]
 name = "oppa"
+default-run = "oppa"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
