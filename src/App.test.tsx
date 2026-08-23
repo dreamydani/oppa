@@ -34,6 +34,9 @@ vi.mock("./lib/pty/transport", () => ({
   worktreeLineage: vi.fn().mockResolvedValue([]),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
+  ptyList: vi.fn().mockResolvedValue([]),
+  agentProfiles: vi.fn().mockResolvedValue([]),
+  worktreeCreateAgent: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

@@ -11,7 +11,9 @@ import {
   loadScrollback,
   deleteScrollback,
   cleanupStaleScrollbacks,
+  ptyList,
   worktreeCreate,
+  worktreeCreateAgent,
   worktreeList,
   worktreeSet,
   worktreeRemove,
@@ -27,6 +29,7 @@ import type {
   PtySpawnOptions,
   WorktreeListEntry,
   WorktreeRecord,
+  WorktreeAgentHandoff,
   RepoRecord,
   WorktreeStatus,
 } from "../lib/pty/transport";
@@ -242,6 +245,12 @@ export interface WorktreeCreateInput {
   parentWorktreeId?: string;
 }
 
+export interface WorktreeCreateAgentInput extends WorktreeCreateInput {
+  agent?: string;
+  prompt?: string;
+  command?: string;
+}
+
 
 export interface TabState {
   id: string;
@@ -359,7 +368,7 @@ export interface TerminalState {
 
   renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
-  createTab: (cwd?: string, worktreeId?: string) => Promise<string>;
+  createTab: (cwd?: string, worktreeId?: string, existingId?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
   selectTab: (tabId: string) => void;
   wakeTab: (tabId: string) => Promise<void>;
@@ -451,6 +460,7 @@ export interface TerminalState {
   loadRepos: () => Promise<void>;
   addRepo: (path: string) => Promise<RepoRecord>;
   createWorktree: (input: WorktreeCreateInput) => Promise<WorktreeRecord | null>;
+  createWorktreeWithAgent: (input: WorktreeCreateAgentInput) => Promise<WorktreeAgentHandoff>;
   setWorktreeStatus: (id: string, status: WorktreeStatus) => Promise<void>;
   renameWorktree: (id: string, displayName: string) => Promise<void>;
   removeWorktree: (id: string, force?: boolean, deleteBranch?: boolean) => Promise<void>;
@@ -783,9 +793,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
-  createTab: async (cwd, worktreeId) => {
+  createTab: async (cwd, worktreeId, existingId) => {
     const resolvedCwd = cwd ?? get().resolveDefaultCwd();
-    const sessionId = await get().spawnSession(resolvedCwd, undefined, undefined, undefined, worktreeId);
+    const sessionId = await get().spawnSession(resolvedCwd, undefined, existingId, undefined, worktreeId);
     const currentTabs = getSyncedTabs(get());
     const tabId = generateNextTabId(currentTabs);
     const newTab: TabState = {
@@ -2307,6 +2317,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const record = await worktreeCreate(input);
     await Promise.all([get().loadWorktrees(), get().loadRepos()]);
     return record;
+  },
+
+  createWorktreeWithAgent: async (input) => {
+    const handoff = await worktreeCreateAgent(input);
+    await Promise.all([get().loadWorktrees(), get().loadRepos()]);
+    // Attach only when ListSessions confirms the daemon actually spawned the agent
+    const liveSessions = await ptyList().catch(() => [] as string[]);
+    if (!liveSessions.includes(handoff.session_id)) return handoff;
+    await get().createTab(handoff.record.path, handoff.record.id, handoff.session_id);
+    return handoff;
   },
 
   setWorktreeStatus: async (id, status) => {

@@ -30,6 +30,9 @@ vi.mock("../lib/pty/transport", () => ({
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
+  ptyList: vi.fn().mockResolvedValue([]),
+  agentProfiles: vi.fn().mockResolvedValue([]),
+  worktreeCreateAgent: vi.fn(),
 }));
 
 vi.mock("../lib/workspace/transport", () => ({
@@ -83,6 +86,8 @@ const worktreeRemoveMock = vi.mocked(transport.worktreeRemove);
 const worktreePurgeMock = vi.mocked(transport.worktreePurge);
 const repoAddMock = vi.mocked(transport.repoAdd);
 const repoListMock = vi.mocked(transport.repoList);
+const ptyListMock = vi.mocked(transport.ptyList);
+const worktreeCreateAgentMock = vi.mocked(transport.worktreeCreateAgent);
 
 function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): transport.WorktreeRecord {
   return {
@@ -3871,6 +3876,61 @@ describe("terminalStore", () => {
       await vi.waitFor(() => {
         expect(useTerminalStore.getState().worktrees).toHaveLength(1);
       });
+    });
+
+    it("createWorktreeWithAgent opens a tab bound to the daemon's agent session", async () => {
+      const record = worktreeRecord();
+      worktreeCreateAgentMock.mockResolvedValue({ record, session_id: "agent-1" });
+      ptyListMock.mockResolvedValue(["agent-1"]);
+      ptySpawnMock.mockResolvedValue(spawnRes("agent-1", false, "screen"));
+      worktreeListMock.mockResolvedValue([]);
+      repoListMock.mockResolvedValue([]);
+
+      const handoff = await useTerminalStore.getState().createWorktreeWithAgent({
+        repoPath: "C:/repos/demo",
+        name: "feat-a",
+        agent: "claude",
+        prompt: "fix it",
+      });
+
+      expect(handoff.session_id).toBe("agent-1");
+      expect(worktreeCreateAgentMock).toHaveBeenCalledWith({
+        repoPath: "C:/repos/demo",
+        name: "feat-a",
+        agent: "claude",
+        prompt: "fix it",
+      });
+      await vi.waitFor(() => {
+        const state = useTerminalStore.getState();
+        const tab = state.tabs[state.tabs.length - 1];
+        expect(tab?.layout).toEqual({ type: "leaf", id: "agent-1" });
+        expect(state.activeTabId).toBe(tab?.id);
+      });
+      // Attach must reuse the daemon session id, not spawn a fresh shell
+      const spawnArgs = ptySpawnMock.mock.calls[0][0];
+      expect(spawnArgs?.id).toBe("agent-1");
+      expect(spawnArgs?.cwd).toBe(record.path);
+      expect(spawnArgs?.worktreeId).toBe(record.id);
+    });
+
+    it("createWorktreeWithAgent skips the attach when ListSessions lacks the session", async () => {
+      worktreeCreateAgentMock.mockResolvedValue({
+        record: worktreeRecord(),
+        session_id: "agent-missing",
+      });
+      ptyListMock.mockResolvedValue([]);
+      worktreeListMock.mockResolvedValue([]);
+      repoListMock.mockResolvedValue([]);
+
+      const handoff = await useTerminalStore.getState().createWorktreeWithAgent({
+        repoPath: "C:/repos/demo",
+        name: "feat-a",
+        agent: "codex",
+      });
+
+      expect(handoff.record.id).toBe("demo::C:/ws/feat-a");
+      expect(ptySpawnMock).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().tabs).toHaveLength(0);
     });
 
     it("setWorktreeStatus forwards the status and refreshes", async () => {

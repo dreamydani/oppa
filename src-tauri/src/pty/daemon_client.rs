@@ -5,6 +5,7 @@ use crate::pty::ipc_protocol::{
     WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -18,6 +19,14 @@ pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
 pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Agent handoff result: created worktree plus the live agent session a pane
+/// can bind to (session_id doubles as the agent terminal handle).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorktreeAgentHandoff {
+    pub record: WorktreeRecord,
+    pub session_id: String,
+}
 
 #[derive(Default)]
 struct SessionCallbacks {
@@ -519,7 +528,7 @@ impl DaemonClient {
             parent_worktree_id,
             workspace_dir,
             nest_workspaces,
-            // GUI agent-handoff surface arrives in a later milestone
+            // Plain creates never hand off; see create_worktree_with_agent
             agent: None,
             prompt: None,
             command: None,
@@ -529,6 +538,44 @@ impl DaemonClient {
             DaemonResponse::WorktreeRecordOne(None) => {
                 Err("worktree create returned no record".into())
             }
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for WorktreeCreate: {other:?}")),
+        }
+    }
+
+    // Same WorktreeCreate verb, but the daemon launches the agent and replies
+    // AgentHandoff with a live session id instead of a bare record.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_worktree_with_agent(
+        &self,
+        repo_path: &str,
+        name: Option<String>,
+        branch: Option<String>,
+        base_ref: Option<String>,
+        parent_worktree_id: Option<String>,
+        workspace_dir: Option<String>,
+        nest_workspaces: Option<bool>,
+        agent: Option<String>,
+        prompt: Option<String>,
+        command: Option<String>,
+    ) -> Result<WorktreeAgentHandoff, String> {
+        let req = DaemonRequest::WorktreeCreate {
+            repo_path: repo_path.into(),
+            name,
+            branch,
+            base_ref,
+            parent_worktree_id,
+            workspace_dir,
+            nest_workspaces,
+            agent,
+            prompt,
+            command,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::AgentHandoff { record, session_id } => Ok(WorktreeAgentHandoff {
+                record,
+                session_id,
+            }),
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response for WorktreeCreate: {other:?}")),
         }
@@ -835,6 +882,119 @@ mod tests {
         assert!(sessions.contains(&"ack-test-session".to_string()));
 
         client.kill("ack-test-session").expect("kill");
+        client.disconnect().expect("disconnect");
+        cancel_token.cancel();
+        let _ = server_thread.join();
+    }
+
+    #[test]
+    fn worktree_agent_handoff_serializes_snake_case_for_tauri() {
+        let handoff = WorktreeAgentHandoff {
+            record: sample_worktree_record(),
+            session_id: "agent-abc".into(),
+        };
+        let json = serde_json::to_value(&handoff).unwrap();
+        assert_eq!(json["session_id"], "agent-abc");
+        assert_eq!(json["record"]["id"], "demo::C:/ws/feat-a");
+    }
+
+    fn sample_worktree_record() -> WorktreeRecord {
+        serde_json::from_value(serde_json::json!({
+            "id": "demo::C:/ws/feat-a",
+            "repo_id": "demo",
+            "name": "feat-a",
+            "display_name": null,
+            "branch": "feat-a",
+            "path": "C:/ws/feat-a",
+            "base_ref": "main",
+            "parent_worktree_id": null,
+            "child_worktree_ids": [],
+            "workspace_status": "todo",
+            "retired": false,
+            "created_at_ms": 1723900000000u64,
+            "linked_pr_url": null
+        }))
+        .unwrap()
+    }
+
+    // Validation failures round-trip through the real pipe, proving the request
+    // carries the handoff fields and the Error response maps to Err.
+    #[test]
+    fn create_worktree_with_agent_surfaces_server_validation_errors() {
+        let temp_dir = std::env::temp_dir().join(format!("oppa_handoff_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let server = Arc::new(DaemonServer::with_snapshot_storage(temp_dir));
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-handoff-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-handoff-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        let server_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect client");
+
+        let both = client.create_worktree_with_agent(
+            "/tmp/repo",
+            Some("feat-a".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("claude".into()),
+            None,
+            Some("claude --yolo".into()),
+        );
+        assert!(
+            both.err().unwrap().contains("mutually exclusive"),
+            "agent+command must be rejected"
+        );
+
+        let orphan_prompt = client.create_worktree_with_agent(
+            "/tmp/repo",
+            Some("feat-a".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("no-such-agent-xyz".into()),
+            None,
+            None,
+        );
+        assert!(
+            orphan_prompt.err().unwrap().contains("unknown agent"),
+            "unknown agent id must be rejected"
+        );
+
         client.disconnect().expect("disconnect");
         cancel_token.cancel();
         let _ = server_thread.join();

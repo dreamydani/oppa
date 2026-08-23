@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { RepoRecord, WorktreeListEntry } from "../../lib/pty/transport";
+import { agentProfiles } from "../../lib/pty/transport";
+import type {
+  AgentProfile,
+  RepoRecord,
+  WorktreeListEntry,
+} from "../../lib/pty/transport";
 import "./worktree.css";
 
-// Agent launch is wired in task 12; the control stays visible but disabled.
-const AGENT_PLACEHOLDER = "Agent launch lands in task 12";
+// Catalog id of the raw-command pseudo profile; it takes a --command, not a prompt
+const GENERIC_AGENT_ID = "generic";
 
 export function WorktreeCreateModal(): React.ReactElement | null {
   const isOpen = useTerminalStore((s) => s.isWorktreeCreateOpen);
@@ -13,6 +18,7 @@ export function WorktreeCreateModal(): React.ReactElement | null {
   const worktrees = useTerminalStore((s) => s.worktrees);
   const addRepo = useTerminalStore((s) => s.addRepo);
   const createWorktree = useTerminalStore((s) => s.createWorktree);
+  const createWorktreeWithAgent = useTerminalStore((s) => s.createWorktreeWithAgent);
   const setLeftSidebarView = useTerminalStore((s) => s.setLeftSidebarView);
   const createTab = useTerminalStore((s) => s.createTab);
 
@@ -22,6 +28,10 @@ export function WorktreeCreateModal(): React.ReactElement | null {
   const [name, setName] = useState("");
   const [baseRef, setBaseRef] = useState("");
   const [parentWorktreeId, setParentWorktreeId] = useState("");
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [agentId, setAgentId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [customCommand, setCustomCommand] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,10 +43,16 @@ export function WorktreeCreateModal(): React.ReactElement | null {
     setName("");
     setBaseRef("");
     setParentWorktreeId("");
+    setAgentId("");
+    setPrompt("");
+    setCustomCommand("");
     setError(null);
     setBusy(false);
     void useTerminalStore.getState().loadRepos().catch(() => {});
     void useTerminalStore.getState().loadWorktrees().catch(() => {});
+    void agentProfiles()
+      .then(setProfiles)
+      .catch(() => setProfiles([]));
   }, [isOpen]);
 
   useEffect(() => {
@@ -76,22 +92,41 @@ export function WorktreeCreateModal(): React.ReactElement | null {
       setError("Pick a repository and enter a worktree name.");
       return;
     }
+    if (agentId === GENERIC_AGENT_ID && !customCommand.trim()) {
+      setError("Enter a command for the custom agent launch.");
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
-      const record = await createWorktree({
+      const sharedInput = {
         repoPath,
         name: name.trim(),
         baseRef: baseRef.trim() || undefined,
         parentWorktreeId: parentWorktreeId || undefined,
-      });
+      };
+      if (agentId === GENERIC_AGENT_ID) {
+        await createWorktreeWithAgent({
+          ...sharedInput,
+          command: customCommand.trim(),
+          prompt: prompt.trim() || undefined,
+        });
+      } else if (agentId) {
+        await createWorktreeWithAgent({
+          ...sharedInput,
+          agent: agentId,
+          prompt: prompt.trim() || undefined,
+        });
+      } else {
+        const record = await createWorktree(sharedInput);
+        if (record) {
+          // Bound terminal: CreateOrAttach carries the worktree id so the daemon
+          // records session↔worktree ownership for teardown gating.
+          void createTab(record.path, record.id).catch(() => {});
+        }
+      }
       closeWorktreeCreate();
       setLeftSidebarView("worktrees");
-      if (record) {
-        // Bound terminal: CreateOrAttach carries the worktree id so the daemon
-        // records session↔worktree ownership for teardown gating.
-        void createTab(record.path, record.id).catch(() => {});
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -190,10 +225,50 @@ export function WorktreeCreateModal(): React.ReactElement | null {
 
         <div className="wt-form-group">
           <label htmlFor="wt-agent-select" className="wt-label">Agent</label>
-          <select id="wt-agent-select" className="wt-select" disabled aria-label="Agent">
-            <option>{AGENT_PLACEHOLDER}</option>
+          <select
+            id="wt-agent-select"
+            className="wt-select"
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            aria-label="Agent"
+          >
+            <option value="">No agent</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.displayName}
+              </option>
+            ))}
           </select>
         </div>
+
+        {agentId === GENERIC_AGENT_ID && (
+          <div className="wt-form-group">
+            <label htmlFor="wt-command-input" className="wt-label">Command</label>
+            <input
+              id="wt-command-input"
+              type="text"
+              className="wt-input"
+              value={customCommand}
+              onChange={(e) => setCustomCommand(e.target.value)}
+              placeholder="e.g. my-agent --yolo"
+              aria-label="Command"
+            />
+          </div>
+        )}
+
+        {agentId && agentId !== GENERIC_AGENT_ID && (
+          <div className="wt-form-group">
+            <label htmlFor="wt-prompt-input" className="wt-label">First prompt (optional)</label>
+            <textarea
+              id="wt-prompt-input"
+              className="wt-input"
+              rows={3}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              aria-label="First prompt"
+            />
+          </div>
+        )}
 
         <div className="wt-form-group">
           <label htmlFor="wt-parent-select" className="wt-label">Parent worktree (optional)</label>

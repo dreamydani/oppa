@@ -1,5 +1,7 @@
+use crate::agents::catalog::PromptDelivery;
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
+use crate::pty::daemon_client::WorktreeAgentHandoff;
 use crate::pty::ipc_protocol::WorktreePsEntry;
 use crate::pty::manager::PtyManager;
 use serde::Serialize;
@@ -305,6 +307,61 @@ pub fn worktree_list(manager: State<'_, PtyManager>) -> Result<Vec<WorktreeListE
     manager.get_client()?.worktree_list()
 }
 
+/// Minimal agent descriptor for the GUI picker; launch details stay daemon-side.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileDto {
+    pub id: String,
+    pub display_name: String,
+    pub prompt_delivery: PromptDelivery,
+}
+
+fn agent_profiles_impl() -> Vec<AgentProfileDto> {
+    crate::agents::catalog::profiles()
+        .iter()
+        .map(|p| AgentProfileDto {
+            id: p.id.to_string(),
+            display_name: p.display_name.to_string(),
+            prompt_delivery: p.prompt_delivery,
+        })
+        .collect()
+}
+
+/// Static catalog read in-process; the frontend never hardcodes agent lists.
+#[tauri::command]
+pub fn agent_profiles() -> Vec<AgentProfileDto> {
+    agent_profiles_impl()
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn worktree_create_agent(
+    manager: State<'_, PtyManager>,
+    repo_path: String,
+    name: Option<String>,
+    branch: Option<String>,
+    base_ref: Option<String>,
+    parent_worktree_id: Option<String>,
+    workspace_dir: Option<String>,
+    nest_workspaces: Option<bool>,
+    agent: Option<String>,
+    prompt: Option<String>,
+    command: Option<String>,
+) -> Result<WorktreeAgentHandoff, String> {
+    manager.get_client()?.create_worktree_with_agent(
+        &repo_path,
+        name,
+        branch,
+        base_ref,
+        parent_worktree_id,
+        workspace_dir,
+        nest_workspaces,
+        agent,
+        prompt,
+        command,
+    )
+}
+
 #[tauri::command]
 pub fn worktree_show(
     manager: State<'_, PtyManager>,
@@ -518,5 +575,16 @@ mod tests {
         let json =
             serde_json::to_string(&SessionFocusRequestedPayload { id: "s1".into() }).unwrap();
         assert_eq!(json, r#"{"id":"s1"}"#);
+    }
+
+    #[test]
+    fn agent_profiles_dto_mirrors_catalog_with_camel_case_keys() {
+        let dtos = agent_profiles_impl();
+        assert_eq!(dtos.len(), crate::agents::catalog::profiles().len());
+        let json = serde_json::to_string(&dtos).unwrap();
+        assert!(json.contains("\"displayName\":\"Claude Code\""));
+        assert!(json.contains("\"promptDelivery\":\"arg\""));
+        assert!(json.contains("\"promptDelivery\":\"stdin\""));
+        assert!(!json.contains("display_name"), "must not leak snake_case");
     }
 }

@@ -34,11 +34,23 @@ vi.mock("../../lib/pty/transport", () => ({
   worktreeLineage: vi.fn().mockResolvedValue([]),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
+  ptyList: vi.fn().mockResolvedValue([]),
+  agentProfiles: vi.fn().mockResolvedValue([]),
+  worktreeCreateAgent: vi.fn(),
 }));
 
 const worktreeCreateMock = vi.mocked(transport.worktreeCreate);
+const worktreeCreateAgentMock = vi.mocked(transport.worktreeCreateAgent);
+const agentProfilesMock = vi.mocked(transport.agentProfiles);
+const ptyListMock = vi.mocked(transport.ptyList);
 const repoListMock = vi.mocked(transport.repoList);
 const repoAddMock = vi.mocked(transport.repoAdd);
+
+const demoProfiles: transport.AgentProfile[] = [
+  { id: "claude", displayName: "Claude Code", promptDelivery: "arg" },
+  { id: "qwen", displayName: "Qwen Code", promptDelivery: "stdin" },
+  { id: "generic", displayName: "Custom command", promptDelivery: "arg" },
+];
 
 const demoRepo: RepoRecord = {
   repo_id: "demo",
@@ -69,6 +81,8 @@ describe("WorktreeCreateModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     repoListMock.mockResolvedValue([demoRepo]);
+    agentProfilesMock.mockResolvedValue(demoProfiles);
+    ptyListMock.mockResolvedValue([]);
     useTerminalStore.setState({
       isWorktreeCreateOpen: true,
       repos: [demoRepo],
@@ -166,11 +180,170 @@ describe("WorktreeCreateModal", () => {
     expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
   });
 
-  it("shows the deferred agent launcher placeholder", async () => {
+  it("renders real agent profiles with a No-agent default", async () => {
     render(<WorktreeCreateModal />);
 
-    const agentSelect = await screen.findByRole("combobox", { name: /agent/i });
-    expect(agentSelect.hasAttribute("disabled")).toBe(true);
-    expect(agentSelect.textContent).toMatch(/task 12/i);
+    const select = await screen.findByRole("combobox", { name: /agent/i });
+    expect(select.hasAttribute("disabled")).toBe(false);
+    await vi.waitFor(() => {
+      expect(agentProfilesMock).toHaveBeenCalled();
+    });
+    expect(screen.getByRole("option", { name: /no agent/i })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Claude Code" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Qwen Code" })).toBeTruthy();
+    expect(select.textContent).toContain("Custom command");
+  });
+
+  it("reveals the first-prompt field only when an agent is selected", async () => {
+    render(<WorktreeCreateModal />);
+
+    expect(screen.queryByLabelText(/first prompt/i)).toBeNull();
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /agent/i }), {
+      target: { value: "claude" },
+    });
+    expect(screen.getByLabelText(/first prompt/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /agent/i }), {
+      target: { value: "" },
+    });
+    expect(screen.queryByLabelText(/first prompt/i)).toBeNull();
+  });
+
+  it("custom-command profile reveals a command input instead of the prompt", async () => {
+    render(<WorktreeCreateModal />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /agent/i }), {
+      target: { value: "generic" },
+    });
+
+    expect(screen.getByLabelText(/^command$/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/first prompt/i)).toBeNull();
+  });
+
+  it("submits the handoff branch and opens the returned agent session", async () => {
+    const record = createdRecord();
+    worktreeCreateAgentMock.mockResolvedValue({ record, session_id: "agent-1" });
+    ptyListMock.mockResolvedValue(["agent-1"]);
+    vi.mocked(transport.ptySpawn).mockResolvedValue({
+      id: "agent-1",
+      is_new: false,
+      snapshot: null,
+    });
+
+    render(<WorktreeCreateModal />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    fireEvent.change(screen.getByLabelText(/worktree name/i), {
+      target: { value: "feat-a" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: /agent/i }), {
+      target: { value: "claude" },
+    });
+    fireEvent.change(screen.getByLabelText(/first prompt/i), {
+      target: { value: "ship it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create worktree$/i }));
+
+    await vi.waitFor(() => {
+      expect(worktreeCreateAgentMock).toHaveBeenCalledWith({
+        repoPath: demoRepo.path,
+        name: "feat-a",
+        baseRef: undefined,
+        parentWorktreeId: undefined,
+        agent: "claude",
+        prompt: "ship it",
+      });
+    });
+    expect(worktreeCreateMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(false);
+    });
+    // Terminal must bind the daemon's session id directly
+    const spawnCalls = vi.mocked(transport.ptySpawn).mock.calls;
+    expect(spawnCalls[0][0]?.id).toBe("agent-1");
+    expect(spawnCalls[0][0]?.cwd).toBe(record.path);
+    expect(spawnCalls[0][0]?.worktreeId).toBe(record.id);
+  });
+
+  it("generic profile submits the handoff with a raw command and no agent id", async () => {
+    worktreeCreateAgentMock.mockResolvedValue({
+      record: createdRecord(),
+      session_id: "agent-2",
+    });
+
+    render(<WorktreeCreateModal />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    fireEvent.change(screen.getByLabelText(/worktree name/i), {
+      target: { value: "feat-a" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: /agent/i }), {
+      target: { value: "generic" },
+    });
+    fireEvent.change(screen.getByLabelText(/^command$/i), {
+      target: { value: "my-agent --yolo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create worktree$/i }));
+
+    await vi.waitFor(() => {
+      expect(worktreeCreateAgentMock).toHaveBeenCalledWith({
+        repoPath: demoRepo.path,
+        name: "feat-a",
+        baseRef: undefined,
+        parentWorktreeId: undefined,
+        agent: undefined,
+        prompt: undefined,
+        command: "my-agent --yolo",
+      });
+    });
+  });
+
+  it("blocks custom-command submission without a command line", async () => {
+    render(<WorktreeCreateModal />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    fireEvent.change(screen.getByLabelText(/worktree name/i), {
+      target: { value: "feat-a" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: /agent/i }), {
+      target: { value: "generic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create worktree$/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/enter a command/i);
+    });
+    expect(worktreeCreateAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces handoff server errors instead of closing", async () => {
+    worktreeCreateAgentMock.mockRejectedValue(
+      "agent executable not found on PATH: claude",
+    );
+
+    render(<WorktreeCreateModal />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    fireEvent.change(screen.getByLabelText(/worktree name/i), {
+      target: { value: "feat-a" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: /agent/i }), {
+      target: { value: "claude" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create worktree$/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/not found on PATH/);
+    });
+    expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
   });
 });

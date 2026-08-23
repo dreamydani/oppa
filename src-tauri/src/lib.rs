@@ -115,6 +115,8 @@ pub fn run() {
             pty::commands::repo_add,
             pty::commands::repo_list,
             pty::commands::worktree_create,
+            pty::commands::worktree_create_agent,
+            pty::commands::agent_profiles,
             pty::commands::worktree_list,
             pty::commands::worktree_show,
             pty::commands::worktree_current,

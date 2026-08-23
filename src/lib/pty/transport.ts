@@ -176,6 +176,36 @@ export type WorktreeSetOptions = {
 export function worktreeCreate(opts: WorktreeCreateOptions): Promise<WorktreeRecord | null> {
   return invoke("worktree_create", opts as unknown as Record<string, unknown>);
 }
+
+// Mirrors catalog::PromptDelivery's kebab-case serde representation
+export type PromptDelivery = "arg" | "stdin" | "paste-on-ready";
+
+export interface AgentProfile {
+  id: string;
+  displayName: string;
+  promptDelivery: PromptDelivery;
+}
+
+// AgentHandoff response shape: session_id doubles as the agent pane handle
+export interface WorktreeAgentHandoff {
+  record: WorktreeRecord;
+  session_id: string;
+}
+
+export type WorktreeCreateAgentOptions = WorktreeCreateOptions & {
+  agent?: string;
+  prompt?: string;
+  command?: string;
+};
+
+export function agentProfiles(): Promise<AgentProfile[]> {
+  return invoke("agent_profiles");
+}
+export function worktreeCreateAgent(
+  opts: WorktreeCreateAgentOptions,
+): Promise<WorktreeAgentHandoff> {
+  return invoke("worktree_create_agent", opts as unknown as Record<string, unknown>);
+}
 export function worktreeList(): Promise<WorktreeListEntry[]> {
   return invoke("worktree_list");
 }
