@@ -310,6 +310,12 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* Auto-flipped variant when the right side would leave the app window */
+.file-context-submenu--left {
+  left: auto;
+  right: calc(100% + 2px);
+}
+
 /* Inline new-file / new-folder naming row */
 .file-tree-new-row {
   gap: 6px;
