@@ -1,0 +1,10 @@
+{
+  "id": "yourname.my-extension",
+  "name": "My Extension",
+  "version": "0.1.0",
+  "description": "What it does, in one line.",
+  "engines": { "oppa": ">=0.1.0" },
+  "main": "main.js",
+  "capabilities": ["notifications", "events"],
+  "contributes": {}
+}
