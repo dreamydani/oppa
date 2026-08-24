@@ -58,9 +58,9 @@ export async function detectEditors(): Promise<EditorApp[]> {
   }
 }
 
-export async function openWith(path: string, app: string): Promise<boolean> {
+export async function openWith(path: string, app?: string): Promise<boolean> {
   try {
-    await invoke("fs_open_with", { path, app });
+    await invoke("fs_open_with", { path, app: app ?? null });
     return true;
   } catch {
     return false;

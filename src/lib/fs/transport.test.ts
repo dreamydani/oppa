@@ -134,6 +134,15 @@ describe("fs transport", () => {
       expect(result).toBe(true);
     });
 
+    it("passes null app for system-default open", async () => {
+      invokeMock.mockResolvedValue(null);
+      await openWith("/test/file.ts");
+      expect(invokeMock).toHaveBeenCalledWith("fs_open_with", {
+        path: "/test/file.ts",
+        app: null,
+      });
+    });
+
     it("returns false and does not throw when launch fails", async () => {
       invokeMock.mockRejectedValue(new Error("App not found"));
       const result = await openWith("/test/file.ts", "missing-app");

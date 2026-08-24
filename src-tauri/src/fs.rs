@@ -88,34 +88,42 @@ pub fn fs_detect_editors() -> Vec<EditorApp> {
 }
 
 #[cfg(windows)]
-fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
+fn build_open_command(app: Option<&str>, path: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("cmd");
     // `start ""` needs the empty title arg so paths with spaces survive intact;
     // CREATE_NO_WINDOW keeps the cmd shell from flashing on screen.
-    cmd.args(["/C", "start", "", app, path]);
+    match app {
+        Some(app) => cmd.args(["/C", "start", "", app, path]),
+        None => cmd.args(["/C", "start", "", path]),
+    };
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
 
 #[cfg(target_os = "macos")]
-fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
+fn build_open_command(app: Option<&str>, path: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new("open");
-    cmd.args(["-a", app, path]);
+    match app {
+        Some(app) => cmd.args(["-a", app, path]),
+        None => cmd.arg(path),
+    };
     cmd
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new(app);
+fn build_open_command(app: Option<&str>, path: &str) -> std::process::Command {
+    let program = app.unwrap_or("xdg-open");
+    let mut cmd = std::process::Command::new(program);
     cmd.arg(path);
     cmd
 }
 
+// app = None delegates to the OS default handler for the file type
 #[tauri::command]
-pub fn fs_open_with(path: String, app: String) -> Result<(), String> {
-    let mut cmd = build_open_with_command(&app, &path);
+pub fn fs_open_with(path: String, app: Option<String>) -> Result<(), String> {
+    let mut cmd = build_open_command(app.as_deref(), &path);
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -374,40 +382,51 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
-    #[test]
-    fn test_build_open_with_command_uses_start_launcher() {
-        let cmd = build_open_with_command("code", "D:\\proj\\file.ts");
-        assert_eq!(cmd.get_program().to_string_lossy(), "cmd");
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(args, vec!["/C", "start", "", "code", "D:\\proj\\file.ts"]);
-    }
+#[cfg(windows)]
+#[test]
+fn test_build_open_with_command_uses_start_launcher() {
+    let cmd = build_open_command(Some("code"), "D:\\proj\\file.ts");
+    assert_eq!(cmd.get_program().to_string_lossy(), "cmd");
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    assert_eq!(args, vec!["/C", "start", "", "code", "D:\\proj\\file.ts"]);
+}
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn test_build_open_with_command_uses_open_dash_a() {
-        let cmd = build_open_with_command("TextEdit", "/tmp/file.txt");
-        assert_eq!(cmd.get_program().to_string_lossy(), "open");
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(args, vec!["-a", "TextEdit", "/tmp/file.txt"]);
-    }
+#[cfg(windows)]
+#[test]
+fn test_build_open_command_without_app_uses_default_handler() {
+    let cmd = build_open_command(None, "D:\\proj\\file.ts");
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    assert_eq!(args, vec!["/C", "start", "", "D:\\proj\\file.ts"]);
+}
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    #[test]
-    fn test_build_open_with_command_executes_app_directly() {
-        let cmd = build_open_with_command("gedit", "/tmp/file.txt");
-        assert_eq!(cmd.get_program().to_string_lossy(), "gedit");
-        assert_eq!(
-            cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>(),
-            vec!["/tmp/file.txt"]
-        );
-    }
+#[cfg(target_os = "macos")]
+#[test]
+fn test_build_open_with_command_uses_open_dash_a() {
+    let cmd = build_open_command(Some("TextEdit"), "/tmp/file.txt");
+    assert_eq!(cmd.get_program().to_string_lossy(), "open");
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    assert_eq!(args, vec!["-a", "TextEdit", "/tmp/file.txt"]);
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn test_build_open_with_command_executes_app_directly() {
+    let cmd = build_open_command(Some("gedit"), "/tmp/file.txt");
+    assert_eq!(cmd.get_program().to_string_lossy(), "gedit");
+    assert_eq!(
+        cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>(),
+        vec!["/tmp/file.txt"]
+    );
+}
 
     #[test]
     fn test_fs_create_file_already_exists_returns_ok() {
