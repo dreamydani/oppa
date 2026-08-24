@@ -1,0 +1,10 @@
+{
+  "id": "oppa.completion-notifier",
+  "name": "Completion Notifier",
+  "version": "1.0.0",
+  "description": "Notifies you when a terminal session that ran for a while finishes.",
+  "engines": { "oppa": ">=0.1.0" },
+  "main": "main.js",
+  "capabilities": ["notifications", "storage", "events"],
+  "contributes": {}
+}

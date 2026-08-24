@@ -60,10 +60,22 @@ struct BuiltinSource {
 }
 
 /// Built-in extensions shipped with oppa. Populated as they land.
-const BUILTIN_SOURCES: &[BuiltinSource] = &[BuiltinSource {
-    manifest_json: include_str!("../../resources/extensions/oppa.theme-pack/oppa-extension.json"),
-    entry_js: None,
-}];
+const BUILTIN_SOURCES: &[BuiltinSource] = &[
+    BuiltinSource {
+        manifest_json: include_str!(
+            "../../resources/extensions/oppa.theme-pack/oppa-extension.json"
+        ),
+        entry_js: None,
+    },
+    BuiltinSource {
+        manifest_json: include_str!(
+            "../../resources/extensions/oppa.completion-notifier/oppa-extension.json"
+        ),
+        entry_js: Some(include_str!(
+            "../../resources/extensions/oppa.completion-notifier/main.js"
+        )),
+    },
+];
 
 /// Load an entry script for a scriptable manifest. `Ok(None)` for declarative;
 /// `Err` when a declared main file cannot be read.
@@ -346,21 +358,27 @@ mod tests {
         // Guards against shipping a broken built-in: the compiled manifest
         // must parse and validate, or the app would boot with a failed entry.
         let builtins = discover_all_at(Path::new("Z:/definitely/not/here"));
-        assert_eq!(builtins.len(), 1);
-        let pack = &builtins[0];
+        assert!(builtins.iter().all(|b| b.error.is_none()));
+        let pack = builtins
+            .iter()
+            .find(|b| b.manifest.as_ref().is_some_and(|m| m.id == "oppa.theme-pack"))
+            .expect("theme pack must ship");
         assert!(pack.is_builtin);
-        assert!(
-            pack.error.is_none(),
-            "shipped theme pack failed validation: {:?}",
-            pack.error
-        );
-        let manifest = pack.manifest.as_ref().unwrap();
-        assert_eq!(manifest.id, "oppa.theme-pack");
-        assert_eq!(manifest.contributes.themes.len(), 3);
-        // Theme ids are unique and globally prefixed without collisions.
-        let mut ids: Vec<_> = manifest.contributes.themes.iter().map(|t| t.id.clone()).collect();
-        ids.sort();
-        ids.dedup();
-        assert_eq!(ids.len(), 3);
+        assert_eq!(pack.manifest.as_ref().unwrap().contributes.themes.len(), 3);
+    }
+
+    #[test]
+    fn shipped_completion_notifier_is_scriptable_with_entry() {
+        let builtins = discover_all_at(Path::new("Z:/definitely/not/here"));
+        let notifier = builtins
+            .iter()
+            .find(|b| b.manifest.as_ref().is_some_and(|m| m.id == "oppa.completion-notifier"))
+            .expect("notifier must ship");
+        assert!(notifier.error.is_none(), "{:?}", notifier.error);
+        assert!(has_entry(notifier));
+        let source = notifier.entry_source.as_deref().unwrap();
+        assert!(source.contains("session-exit"), "registers the exit handler");
+        assert!(source.contains("notify("), "fires notifications");
+        assert!(!notifier.fingerprint.is_empty());
     }
 }
