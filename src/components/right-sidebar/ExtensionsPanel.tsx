@@ -3,8 +3,9 @@ import { ChevronDown, ChevronRight, PackageX, Puzzle } from "lucide-react";
 import { useExtensionStore } from "../../store/extensionStore";
 import "./ExtensionsPanel.css";
 
-// Sidebar view listing installed extensions (M1: built-ins only). Enable/disable
-// is the whole management surface; install/uninstall arrives with Phase 4.
+// Sidebar view listing installed extensions. Enable/disable plus the Phase 2
+// consent flow for scriptable ("Code") extensions; install/uninstall is P4.
+// The consent modal + toast stack render at app level (ExtensionConsent.tsx).
 
 function ContributionBadges({
   themeCount,
@@ -83,8 +84,12 @@ export function ExtensionsPanel(): React.ReactElement {
         {extensions.map((ext) => {
           const expanded = expandedId === ext.id;
           const hasError = ext.error !== null;
+          const crashed = ext.crash_error !== null;
           return (
-            <section key={ext.id || ext.name} className={`ext-card${hasError ? " error" : ""}`}>
+            <section
+              key={ext.id || ext.name}
+              className={`ext-card${hasError ? " error" : ""}${crashed ? " crashed" : ""}`}
+            >
               <div className="ext-card-main">
                 <button
                   type="button"
@@ -100,11 +105,17 @@ export function ExtensionsPanel(): React.ReactElement {
                     <span className="ext-card-name">{ext.name}</span>
                     {ext.version && <span className="ext-card-version">v{ext.version}</span>}
                     {ext.is_builtin && <span className="ext-badge builtin">Built-in</span>}
+                    {ext.is_scriptable && <span className="ext-badge code">Code</span>}
                     {hasError && <span className="ext-badge error-badge">Failed to load</span>}
                   </div>
                   {(ext.description || hasError) && (
                     <p className="ext-card-desc">
                       {hasError ? ext.error : ext.description}
+                    </p>
+                  )}
+                  {crashed && (
+                    <p className="ext-crash-banner" role="alert">
+                      Crashed: {ext.crash_error}
                     </p>
                   )}
                   {!hasError && (

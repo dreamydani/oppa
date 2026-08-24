@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useExtensionStore } from "./extensionStore";
+import {
+  handleExtensionCrash,
+  useExtensionStore,
+} from "./extensionStore";
 import { syncExtensionThemes, isExtensionTheme } from "../lib/theme/terminalThemes";
 import type { ExtensionListItem } from "../lib/extensions/extensionTransport";
 
@@ -7,17 +10,25 @@ vi.mock("../lib/extensions/extensionTransport", () => ({
   listExtensions: vi.fn(),
   setExtensionEnabled: vi.fn(),
   getContributions: vi.fn(),
+  getExtensionFingerprint: vi.fn(),
+  grantExtensionConsent: vi.fn(),
+  CONSENT_REQUIRED_PREFIX: "consent required:",
 }));
 
 import {
   listExtensions,
   setExtensionEnabled,
   getContributions,
+  getExtensionFingerprint,
+  grantExtensionConsent,
+  CONSENT_REQUIRED_PREFIX,
 } from "../lib/extensions/extensionTransport";
 
 const listExtensionsMock = vi.mocked(listExtensions);
 const setEnabledMock = vi.mocked(setExtensionEnabled);
 const getContributionsMock = vi.mocked(getContributions);
+const getFingerprintMock = vi.mocked(getExtensionFingerprint);
+const grantConsentMock = vi.mocked(grantExtensionConsent);
 
 function themePack(enabled: boolean): ExtensionListItem {
   return {
@@ -31,6 +42,10 @@ function themePack(enabled: boolean): ExtensionListItem {
     theme_count: 3,
     snippet_count: 0,
     command_count: 0,
+    is_scriptable: false,
+    capabilities: [],
+    consent_required: false,
+    crash_error: null,
   };
 }
 
@@ -110,5 +125,96 @@ describe("extensionStore", () => {
 
     // The switch never lies.
     expect(useExtensionStore.getState().extensions[0].enabled).toBe(true);
+  });
+
+  describe("consent flow (scriptable extensions)", () => {
+    function scriptExt(enabled: boolean) {
+      return {
+        ...themePack(enabled),
+        id: "acme.notifier",
+        name: "Notifier",
+        is_scriptable: true,
+        capabilities: ["notifications", "events"],
+      };
+    }
+
+    beforeEach(() => {
+      vi.mocked(setExtensionEnabled).mockClear?.();
+    });
+
+    it("opens the consent dialog when the backend demands consent", async () => {
+      listExtensionsMock.mockResolvedValue([scriptExt(false)]);
+      getContributionsMock.mockResolvedValue({ themes: [] });
+      setEnabledMock.mockRejectedValue(
+        new Error(`${CONSENT_REQUIRED_PREFIX} needs approval`),
+      );
+      await useExtensionStore.getState().load();
+
+      // Boot policy leaves unconsented scriptable exts disabled; user flips on.
+      await useExtensionStore.getState().toggleExtension("acme.notifier", true);
+
+      const state = useExtensionStore.getState();
+      expect(state.pendingConsentId).toBe("acme.notifier");
+      // Switch rolled back — nothing runs without approval.
+      expect(state.extensions[0].enabled).toBe(false);
+    });
+
+    it("grantConsentAndEnable enables and closes the dialog", async () => {
+      // load -> disabled; post-grant refresh reports it enabled.
+      listExtensionsMock
+        .mockResolvedValueOnce([scriptExt(false)])
+        .mockResolvedValue([scriptExt(true)]);
+      getContributionsMock.mockResolvedValue({ themes: [] });
+      await useExtensionStore.getState().load();
+      setEnabledMock.mockRejectedValue(
+        new Error(`${CONSENT_REQUIRED_PREFIX} needs approval`),
+      );
+      await useExtensionStore.getState().toggleExtension("acme.notifier", true);
+      expect(useExtensionStore.getState().pendingConsentId).toBe("acme.notifier");
+
+      getFingerprintMock.mockResolvedValue("fp-123");
+      grantConsentMock.mockResolvedValue(undefined);
+
+      await useExtensionStore.getState().grantConsentAndEnable("acme.notifier");
+
+      expect(grantConsentMock).toHaveBeenCalledWith("acme.notifier", "fp-123");
+      const state = useExtensionStore.getState();
+      expect(state.pendingConsentId).toBeNull();
+      expect(state.extensions[0].enabled).toBe(true);
+    });
+
+    it("dismissConsent closes the dialog without enabling", async () => {
+      listExtensionsMock.mockResolvedValue([scriptExt(false)]);
+      getContributionsMock.mockResolvedValue({ themes: [] });
+      await useExtensionStore.getState().load();
+      setEnabledMock.mockRejectedValue(
+        new Error(`${CONSENT_REQUIRED_PREFIX} x`),
+      );
+      await useExtensionStore.getState().toggleExtension("acme.notifier", true);
+      expect(useExtensionStore.getState().pendingConsentId).not.toBeNull();
+
+      useExtensionStore.getState().dismissConsent();
+      expect(useExtensionStore.getState().pendingConsentId).toBeNull();
+      expect(useExtensionStore.getState().extensions[0].enabled).toBe(false);
+    });
+  });
+
+  it("crash events disable the extension and surface the reason", () => {
+    listExtensionsMock.mockResolvedValue([
+      {
+        ...themePack(true),
+        id: "acme.notifier",
+        name: "Notifier",
+        is_scriptable: true,
+      },
+    ]);
+    getContributionsMock.mockResolvedValue(MIDNIGHT_CONTRIBUTION);
+    return useExtensionStore.getState().load().then(() => {
+      handleExtensionCrash({ id: "acme.notifier", reason: "watchdog abort" });
+
+      const ext = useExtensionStore.getState().extensions[0];
+      expect(ext.enabled).toBe(false);
+      expect(ext.crash_error).toBe("watchdog abort");
+    });
   });
 });

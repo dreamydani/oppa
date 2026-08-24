@@ -13,7 +13,18 @@ import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
 import { SettingsView } from "./components/settings/SettingsView";
 import { useTerminalStore } from "./store/terminalStore";
-import { useExtensionStore } from "./store/extensionStore";
+import {
+  handleExtensionCrash,
+  useExtensionStore,
+} from "./store/extensionStore";
+import {
+  ExtensionConsentModal,
+  ExtensionToasts,
+} from "./components/right-sidebar/ExtensionConsent";
+import {
+  onExtensionCrashed,
+  onExtensionNotify,
+} from "./lib/extensions/extensionTransport";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
 
@@ -147,6 +158,20 @@ function App() {
     });
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Extension host events: notifications become toasts; crashes update the
+  // panel state. Both are fire-and-forget — failures never block the UI.
+  useEffect(() => {
+    const unlisteners = [
+      onExtensionNotify((payload) =>
+        useExtensionStore.getState().pushToast(payload),
+      ),
+      onExtensionCrashed((payload) => handleExtensionCrash(payload)),
+    ];
+    return () => {
+      void Promise.all(unlisteners).then((fns) => fns.forEach((fn) => fn()));
     };
   }, []);
 
@@ -419,6 +444,10 @@ function App() {
       {showStatusBar && <StatusBar />}
       <WorkspaceLauncherModal />
       <WorktreeCreateModal />
+      {/* Extension consent + notification overlays are always mounted so they
+          work from any mode/tab (the host pushes events app-wide). */}
+      <ExtensionConsentModal />
+      <ExtensionToasts />
     </div>
   );
 }
