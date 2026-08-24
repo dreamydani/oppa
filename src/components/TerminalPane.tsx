@@ -20,6 +20,10 @@ import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import { planFullBleed } from "../lib/terminal/fullBleedFit";
 import {
+  notifyResizeActivity,
+  requestFit,
+} from "../lib/terminal/fitCoordinator";
+import {
   isLayoutAnimating,
   runWhenLayoutIdle,
 } from "../lib/layout/layoutAnimationGate";
@@ -478,17 +482,25 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     };
     // During a layout animation (drawer slide, etc.) container sizes change
     // every frame; defer so the grid commits exactly once after it ends.
+    // Otherwise route through the shared coordinator: coalesced passes and
+    // leading-edge/settle semantics for continuous resizes (drags).
     let fitDeferredWhileAnimating = false;
+    let pendingFitCancel: (() => void) | null = null;
+    const scheduleStableFit = () => {
+      notifyResizeActivity();
+      pendingFitCancel?.();
+      pendingFitCancel = requestFit(id, runStableFit);
+    };
     const ro = new ResizeObserver(() => {
       if (!isLayoutAnimating()) {
-        runStableFit();
+        scheduleStableFit();
         return;
       }
       if (fitDeferredWhileAnimating) return;
       fitDeferredWhileAnimating = true;
       runWhenLayoutIdle(() => {
         fitDeferredWhileAnimating = false;
-        if (!disposed) runStableFit();
+        if (!disposed) scheduleStableFit();
       });
     });
     ro.observe(containerRef.current!);
@@ -497,6 +509,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     return () => {
       cancelAnimationFrame(stableRaf);
       cancelAnimationFrame(followUpRaf);
+      pendingFitCancel?.();
+      pendingFitCancel = null;
       if (resizeTimer) {
         clearTimeout(resizeTimer);
         resizeTimer = null;

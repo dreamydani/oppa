@@ -7,6 +7,7 @@ import {
   endLayoutAnimation,
   resetLayoutAnimationGateForTests,
 } from "../lib/layout/layoutAnimationGate";
+import { resetFitCoordinatorForTests, setFitSchedulerForTests } from "../lib/terminal/fitCoordinator";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
 import * as opener from "@tauri-apps/plugin-opener";
@@ -217,14 +218,29 @@ const openUrlMock = vi.mocked(opener.openUrl);
 // trigger a resize the way a browser layout change would.
 const roState = vi.hoisted(() => ({ callback: null as null | (() => void) }));
 
+// The fit coordinator schedules its passes on rAF; capture callbacks so tests
+// can pump a deterministic frame.
+const rafState = vi.hoisted(() => ({ queue: [] as Array<() => void> }));
+
 function fireResize() {
   roState.callback?.();
+  // Drain the coordinator's scheduled pass synchronously.
+  const queue = rafState.queue;
+  rafState.queue = [];
+  for (const cb of queue) cb();
+}
+
+function pumpRaf() {
+  const queue = rafState.queue;
+  rafState.queue = [];
+  for (const cb of queue) cb();
 }
 
 describe("TerminalPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetLayoutAnimationGateForTests();
+    resetFitCoordinatorForTests();
     xtermState.instances.length = 0;
     addonState.fitInstances.length = 0;
     addonState.unicode11Instances.length = 0;
@@ -234,6 +250,13 @@ describe("TerminalPane", () => {
     addonState.webglInstances.length = 0;
     addonState.canvasInstances.length = 0;
     roState.callback = null;
+    rafState.queue = [];
+    // Deterministic frame pump for the fit coordinator (no global stubbing,
+    // so vi.useFakeTimers inside individual tests stays untouched).
+    setFitSchedulerForTests((cb) => {
+      rafState.queue.push(cb);
+      return rafState.queue.length;
+    });
     // Fresh store: the pane under test renders the "abc" session.
     useTerminalStore.setState({
       sessions: {
@@ -266,6 +289,7 @@ describe("TerminalPane", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     resetLayoutAnimationGateForTests();
+    resetFitCoordinatorForTests();
     vi.useRealTimers();
   });
 
@@ -345,6 +369,7 @@ describe("TerminalPane", () => {
     expect(ptyResizeMock).not.toHaveBeenCalled();
 
     endLayoutAnimation("sidebar-left");
+    pumpRaf(); // run the coordinator pass released by the gate
     vi.advanceTimersByTime(100);
     expect(ptyResizeMock).toHaveBeenCalledTimes(1);
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
