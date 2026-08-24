@@ -193,15 +193,98 @@ pub fn run() {
             // Extension registry: built-ins + user-installed, honoring the
             // persisted disabled set. A missing data dir just skips managing
             // state; commands then fail loudly instead of half-working.
-            if let (Some(user_dir), Some(state_path)) = (
+            if let (Some(user_dir), Some(state_path), Some(data_root)) = (
                 app.path().app_data_dir().ok().map(|d| d.join("extensions")),
                 app.path()
                     .app_data_dir()
                     .ok()
                     .map(|d| d.join(extensions::registry::STATE_FILE_NAME)),
+                app.path().app_data_dir().ok(),
             ) {
                 let registry = extensions::commands::init_registry_at(&user_dir, &state_path);
+
+                // Host service: webview notifications + PTY write path + crash
+                // pump that auto-disables and persists the failing extension.
+                let services = extensions::host::HostServices {
+                    notify: Arc::new(extensions::service::WebviewNotifySink(
+                        app.handle().clone(),
+                    )),
+                    terminal: Arc::new(extensions::service::ManagerTerminalWriter(
+                        app.handle().clone(),
+                    )),
+                    storage_root: data_root.join("extension-storage"),
+                };
+                let report_app = app.handle().clone();
+                let host_service = Arc::new(extensions::service::ExtensionHostService::new(
+                    services,
+                    move |report| match report {
+                        extensions::host::EngineReport::Crashed { ext_id, reason } => {
+                            if let Some(state) = report_app.try_state::<extensions::commands::ExtensionsState>() {
+                                if let Ok(mut reg) = state.0.lock() {
+                                    reg.record_error(&ext_id, reason.clone());
+                                    let _ = reg.set_enabled(&ext_id, false);
+                                    if let Some(p) = report_app
+                                        .path()
+                                        .app_data_dir()
+                                        .ok()
+                                        .map(|d| d.join(extensions::registry::STATE_FILE_NAME))
+                                    {
+                                        let _ = extensions::registry::save_state_at(
+                                            &p,
+                                            &extensions::registry::ExtensionsStateFile {
+                                                disabled_ids: reg.disabled_ids(),
+                                                consents: reg.consents().clone(),
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            let _ = report_app.emit(
+                                "extensions:crashed",
+                                serde_json::json!({ "id": ext_id, "reason": reason }),
+                            );
+                        }
+                    },
+                ));
+                app.manage(host_service.clone());
+
+                // Boot-start engines for enabled + consented scriptable entries.
+                for entry in registry.entries() {
+                    let Some(manifest) = entry.manifest.as_ref() else {
+                        continue;
+                    };
+                    let Some(entry_source) = entry.entry_source.as_ref() else {
+                        continue;
+                    };
+                    if registry.is_enabled(&manifest.id)
+                        && registry.is_consented(&manifest.id, &entry.fingerprint)
+                    {
+                        host_service.start(
+                            &manifest.id,
+                            manifest.capabilities.clone(),
+                            entry_source.clone(),
+                        );
+                    }
+                }
+
                 app.manage(extensions::commands::ExtensionsState(Mutex::new(registry)));
+
+                // Extension event taps: ride the existing Tauri event bus so no
+                // PTY internals change. Payloads are forwarded as raw JSON —
+                // extensions only ever see the documented subset of fields.
+                use tauri::Listener;
+                let tap_host = host_service.clone();
+                app.listen("pty:exit", move |event| {
+                    tap_host.broadcast("session-exit", event.payload().to_string());
+                });
+                let tap_host = host_service.clone();
+                app.listen("session-title-changed", move |event| {
+                    tap_host.broadcast("title-changed", event.payload().to_string());
+                });
+                let tap_host = host_service.clone();
+                app.listen("session-focus-requested", move |event| {
+                    tap_host.broadcast("focus-changed", event.payload().to_string());
+                });
             }
 
             // Pre-warm daemon client in background so first terminal spawn is immediate
@@ -248,6 +331,12 @@ pub fn run() {
                     }
                     if let Some(manager) = window_clone.try_state::<PtyManager>() {
                         let _ = manager.disconnect();
+                    }
+                    // Extension engines die with the window (spec: GUI-process host).
+                    if let Some(host) = window_clone
+                        .try_state::<Arc<extensions::service::ExtensionHostService>>()
+                    {
+                        host.stop_all();
                     }
                     let _ = window_clone.destroy();
                 });

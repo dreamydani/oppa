@@ -9,7 +9,7 @@ use super::registry::{
 };
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 
 /// Tauri-managed singleton holding the loaded registry.
@@ -185,6 +185,7 @@ pub fn list_extensions(state: State<'_, ExtensionsState>) -> Result<Vec<Extensio
 pub fn set_extension_enabled(
     app: AppHandle,
     state: State<'_, ExtensionsState>,
+    host: State<'_, Arc<super::service::ExtensionHostService>>,
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
@@ -192,10 +193,10 @@ pub fn set_extension_enabled(
     // Scriptable extensions need a valid consent grant for their CURRENT
     // content before the engine may start.
     if enabled {
-        if let Some(entry) = registry.entries().iter().find(|e| {
-            e.manifest.as_ref().is_some_and(|m| m.id == id) && is_scriptable(e.manifest.as_ref().unwrap())
-        }) {
-            if !registry.is_consented(&id, &entry.fingerprint) {
+        if let Some(entry) = find_entry(&registry, &id) {
+            if is_scriptable(entry.manifest.as_ref().unwrap())
+                && !registry.is_consented(&id, &entry.fingerprint)
+            {
                 return Err(format!(
                     "{CONSENT_REQUIRED_PREFIX} extension '{id}' needs your approval to run code"
                 ));
@@ -203,8 +204,40 @@ pub fn set_extension_enabled(
         }
     }
     registry.set_enabled(&id, enabled)?;
+    sync_engine_state(&host, &registry, &id, enabled);
     persist_state(&app, &registry)?;
     Ok(())
+}
+
+fn find_entry<'a>(
+    registry: &'a ExtensionRegistry,
+    id: &str,
+) -> Option<&'a DiscoveredExtension> {
+    registry
+        .entries()
+        .iter()
+        .find(|e| e.manifest.as_ref().is_some_and(|m| m.id == id))
+}
+
+/// Start or stop an extension's engine to match its registry state. Declarative
+/// extensions never have engines; stopping a non-running id is a no-op.
+fn sync_engine_state(
+    host: &Arc<super::service::ExtensionHostService>,
+    registry: &ExtensionRegistry,
+    id: &str,
+    enabled: bool,
+) {
+    match (enabled, find_entry(registry, id)) {
+        (true, Some(entry)) if entry.entry_source.is_some() => {
+            let caps = entry
+                .manifest
+                .as_ref()
+                .map(|m| m.capabilities.clone())
+                .unwrap_or_default();
+            host.start(id, caps, entry.entry_source.clone().unwrap());
+        }
+        _ => host.stop(id),
+    }
 }
 
 /// Validate + apply a consent grant against the registry. Shared by the
@@ -232,11 +265,13 @@ pub fn apply_consent_grant(
 pub fn grant_extension_consent(
     app: AppHandle,
     state: State<'_, ExtensionsState>,
+    host: State<'_, Arc<super::service::ExtensionHostService>>,
     id: String,
     fingerprint: String,
 ) -> Result<(), String> {
     let mut registry = state.0.lock().map_err(|e| e.to_string())?;
     apply_consent_grant(&mut registry, &id, &fingerprint)?;
+    sync_engine_state(&host, &registry, &id, true);
     persist_state(&app, &registry)
 }
 
