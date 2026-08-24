@@ -8,6 +8,7 @@ import {
   SLIDE_EASING,
   SlideDrawer,
 } from "../lib/layout/sideDrawer";
+import { createRafCoalescer } from "../lib/layout/rafThrottle";
 import { WorktreePane } from "./worktree/WorktreePane";
 import {
   SearchIcon,
@@ -153,17 +154,20 @@ export function LeftSidebar(): React.ReactElement {
     setIsResizing(true);
     const sidebarEl = (e.currentTarget as HTMLElement).closest(".left-sidebar");
     const sidebarLeft = sidebarEl?.getBoundingClientRect().left ?? 0;
+    // One width commit per frame; the drag end flushes the final value.
+    const widthCoalescer = createRafCoalescer<number>((width) => setLeftSidebarWidth(width));
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const nextWidth = Math.max(
         MIN_SIDEBAR_WIDTH,
         Math.min(MAX_SIDEBAR_WIDTH, moveEvent.clientX - sidebarLeft),
       );
-      setLeftSidebarWidth(nextWidth);
+      widthCoalescer.push(nextWidth);
     };
 
     const handleMouseUp = () => {
       setIsResizing(false);
+      widthCoalescer.flushNow();
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };

@@ -6,6 +6,7 @@ import {
   SLIDE_EASING,
   SlideDrawer,
 } from "../../lib/layout/sideDrawer";
+import { createRafCoalescer } from "../../lib/layout/rafThrottle";
 import { ActivityBar } from "./ActivityBar";
 import { FileExplorer } from "./FileExplorer";
 import { GitSourceControl } from "./GitSourceControl";
@@ -55,6 +56,8 @@ export function RightSidebar(): React.ReactElement {
     setIsResizing(true);
     const startX = e.clientX;
     const startWidth = rightSidebarWidth;
+    // One width commit per frame; the drag end flushes the final value.
+    const widthCoalescer = createRafCoalescer<number>((width) => setRightSidebarWidth(width));
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const delta = startX - moveEvent.clientX;
@@ -62,11 +65,12 @@ export function RightSidebar(): React.ReactElement {
         MIN_SIDEBAR_WIDTH,
         Math.min(MAX_SIDEBAR_WIDTH, startWidth + delta),
       );
-      setRightSidebarWidth(nextWidth);
+      widthCoalescer.push(nextWidth);
     };
 
     const handleMouseUp = () => {
       setIsResizing(false);
+      widthCoalescer.flushNow();
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };

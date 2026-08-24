@@ -12,6 +12,7 @@ import {
 } from "../lib/pane-manager/maximizeZoom";
 import type { FlipRect } from "../lib/pane-manager/maximizeZoom";
 import { usePaneDragStore } from "../lib/pane-manager/dragState";
+import { createRafCoalescer } from "../lib/layout/rafThrottle";
 import { SessionLeaf } from "./SessionLeaf";
 
 // True when `id` is present as a leaf anywhere in `tree`.
@@ -244,11 +245,15 @@ function SplitDivider({
 
       divider.setPointerCapture(pointerId);
 
+      // Ratio updates collapse to one store write per frame (latest wins);
+      // endDrag flushes the final value synchronously before persisting.
+      const ratioCoalescer = createRafCoalescer<number>((next) => setRatio(path, next));
+
       const onMove = (ev: PointerEvent) => {
         if (totalLength > 0) {
           const currentPos = dir === "h" ? ev.clientX : ev.clientY;
           const next = Math.min(0.95, Math.max(0.05, (currentPos - origin) / totalLength));
-          setRatio(path, next);
+          ratioCoalescer.push(next);
         }
       };
 
@@ -258,6 +263,7 @@ function SplitDivider({
         } catch {
           // capture already lost — nothing to release
         }
+        ratioCoalescer.flushNow();
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", endDrag);
         window.removeEventListener("blur", endDrag);

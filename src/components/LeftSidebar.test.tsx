@@ -1,7 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/react";
 import { LeftSidebar } from "./LeftSidebar";
 import { useTerminalStore } from "../store/terminalStore";
+import {
+  setFrameSchedulerForTests,
+  resetFrameSchedulerForTests,
+} from "../lib/layout/frameScheduler";
 import * as transport from "../lib/pty/transport";
 
 vi.mock("../lib/pty/transport", () => ({
@@ -46,8 +50,20 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
 const ptySpawnMock = vi.mocked(transport.ptySpawn);
 
 describe("LeftSidebar", () => {
+  // Deterministic frame pump for drag coalescing.
+  let frameQueue: Array<() => void>;
+  function pumpFrames() {
+    const q = frameQueue;
+    frameQueue = [];
+    for (const cb of q) cb();
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    frameQueue = [];
+    setFrameSchedulerForTests((cb) => {
+      frameQueue.push(cb);
+    });
     ptySpawnMock.mockResolvedValue({ id: "s-new", is_new: true, pid: 100 });
     useTerminalStore.setState({
       leftSidebarOpen: true,
@@ -88,6 +104,10 @@ describe("LeftSidebar", () => {
       layout: { type: "leaf", id: "s1" },
       focusedPath: [],
     });
+  });
+
+  afterEach(() => {
+    resetFrameSchedulerForTests();
   });
 
   it("renders search strip and tab cards with avatar badges and no duplicate icon", () => {
@@ -213,12 +233,15 @@ describe("LeftSidebar", () => {
     fireEvent.mouseDown(resizeHandle, { clientX: 240 });
 
     fireEvent.mouseMove(window, { clientX: 300 });
+    pumpFrames(); // coalescer commits on frame
     expect(useTerminalStore.getState().leftSidebarWidth).toBe(300);
 
     fireEvent.mouseMove(window, { clientX: 500 });
+    pumpFrames();
     expect(useTerminalStore.getState().leftSidebarWidth).toBe(420);
 
     fireEvent.mouseMove(window, { clientX: 100 });
+    pumpFrames();
     expect(useTerminalStore.getState().leftSidebarWidth).toBe(200);
 
     fireEvent.mouseUp(window);

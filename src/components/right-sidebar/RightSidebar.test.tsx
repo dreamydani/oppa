@@ -1,7 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RightSidebar } from "./RightSidebar";
 import { useTerminalStore } from "../../store/terminalStore";
+import {
+  setFrameSchedulerForTests,
+  resetFrameSchedulerForTests,
+} from "../../lib/layout/frameScheduler";
 import * as fsTransport from "../../lib/fs/transport";
 import * as ptyTransport from "../../lib/pty/transport";
 import type { SourceControlStatus } from "../../lib/pty/transport";
@@ -43,8 +47,20 @@ function makeGitStatus(): SourceControlStatus {
 }
 
 describe("RightSidebar", () => {
+  // Deterministic frame pump for drag coalescing.
+  let frameQueue: Array<() => void>;
+  function pumpFrames() {
+    const q = frameQueue;
+    frameQueue = [];
+    for (const cb of q) cb();
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    frameQueue = [];
+    setFrameSchedulerForTests((cb) => {
+      frameQueue.push(cb);
+    });
     useTerminalStore.setState({
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
@@ -83,6 +99,10 @@ describe("RightSidebar", () => {
       gitBranches: null,
       gitHistory: null,
     });
+  });
+
+  afterEach(() => {
+    resetFrameSchedulerForTests();
   });
 
   it("renders Activity Bar tabs for Explorer and Git", () => {
@@ -239,14 +259,17 @@ describe("RightSidebar", () => {
 
     // Drag left by 70px (clientX = 730 -> width = 280 + (800 - 730) = 350)
     fireEvent.mouseMove(window, { clientX: 730 });
+    pumpFrames();
     expect(useTerminalStore.getState().rightSidebarWidth).toBe(350);
 
     // Drag beyond max bound 480 (clientX = 500 -> delta 300 -> 280+300 = 580 -> capped at 480)
     fireEvent.mouseMove(window, { clientX: 500 });
+    pumpFrames();
     expect(useTerminalStore.getState().rightSidebarWidth).toBe(480);
 
     // Drag beyond min bound 200 (clientX = 950 -> delta -150 -> 280-150 = 130 -> capped at 200)
     fireEvent.mouseMove(window, { clientX: 950 });
+    pumpFrames();
     expect(useTerminalStore.getState().rightSidebarWidth).toBe(200);
 
     // Release mouse
