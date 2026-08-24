@@ -476,6 +476,9 @@
      radius / rounding slivers blend into the running app. */
   background-color: var(--session-term-bg, var(--bg-terminal, #141414));
   overflow: hidden;
+  /* Isolate each pane's layout/paint so animated resizes (drawer slide,
+     divider drag) never cascade reflow into the xterm DOM subtree. */
+  contain: layout paint style;
   /* Reveal-side durations: a restored sibling fades/scales back in here;
      the hide side lives on .pane-hidden (destination-state rule wins). */
   transition: border-color 0.12s ease,
@@ -616,6 +619,8 @@
      band and any rounding remainder have no contrasting edge. */
   background-color: var(--session-term-bg, var(--bg-terminal, #141414));
   border-radius: 6px;
+  /* Second containment ring: keeps xterm relayouts scoped inside the pane. */
+  contain: layout paint style;
 }
 
 .terminal-pane-error {
