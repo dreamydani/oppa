@@ -270,6 +270,108 @@
   color: var(--text-muted);
 }
 
+/* File Explorer context menu */
+.file-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 4px;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.file-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  text-align: left;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.file-context-menu-item:hover {
+  background-color: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.file-context-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.file-context-menu-text {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.file-context-menu-label-with-chevron {
+  display: flex;
+}
+
+.file-context-menu-chevron {
+  margin-left: auto;
+  color: var(--muted-foreground);
+}
+
+.file-context-menu-submenu-anchor {
+  position: relative;
+}
+
+.file-context-submenu {
+  position: absolute;
+  top: -4px;
+  left: calc(100% + 2px);
+  min-width: 170px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Inline new-file / new-folder naming row */
+.file-tree-new-row {
+  gap: 6px;
+}
+
+.file-tree-new-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background-color: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.file-tree-new-input:focus {
+  border-color: var(--muted-foreground);
+}
+
+.file-create-error {
+  font-size: 11px;
+  color: #f87171;
+  white-space: nowrap;
+}
+
 /* Git Source Control */
 .git-source-control {
   display: flex;

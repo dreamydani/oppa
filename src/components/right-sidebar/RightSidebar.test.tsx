@@ -9,6 +9,11 @@ import type { SourceControlStatus } from "../../lib/pty/transport";
 vi.mock("../../lib/fs/transport", () => ({
   readDir: vi.fn(),
   readFile: vi.fn().mockResolvedValue(""),
+  writeFile: vi.fn(),
+  createFile: vi.fn().mockResolvedValue(undefined),
+  createDir: vi.fn().mockResolvedValue(true),
+  detectEditors: vi.fn().mockResolvedValue([]),
+  openWith: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("../../lib/pty/transport", async (importOriginal) => ({
