@@ -1,0 +1,102 @@
+{
+  "id": "oppa.theme-pack",
+  "name": "Oppa Theme Pack",
+  "version": "1.0.0",
+  "description": "Three original dark terminal themes: Aurora Night, Ember Slate, and Violet Dusk.",
+  "engines": { "oppa": ">=0.1.0" },
+  "capabilities": [],
+  "contributes": {
+    "themes": [
+      {
+        "id": "aurora_night",
+        "name": "Aurora Night",
+        "type": "dark",
+        "colors": {
+          "background": "#0b1316",
+          "foreground": "#cfe3e0",
+          "cursor": "#4fd1b5",
+          "cursorAccent": "#0b1316",
+          "selectionBackground": "#79e2c740",
+          "selectionForeground": "#ffffff",
+          "black": "#16232a",
+          "red": "#f07178",
+          "green": "#5fe0b0",
+          "yellow": "#ffd173",
+          "blue": "#59c2ff",
+          "magenta": "#d2a6ff",
+          "cyan": "#4fd1b5",
+          "white": "#d9e6e4",
+          "brightBlack": "#486068",
+          "brightRed": "#ff8f95",
+          "brightGreen": "#8cecc7",
+          "brightYellow": "#ffe08a",
+          "brightBlue": "#73d0ff",
+          "brightMagenta": "#e0c3ff",
+          "brightCyan": "#7de8d0",
+          "brightWhite": "#f2fbfa"
+        },
+        "preview_colors": ["#0b1316", "#cfe3e0", "#4fd1b5", "#59c2ff"]
+      },
+      {
+        "id": "ember_slate",
+        "name": "Ember Slate",
+        "type": "dark",
+        "colors": {
+          "background": "#17151a",
+          "foreground": "#e3ddd6",
+          "cursor": "#ff9e64",
+          "cursorAccent": "#17151a",
+          "selectionBackground": "#ff9e6440",
+          "selectionForeground": "#ffffff",
+          "black": "#242028",
+          "red": "#ef6b73",
+          "green": "#9acD82",
+          "yellow": "#e5b567",
+          "blue": "#8fbcd4",
+          "magenta": "#c99be2",
+          "cyan": "#7fcabf",
+          "white": "#e3ddd6",
+          "brightBlack": "#574f58",
+          "brightRed": "#ff8c92",
+          "brightGreen": "#b4dd9e",
+          "brightYellow": "#f2ca80",
+          "brightBlue": "#a8cee0",
+          "brightMagenta": "#dbb3ef",
+          "brightCyan": "#96ded3",
+          "brightWhite": "#f7f3ee"
+        },
+        "preview_colors": ["#17151a", "#e3ddd6", "#ff9e64", "#ef6b73"]
+      },
+      {
+        "id": "violet_dusk",
+        "name": "Violet Dusk",
+        "type": "dark",
+        "colors": {
+          "background": "#14121f",
+          "foreground": "#d8d4ea",
+          "cursor": "#b892ff",
+          "cursorAccent": "#14121f",
+          "selectionBackground": "#b892ff40",
+          "selectionForeground": "#ffffff",
+          "black": "#211d31",
+          "red": "#f2798f",
+          "green": "#84e1a6",
+          "yellow": "#ecc98a",
+          "blue": "#86a8ec",
+          "magenta": "#c39bff",
+          "cyan": "#79cfd6",
+          "white": "#d8d4ea",
+          "brightBlack": "#504966",
+          "brightRed": "#ff93a6",
+          "brightGreen": "#a3ecbd",
+          "brightYellow": "#f6d9a0",
+          "brightBlue": "#9dbdf5",
+          "brightMagenta": "#d4b3ff",
+          "brightCyan": "#93dee4",
+          "brightWhite": "#efeaf9"
+        },
+        "preview_colors": ["#14121f", "#d8d4ea", "#b892ff", "#c39bff"]
+      }
+    ]
+  }
+}

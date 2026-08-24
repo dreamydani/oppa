@@ -26,7 +26,9 @@ fn errored(is_builtin: bool, source_label: String, message: String) -> Discovere
 }
 
 /// Built-in manifests compiled into the binary. Populated as built-ins ship.
-const BUILTIN_MANIFEST_JSONS: &[&str] = &[];
+const BUILTIN_MANIFEST_JSONS: &[&str] = &[include_str!(
+    "../../resources/extensions/oppa.theme-pack/oppa-extension.json"
+)];
 
 /// Parse embedded built-in manifests in order. Public for testing with inline JSON.
 pub fn discover_builtins_from(manifest_jsons: &[&str]) -> Vec<DiscoveredExtension> {
@@ -221,5 +223,28 @@ mod tests {
         let broken = discover_builtins_from(&["{ bad"]);
         assert_eq!(broken.len(), 1);
         assert!(broken[0].error.is_some());
+    }
+
+    #[test]
+    fn shipped_builtin_theme_pack_is_valid() {
+        // Guards against shipping a broken built-in: the compiled manifest
+        // must parse and validate, or the app would boot with a failed entry.
+        let builtins = discover_all_at(Path::new("Z:/definitely/not/here"));
+        assert_eq!(builtins.len(), 1);
+        let pack = &builtins[0];
+        assert!(pack.is_builtin);
+        assert!(
+            pack.error.is_none(),
+            "shipped theme pack failed validation: {:?}",
+            pack.error
+        );
+        let manifest = pack.manifest.as_ref().unwrap();
+        assert_eq!(manifest.id, "oppa.theme-pack");
+        assert_eq!(manifest.contributes.themes.len(), 3);
+        // Theme ids are unique and globally prefixed without collisions.
+        let mut ids: Vec<_> = manifest.contributes.themes.iter().map(|t| t.id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 3);
     }
 }
