@@ -4,7 +4,7 @@ import {
   useExtensionStore,
   type Toast,
 } from "../../store/extensionStore";
-import "./ExtensionsConsent.css";
+import "./ExtensionConsent.css";
 
 // Consent dialog for scriptable extensions. Shown when enabling code whose
 // fingerprint has no stored grant; denying leaves the extension off.
