@@ -112,6 +112,17 @@
   width: 0;
 }
 
+/* The viewport is a full-size overflow-y:scroll container, so Chromium would
+   paint a native light-styled scrollbar at its right edge — the white line.
+   theme.css's body-level scrollbar-width: thin inherits here and (in Chromium
+   121+) disables ::-webkit-scrollbar overrides, so hide it with the standard
+   property, which beats the inheritance. The DOM slider above is the only
+   scrollbar the terminal shows. */
+.terminal-pane .xterm-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 /* Symmetric centering: FitAddon (and readFitBudget) subtract .xterm padding
    plus the 4px ruler gutter from the grid budget, so a matching left pad
    splits the leftover evenly — 4px | grid | 4px. */

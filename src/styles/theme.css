@@ -80,6 +80,9 @@
   --git-modified: #fbbf24;
   --git-deleted: #f87171;
   --git-untracked: #a3e635;
+
+  /* Native widgets (scrollbars, form controls) follow the app theme. */
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
@@ -117,6 +120,8 @@
   --primary-foreground: #ffffff;
   --destructive: #e05252;
   --ring: rgba(0, 0, 0, 0.22);
+
+  color-scheme: light;
 }
 
 /* ==========================================================================
