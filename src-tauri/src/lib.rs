@@ -1,6 +1,7 @@
 pub mod agents;
 mod browser;
 pub mod cli;
+pub mod extensions;
 mod fs;
 pub mod git;
 mod layout;
