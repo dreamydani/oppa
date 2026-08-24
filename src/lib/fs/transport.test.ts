@@ -5,6 +5,9 @@ import {
   readFile,
   writeFile,
   createFile,
+  createDir,
+  detectEditors,
+  openWith,
   FileEntry,
 } from "./transport";
 
@@ -80,6 +83,61 @@ describe("fs transport", () => {
     it("safely catches errors on failure", async () => {
       invokeMock.mockRejectedValue(new Error("Permission denied"));
       await expect(createFile("/test/new_file.txt")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("createDir", () => {
+    it("invokes fs_create_dir with path and returns true on success", async () => {
+      invokeMock.mockResolvedValue(null);
+      const result = await createDir("/test/new_folder");
+      expect(invokeMock).toHaveBeenCalledWith("fs_create_dir", {
+        path: "/test/new_folder",
+      });
+      expect(result).toBe(true);
+    });
+
+    it("returns false and does not throw when creation fails", async () => {
+      invokeMock.mockRejectedValue(new Error("Path already exists"));
+      const result = await createDir("/test/existing");
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("detectEditors", () => {
+    it("invokes fs_detect_editors and returns the app list", async () => {
+      const mockApps = [
+        { name: "VS Code", command: "code" },
+        { name: "Notepad", command: "notepad" },
+      ];
+      invokeMock.mockResolvedValue(mockApps);
+
+      const result = await detectEditors();
+      expect(invokeMock).toHaveBeenCalledWith("fs_detect_editors");
+      expect(result).toEqual(mockApps);
+    });
+
+    it("safely catches errors and returns empty array on failure", async () => {
+      invokeMock.mockRejectedValue(new Error("IPC not available"));
+      const result = await detectEditors();
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe("openWith", () => {
+    it("invokes fs_open_with with path and app command, returning true on success", async () => {
+      invokeMock.mockResolvedValue(null);
+      const result = await openWith("/test/file.ts", "code");
+      expect(invokeMock).toHaveBeenCalledWith("fs_open_with", {
+        path: "/test/file.ts",
+        app: "code",
+      });
+      expect(result).toBe(true);
+    });
+
+    it("returns false and does not throw when launch fails", async () => {
+      invokeMock.mockRejectedValue(new Error("App not found"));
+      const result = await openWith("/test/file.ts", "missing-app");
+      expect(result).toBe(false);
     });
   });
 });
