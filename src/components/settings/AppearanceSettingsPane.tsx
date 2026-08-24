@@ -1,8 +1,10 @@
 import React from "react";
 import { useTerminalStore } from "../../store/terminalStore";
+import { useExtensionStore } from "../../store/extensionStore";
 import {
   getTerminalTheme,
   getAllTerminalThemes,
+  extensionThemeOwner,
 } from "../../lib/theme/terminalThemes";
 import type { TerminalCursorStyle } from "../../lib/settings/types";
 import { TerminalPreviewBox } from "./TerminalPreviewBox";
@@ -63,6 +65,9 @@ export function AppearanceSettingsPane(): React.ReactElement {
   const updateAppearanceSettings = useTerminalStore(
     (s) => s.updateAppearanceSettings
   );
+  // Subscribing to the extensions list re-renders this pane when extension
+  // themes arrive (boot-time load) or change (enable/disable toggle).
+  useExtensionStore((s) => s.extensions);
 
   const allThemes = getAllTerminalThemes();
   const currentTheme = getTerminalTheme(appearance.themeName);
@@ -404,6 +409,7 @@ export function AppearanceSettingsPane(): React.ReactElement {
             <div className="theme-grid" role="group" aria-label="Terminal Themes">
               {allThemes.map((theme) => {
                 const isActive = appearance.themeName === theme.id;
+                const owner = extensionThemeOwner(theme.id);
                 return (
                   <button
                     key={theme.id}
@@ -418,6 +424,14 @@ export function AppearanceSettingsPane(): React.ReactElement {
                     <div className="theme-card-header">
                       <span className="theme-card-name">{theme.name}</span>
                       <div className="theme-card-badges">
+                        {owner && (
+                          <span
+                            className="theme-badge badge-extension"
+                            title={`Contributed by ${owner}`}
+                          >
+                            Extension
+                          </span>
+                        )}
                         <span
                           className={`theme-badge ${theme.isDark ? "badge-dark" : "badge-light"}`}
                         >

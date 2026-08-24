@@ -1,5 +1,5 @@
 import React from "react";
-import { Files, GitBranch, RefreshCw } from "lucide-react";
+import { Files, GitBranch, Puzzle, RefreshCw } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 
 interface ActivityBarProps {
@@ -32,6 +32,16 @@ export function ActivityBar({ onRefresh }: ActivityBarProps): React.ReactElement
         >
           <GitBranch size={14} />
           <span>Git</span>
+        </button>
+        <button
+          type="button"
+          className={`activity-tab-btn ${rightSidebarTab === "extensions" ? "active" : ""}`}
+          onClick={() => setRightSidebarTab("extensions")}
+          title="Extensions"
+          aria-label="Extensions"
+        >
+          <Puzzle size={14} />
+          <span>Extensions</span>
         </button>
       </div>
       <div className="activity-actions">

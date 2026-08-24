@@ -146,6 +146,12 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
+.badge-extension {
+  background: rgba(88, 166, 255, 0.14);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
 .theme-check-badge {
   display: inline-flex;
   align-items: center;

@@ -435,12 +435,12 @@ export interface TerminalState {
   leftSidebarWidth: number;
   rightSidebarOpen: boolean;
   rightSidebarWidth: number;
-  rightSidebarTab: "explorer" | "git";
+  rightSidebarTab: "explorer" | "git" | "extensions";
   toggleLeftSidebar: () => void;
   setLeftSidebarWidth: (width: number) => void;
   toggleRightSidebar: () => void;
   setRightSidebarWidth: (width: number) => void;
-  setRightSidebarTab: (tab: "explorer" | "git") => void;
+  setRightSidebarTab: (tab: "explorer" | "git" | "extensions") => void;
   getActiveCwd: () => string | undefined;
   isWorkspaceLauncherOpen: boolean;
   openWorkspaceLauncher: () => void;
@@ -1508,7 +1508,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           leftSidebarWidth?: number;
           rightSidebarOpen?: boolean;
           rightSidebarWidth?: number;
-          rightSidebarTab?: "explorer" | "git";
+          rightSidebarTab?: "explorer" | "git" | "extensions";
           activeAppMode?: AppMode;
           maximizedSessionId?: string | null;
           editorTabs?: EditorTab[];

@@ -1,0 +1,246 @@
+.extensions-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 10px;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.extensions-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.extensions-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
+.extensions-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.extensions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ext-card {
+  border: 1px solid var(--border-divider, var(--border));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.ext-card.error {
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.ext-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 8px 8px 2px;
+}
+
+.ext-card-expand {
+  width: 22px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  flex-shrink: 0;
+}
+
+.ext-card-expand:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.ext-card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ext-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ext-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.ext-card-version {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.ext-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 9999px;
+}
+
+.ext-badge.builtin {
+  background: rgba(88, 166, 255, 0.14);
+  color: #58a6ff;
+}
+
+.ext-badge.error-badge {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+}
+
+.ext-card-desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  word-break: break-word;
+}
+
+.ext-card-contributions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ext-contribution-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.ext-switch {
+  width: 36px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.ext-switch:hover {
+  background: var(--border-strong);
+}
+
+.ext-switch:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+
+.ext-switch.checked {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+}
+
+.ext-switch-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #808080;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition:
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.2s ease;
+  pointer-events: none;
+}
+
+.ext-switch.checked .ext-switch-thumb {
+  transform: translateX(16px);
+  background: #18181b;
+}
+
+.ext-card-details {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-divider, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ext-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.ext-detail-grid dt {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.ext-detail-grid dd {
+  margin: 0;
+  color: var(--foreground);
+  word-break: break-all;
+}
+
+.ext-managed-note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.extensions-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.extensions-empty p {
+  margin: 0;
+}
+
+.extensions-empty-detail {
+  font-size: 11px;
+  opacity: 0.75;
+}

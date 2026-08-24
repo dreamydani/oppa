@@ -13,6 +13,7 @@ import { BrowserViewport } from "./components/browser/BrowserViewport";
 import { EditorViewport } from "./components/editor/EditorViewport";
 import { SettingsView } from "./components/settings/SettingsView";
 import { useTerminalStore } from "./store/terminalStore";
+import { useExtensionStore } from "./store/extensionStore";
 import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
 import "./App.css";
 
@@ -35,6 +36,7 @@ export type ActiveMode = "terminal" | "editor" | "browser";
 //   Alt+Shift+arrows  swap focused pane with adjacent pane
 //   Cmd/Ctrl+B        toggle left sidebar
 //   Cmd/Ctrl+Shift+B  toggle right sidebar
+//   Cmd/Ctrl+Shift+X  open the Extensions panel
 function App() {
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
@@ -131,6 +133,9 @@ function App() {
           void useTerminalStore.getState().createTab();
         }
       }
+      // Extensions load once at boot so contributions (themes) are available
+      // to pickers without waiting for the Extensions panel to open.
+      void useExtensionStore.getState().load();
     };
     void init();
   }, [loadLayout]);
@@ -280,6 +285,12 @@ function App() {
       } else if (key === "b" && e.shiftKey) {
         e.preventDefault();
         toggleRightSidebar();
+      } else if (key === "x" && e.shiftKey) {
+        // Ctrl/Cmd+Shift+X: open the Extensions panel (VS Code parity).
+        e.preventDefault();
+        const ui = useTerminalStore.getState();
+        if (!ui.rightSidebarOpen) ui.toggleRightSidebar();
+        ui.setRightSidebarTab("extensions");
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         toggleLeftSidebar();

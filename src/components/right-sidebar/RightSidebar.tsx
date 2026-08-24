@@ -8,6 +8,7 @@ import {
 } from "../../lib/layout/sideDrawer";
 import { createRafCoalescer } from "../../lib/layout/rafThrottle";
 import { ActivityBar } from "./ActivityBar";
+import { ExtensionsPanel } from "./ExtensionsPanel";
 import { FileExplorer } from "./FileExplorer";
 import { GitSourceControl } from "./GitSourceControl";
 import "./RightSidebar.css";
@@ -91,6 +92,8 @@ export function RightSidebar(): React.ReactElement {
           <div className="right-sidebar-content">
             {rightSidebarTab === "explorer" ? (
               <FileExplorer refreshKey={refreshKey} />
+            ) : rightSidebarTab === "extensions" ? (
+              <ExtensionsPanel />
             ) : (
               <GitSourceControl refreshKey={refreshKey} />
             )}
