@@ -345,7 +345,8 @@ const THEME_METADATA: TerminalThemeInfo[] = [
 ];
 
 export function getTerminalTheme(id: TerminalThemeId): ITheme {
-  const base = TERMINAL_THEMES[id] ?? TERMINAL_THEMES.oppa_dark;
+  const base =
+    EXTENSION_THEMES.get(id)?.theme ?? TERMINAL_THEMES[id] ?? TERMINAL_THEMES.oppa_dark;
   // xterm 6 renders its scrollbar via a VS Code-style DOM slider that reads
   // these theme slots; defaults are raised-alpha (stock ~0.2 is nearly
   // invisible) and spread first so explicit theme values win.
@@ -365,5 +366,72 @@ export function getTerminalTheme(id: TerminalThemeId): ITheme {
 }
 
 export function getAllTerminalThemes(): TerminalThemeInfo[] {
-  return THEME_METADATA;
+  return [...THEME_METADATA, ...extensionThemeInfos()];
+}
+
+// --- Extension-contributed themes -------------------------------------------
+
+interface ExtensionThemeEntry {
+  extensionId: string;
+  info: TerminalThemeInfo;
+  theme: ITheme;
+}
+
+const EXTENSION_THEMES = new Map<string, ExtensionThemeEntry>();
+
+/**
+ * Replace the entire set of extension-contributed themes. Called by the
+ * extension store whenever contributions change (load, enable, disable).
+ * Entries missing background/foreground are skipped so a bad manifest can
+ * never paint an unreadable terminal.
+ */
+export function syncExtensionThemes(
+  contributed: Array<{
+    extension_id: string;
+    theme_id: string;
+    name: string;
+    theme_type: "dark" | "light";
+    colors: Record<string, string>;
+    preview_colors: readonly string[];
+  }>,
+): void {
+  EXTENSION_THEMES.clear();
+  for (const contribution of contributed) {
+    const { background, foreground } = contribution.colors;
+    if (!background || !foreground) continue;
+    const isDark = contribution.theme_type !== "light";
+    const previewColors = [
+      contribution.preview_colors[0] ?? background,
+      contribution.preview_colors[1] ?? foreground,
+      contribution.preview_colors[2] ?? "#58a6ff",
+      contribution.preview_colors[3] ?? "#4ade80",
+    ] as [string, string, string, string];
+    EXTENSION_THEMES.set(contribution.theme_id, {
+      extensionId: contribution.extension_id,
+      info: {
+        id: contribution.theme_id,
+        name: contribution.name,
+        isDark,
+        previewColors,
+      },
+      theme: { ...contribution.colors },
+    });
+  }
+}
+
+function extensionThemeInfos(): (TerminalThemeInfo & { extensionId: string })[] {
+  return [...EXTENSION_THEMES.values()].map((entry) => ({
+    ...entry.info,
+    extensionId: entry.extensionId,
+  }));
+}
+
+/** True when the id belongs to an extension-contributed theme. */
+export function isExtensionTheme(id: string): boolean {
+  return EXTENSION_THEMES.has(id);
+}
+
+/** The owning extension id for a contributed theme, if any. */
+export function extensionThemeOwner(id: string): string | undefined {
+  return EXTENSION_THEMES.get(id)?.extensionId;
 }

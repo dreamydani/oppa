@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   getTerminalTheme,
   getAllTerminalThemes,
+  syncExtensionThemes,
+  isExtensionTheme,
+  extensionThemeOwner,
   TERMINAL_THEMES,
 } from "./terminalThemes";
 import type { TerminalThemeId } from "../settings/types";
@@ -66,7 +69,8 @@ describe("terminalThemes catalog", () => {
   });
 
   it("falls back to OPPA Dark for unknown theme ID", () => {
-    // @ts-expect-error testing invalid ID fallback
+    // Widened TerminalThemeId admits arbitrary extension ids, so a plain
+    // string type-checks; resolution still falls back to oppa_dark.
     const theme = getTerminalTheme("nonexistent_theme");
     expect(theme.background).toBe(TERMINAL_THEMES.oppa_dark.background);
     expect(theme.foreground).toBe(TERMINAL_THEMES.oppa_dark.foreground);
@@ -83,5 +87,73 @@ describe("terminalThemes catalog", () => {
     // Explicit theme values still win over the defaults.
     const customized = getTerminalTheme("dracula");
     expect(customized.background).toBe(TERMINAL_THEMES.dracula.background);
+  });
+});
+
+describe("extension-contributed themes", () => {
+  beforeEach(() => {
+    syncExtensionThemes([]);
+  });
+
+  const midnight = {
+    extension_id: "oppa.theme-pack",
+    theme_id: "oppa.theme-pack:midnight",
+    name: "Midnight",
+    theme_type: "dark" as const,
+    colors: {
+      background: "#0a0e14",
+      foreground: "#d5d8df",
+      cursor: "#58a6ff",
+      red: "#f87171",
+    },
+    preview_colors: ["#0a0e14", "#d5d8df", "#58a6ff", "#f87171"],
+  };
+
+  it("registers contributed themes into the catalog and resolver", () => {
+    syncExtensionThemes([midnight]);
+
+    const all = getAllTerminalThemes();
+    expect(all.some((t) => t.id === "oppa.theme-pack:midnight")).toBe(true);
+    // Built-ins stay first, contributions appended.
+    expect(all[all.length - 1].id).toBe("oppa.theme-pack:midnight");
+
+    const theme = getTerminalTheme("oppa.theme-pack:midnight");
+    expect(theme.background).toBe("#0a0e14");
+    expect(theme.foreground).toBe("#d5d8df");
+    expect(isExtensionTheme("oppa.theme-pack:midnight")).toBe(true);
+    expect(extensionThemeOwner("oppa.theme-pack:midnight")).toBe("oppa.theme-pack");
+  });
+
+  it("resync replaces the whole set (disable removes themes)", () => {
+    syncExtensionThemes([midnight]);
+    syncExtensionThemes([]);
+    expect(getAllTerminalThemes().some((t) => t.id === "oppa.theme-pack:midnight")).toBe(false);
+    expect(isExtensionTheme("oppa.theme-pack:midnight")).toBe(false);
+    // Resolution falls back to oppa_dark once the contribution is gone.
+    const fallback = getTerminalTheme("oppa.theme-pack:midnight");
+    expect(fallback.background).toBe(TERMINAL_THEMES.oppa_dark.background);
+  });
+
+  it("skips entries missing background or foreground", () => {
+    syncExtensionThemes([
+      {
+        ...midnight,
+        theme_id: "bad:no-background",
+        colors: { foreground: "#ffffff" },
+      },
+      {
+        ...midnight,
+        theme_id: "bad:no-foreground",
+        colors: { background: "#000000" },
+      },
+    ]);
+    expect(getAllTerminalThemes()).toHaveLength(11);
+  });
+
+  it("derives preview swatches when a manifest omits them", () => {
+    syncExtensionThemes([{ ...midnight, preview_colors: [] }]);
+    const entry = getAllTerminalThemes().find((t) => t.id === "oppa.theme-pack:midnight");
+    expect(entry?.previewColors).toHaveLength(4);
+    expect(entry?.previewColors[0]).toBe("#0a0e14");
   });
 });

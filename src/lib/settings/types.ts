@@ -4,6 +4,8 @@ export type TabSwitchMode = "sequential" | "mru";
 export type BrowserSearchEngine = "duckduckgo" | "google" | "bing";
 export type SettingsTabId = "general" | "appearance" | "terminal" | "shortcuts";
 
+// `(string & {})` admits extension-contributed ids (e.g. "oppa.theme-pack:nord")
+// while keeping literal autocompletion for built-ins.
 export type TerminalThemeId =
   | "oppa_dark"
   | "dracula"
@@ -15,7 +17,8 @@ export type TerminalThemeId =
   | "solarized_dark"
   | "ghostty_dark"
   | "github_dark"
-  | "minimal_light";
+  | "minimal_light"
+  | (string & {});
 
 export type TerminalCursorStyle = "block" | "bar" | "underline";
 export type AppThemeMode = "dark" | "light" | "system";
