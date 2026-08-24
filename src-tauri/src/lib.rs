@@ -11,7 +11,7 @@ mod workspace_presets;
 
 use pty::manager::PtyManager;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
@@ -177,6 +177,9 @@ pub fn run() {
             browser::commands::browser_go_forward,
             browser::commands::browser_reload,
             browser::commands::browser_open_devtools,
+            extensions::commands::list_extensions,
+            extensions::commands::set_extension_enabled,
+            extensions::commands::get_contributions,
             confirm_save_complete,
         ])
         .setup(move |app| {
@@ -184,6 +187,20 @@ pub fn run() {
             // The renderer signals that it finished the save via a command.
             // (confirm_save_complete below sets the flag.)
             app.manage(save_done);
+
+            // Extension registry: built-ins + user-installed, honoring the
+            // persisted disabled set. A missing data dir just skips managing
+            // state; commands then fail loudly instead of half-working.
+            if let (Some(user_dir), Some(state_path)) = (
+                app.path().app_data_dir().ok().map(|d| d.join("extensions")),
+                app.path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|d| d.join(extensions::registry::STATE_FILE_NAME)),
+            ) {
+                let registry = extensions::commands::init_registry_at(&user_dir, &state_path);
+                app.manage(extensions::commands::ExtensionsState(Mutex::new(registry)));
+            }
 
             // Pre-warm daemon client in background so first terminal spawn is immediate
             let app_handle = app.handle().clone();

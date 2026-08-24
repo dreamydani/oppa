@@ -55,7 +55,7 @@ File name: `oppa-extension.json` at the root of each extension directory.
           "foreground": "#d5d8df",
           "...": "..."
         },
-        "previewColors": ["#0a0e14", "#d5d8df", "#58a6ff", "#4ade80"] // exactly 4, for the picker swatch
+        "preview_colors": ["#0a0e14", "#d5d8df", "#58a6ff", "#4ade80"] // exactly 4, for the picker swatch
       }
     ]
     // "snippets": [...], "commands": [...] — schema-parsed in M1, consumed by later surfaces.
