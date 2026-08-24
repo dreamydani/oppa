@@ -28,6 +28,10 @@ function themePack(overrides: Partial<ExtensionListItem> = {}): ExtensionListIte
     theme_count: 3,
     snippet_count: 0,
     command_count: 0,
+    is_scriptable: false,
+    capabilities: [],
+    consent_required: false,
+    crash_error: null,
     ...overrides,
   };
 }
