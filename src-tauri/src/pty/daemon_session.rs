@@ -1,9 +1,9 @@
 use crate::pty::ipc_protocol::DaemonEvent;
 use crate::pty::osc_scanner::{OscEvent, OscScanner};
+use crate::pty::output_batcher::{new_drain, run_batcher, BatchCommand, OutputDrain, DEFAULT_FLUSH_INTERVAL_MS};
 use crate::pty::snapshot::AgentSessionRef;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
-use crate::pty::utf8_decoder::Utf8ChunkDecoder;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::Write;
@@ -63,6 +63,9 @@ pub struct DaemonSession {
     pub paused: Arc<AtomicBool>,
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
     pub seq: Arc<AtomicU64>,
+    // Coalesces reader chunks into larger Data events; finish() must run
+    // before Exit is emitted so the tail output always precedes it.
+    pub output_drain: OutputDrain,
     // Output activity tracking for WaitFor::TuiIdle
     pub last_output_at: Arc<Mutex<Instant>>,
     // Some(t) while the last OSC133 D marker is still the freshest output
@@ -194,6 +197,8 @@ impl DaemonSession {
             .map_err(|e| format!("failed to clone pty reader: {e}"))?;
 
         let subscribers = Arc::new(Mutex::new(Vec::new()));
+        let (output_drain, batch_rx, batch_drained_tx) =
+            new_drain();
         let screen_mirror = Arc::new(Mutex::new(ScreenMirror::new(
             cols,
             rows,
@@ -226,6 +231,7 @@ impl DaemonSession {
             paused: Arc::new(AtomicBool::new(false)),
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
+            output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
             last_prompt_end_at: Arc::new(Mutex::new(None)),
         });
@@ -234,6 +240,8 @@ impl DaemonSession {
             Arc::clone(&session),
             reader,
             session.initial_command.clone(),
+            batch_rx,
+            batch_drained_tx,
         );
         Ok(session)
     }
@@ -242,6 +250,8 @@ impl DaemonSession {
         session: Arc<Self>,
         mut reader: Box<dyn std::io::Read + Send>,
         initial_command: Option<String>,
+        batch_rx: std::sync::mpsc::Receiver<crate::pty::output_batcher::BatchCommand>,
+        batch_drained_tx: std::sync::mpsc::Sender<()>,
     ) {
         let id = session.id.clone();
         let session_cwd = Arc::clone(&session.cwd);
@@ -257,7 +267,6 @@ impl DaemonSession {
         let child = Arc::clone(&session.child);
         let screen_mirror = Arc::clone(&session.screen_mirror);
         let subscribers = Arc::clone(&session.subscribers);
-        let seq = Arc::clone(&session.seq);
         let last_output = Arc::clone(&session.last_output_at);
         let last_prompt_end = Arc::clone(&session.last_prompt_end_at);
 
@@ -265,8 +274,33 @@ impl DaemonSession {
         let master_watch = Arc::clone(&master);
         let child_watch = Arc::clone(&child);
         let subscribers_watch = Arc::clone(&session.subscribers);
+        let drain_watch = session.output_drain.clone();
+        let output_drain_reader = session.output_drain.clone();
 
-        // Reader thread: reads PTY output, feeds screen mirror, scans OSC, and emits data events
+        // Output batcher: coalesces raw chunks into larger Data events and
+        // owns the UTF-8 decoder so split code points resolve per batch.
+        {
+            let id_batch = id.clone();
+            let subscribers_batch = Arc::clone(&session.subscribers);
+            let seq_batch = Arc::clone(&session.seq);
+            std::thread::spawn(move || {
+                run_batcher(batch_rx, batch_drained_tx, DEFAULT_FLUSH_INTERVAL_MS, move |data, bytes| {
+                    let seq_num = seq_batch.fetch_add(1, Ordering::SeqCst);
+                    emit_event(
+                        &subscribers_batch,
+                        DaemonEvent::Data {
+                            session_id: id_batch.clone(),
+                            data,
+                            bytes,
+                            seq: seq_num,
+                        },
+                    );
+                });
+            });
+        }
+
+        // Reader thread: reads PTY output, feeds screen mirror, scans OSC,
+        // and hands raw chunks to the output batcher for coalesced emission.
         let initial_command_reader = initial_command.clone();
         let writer_inject = Arc::clone(&writer);
         let written_inject = Arc::clone(&initial_command_written);
@@ -274,7 +308,6 @@ impl DaemonSession {
             let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
-            let mut utf8_decoder = Utf8ChunkDecoder::new();
             loop {
                 if paused.load(Ordering::SeqCst) {
                     if pending.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
@@ -344,17 +377,9 @@ impl DaemonSession {
                         // Feed VT100 virtual screen buffer
                         screen_mirror.lock().process(chunk);
 
-                        // Emit Data event with monotonic sequence number
-                        let seq_num = seq.fetch_add(1, Ordering::SeqCst);
-                        emit_event(
-                            &subscribers,
-                            DaemonEvent::Data {
-                                session_id: id.clone(),
-                                data: utf8_decoder.decode(chunk),
-                                bytes: chunk.len(),
-                                seq: seq_num,
-                            },
-                        );
+                        // Hand raw bytes to the batcher: coalesces into
+                        // larger Data events (≤32KB / ~8ms) before emission.
+                        output_drain_reader.send_chunk(chunk.to_vec());
 
                         // Inject initial command exactly once when the ready marker arrives.
                         // Fallback timeout lives in a timer thread: the reader blocks in
@@ -383,6 +408,9 @@ impl DaemonSession {
                     .map(|status| status.exit_code() as i32);
                 if let Some(code) = exit_code {
                     master_watch.lock().take();
+                    // Tail output must precede Exit: bounded drain of the
+                    // batcher before signalling the child is gone.
+                    drain_watch.finish();
                     emit_event(
                         &subscribers_watch,
                         DaemonEvent::Exit {

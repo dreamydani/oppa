@@ -9,6 +9,7 @@ pub mod daemon_spawner;
 pub mod ipc_protocol;
 pub mod manager;
 pub mod osc_scanner;
+pub mod output_batcher;
 pub mod powershell_bootstrap;
 pub mod runtime_metadata;
 pub mod screen_mirror;
