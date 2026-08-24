@@ -8,6 +8,10 @@ import {
   resetLayoutAnimationGateForTests,
 } from "../lib/layout/layoutAnimationGate";
 import { resetFitCoordinatorForTests, setFitSchedulerForTests } from "../lib/terminal/fitCoordinator";
+import {
+  setFrameSchedulerForTests,
+  resetFrameSchedulerForTests,
+} from "../lib/layout/frameScheduler";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
 import * as opener from "@tauri-apps/plugin-opener";
@@ -257,6 +261,10 @@ describe("TerminalPane", () => {
       rafState.queue.push(cb);
       return rafState.queue.length;
     });
+    // Ack coalescer shares the same deterministic frame pump.
+    setFrameSchedulerForTests((cb) => {
+      rafState.queue.push(cb);
+    });
     // Fresh store: the pane under test renders the "abc" session.
     useTerminalStore.setState({
       sessions: {
@@ -290,6 +298,7 @@ describe("TerminalPane", () => {
     vi.unstubAllGlobals();
     resetLayoutAnimationGateForTests();
     resetFitCoordinatorForTests();
+    resetFrameSchedulerForTests();
     vi.useRealTimers();
   });
 
@@ -320,9 +329,11 @@ describe("TerminalPane", () => {
     dataHandler({ id: "abc", data: "hello\r\n", seq: 1 });
     expect(term().write).toHaveBeenCalledWith("hello\r\n");
 
-    // Simulate xterm finishing parsing: the ACK must fire with the chunk length.
+    // Simulate xterm finishing parsing: the ACK flushes on the next frame
+    // with the chunk length.
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
+    pumpRaf();
     expect(ptyAckMock).toHaveBeenCalledWith("abc", "hello\r\n".length);
   });
 
@@ -510,6 +521,7 @@ describe("TerminalPane", () => {
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
+    pumpRaf(); // ack coalescer flushes on the next frame
     expect(ptyAckMock).toHaveBeenCalledTimes(1);
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 8);
   });
@@ -531,6 +543,7 @@ describe("TerminalPane", () => {
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
+    pumpRaf(); // ack coalescer flushes on the next frame
     expect(ptyAckMock).toHaveBeenCalledTimes(1);
     // 4 + 9 = 13 bytes (instead of 2 + 3 = 5 UTF-16 length)
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 13);

@@ -11,10 +11,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import {
   ptyWrite,
-  onPtyData,
   onPtyExit,
   saveScrollback,
 } from "../lib/pty/transport";
+import { subscribePtyData } from "../lib/pty/dataMultiplexer";
+import { AckCoalescer } from "../lib/pty/ackCoalescer";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
@@ -406,23 +407,30 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }
     };
 
+    // Coalesce ACKs: xterm fires onWriteParsed per write batch; acking each
+    // one floods the IPC channel. Frame-cadence flushes keep the daemon's
+    // watermark math identical while cutting invoke count ~10x.
+    const ackCoalescer = new AckCoalescer((bytes) => {
+      void ackSession(id, bytes).catch(() => {});
+    });
+
     term.onWriteParsed(() => {
       if (parsedRef.current > 0) {
-        ackSession(idRef.current, parsedRef.current);
+        ackCoalescer.add(parsedRef.current);
         parsedRef.current = 0;
       }
     });
 
-    onPtyData((p) => {
-      if (disposed) return;
-      if (p.id === idRef.current) {
-        parsedRef.current += typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
+    // Routed through the shared multiplexer: one global listener dispatches
+    // per session id (O(1)) instead of every pane filtering every event.
+    unsubs.push(
+      subscribePtyData(id, (p) => {
+        if (disposed) return;
+        parsedRef.current +=
+          typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
         term.write(p.data);
-      }
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unsubs.push(unlisten);
-    });
+      }),
+    );
 
     onPtyExit((p) => {
       if (disposed) return;
@@ -517,6 +525,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }
       commitFitRef.current = null;
       flushScrollback();
+      ackCoalescer.dispose();
       unregisterSerializer(idRef.current);
       disposed = true;
       ro.disconnect();
