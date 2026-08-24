@@ -70,7 +70,6 @@ function mockTreeGrowingTo(extraName: string): void {
   let created = false;
   createFileMock.mockImplementation(async () => {
     created = true;
-    return true;
   });
   readDirMock.mockImplementation(async (path: string) => {
     if (path === "/mock/workspace") {
@@ -117,7 +116,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("shows Open in Editor, Open via and Copy as Path for files", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("package.json"));
 
@@ -129,7 +128,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("shows creation items plus Copy as Path for folders", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("src"));
 
@@ -170,7 +169,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("creates a folder inside a right-clicked directory", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("src"));
     fireEvent.click(screen.getByText("New Folder"));
@@ -231,7 +230,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("opens internal editor from the file context menu", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("package.json"));
     fireEvent.click(screen.getByText("Open in Editor"));
@@ -244,7 +243,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("lists detected apps under Open via and launches the chosen one", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("package.json"));
     fireEvent.click(screen.getByText("Open via"));
@@ -259,7 +258,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("offers System Default that opens via OS handler", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("package.json"));
     fireEvent.click(screen.getByText("Open via"));
@@ -271,7 +270,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("copies the full native path to clipboard", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("package.json"));
     fireEvent.click(screen.getByText("Copy as Path"));
@@ -284,7 +283,7 @@ describe("FileExplorer context menus", () => {
   });
 
   it("selects the row under the right-clicked cursor", async () => {
-    const container = await renderExplorer();
+    await renderExplorer();
 
     fireEvent.contextMenu(screen.getByText("src"));
 
