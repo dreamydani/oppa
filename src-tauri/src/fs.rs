@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileEntry {
@@ -8,6 +9,114 @@ pub struct FileEntry {
     pub path: String,
     pub is_dir: bool,
     pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EditorApp {
+    pub name: String,
+    pub command: String,
+}
+
+#[cfg(windows)]
+const EXECUTABLE_EXTENSIONS: &[&str] = &[".com", ".exe", ".bat", ".cmd"];
+
+#[cfg(windows)]
+const EDITOR_CANDIDATES: &[(&str, &str)] = &[
+    ("VS Code", "code"),
+    ("Notepad", "notepad"),
+    ("Notepad++", "notepad++"),
+    ("Sublime Text", "subl"),
+    ("Zed", "zed"),
+];
+
+#[cfg(target_os = "macos")]
+const EDITOR_CANDIDATES: &[(&str, &str)] = &[
+    ("VS Code", "code"),
+    ("Sublime Text", "subl"),
+    ("Zed", "zed"),
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const EDITOR_CANDIDATES: &[(&str, &str)] = &[
+    ("VS Code", "code"),
+    ("gedit", "gedit"),
+    ("Kate", "kate"),
+    ("Sublime Text", "subl"),
+    ("Zed", "zed"),
+];
+
+fn editor_candidates() -> &'static [(&'static str, &'static str)] {
+    EDITOR_CANDIDATES
+}
+
+fn find_in_path(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    // Windows resolves commands through PATHEXT, so `code` matches code.cmd shims
+    let candidates: Vec<String> = if cfg!(windows) {
+        EXECUTABLE_EXTENSIONS
+            .iter()
+            .map(|ext| format!("{command}{ext}"))
+            .collect()
+    } else {
+        vec![command.to_string()]
+    };
+
+    for dir in path_dirs {
+        for candidate in &candidates {
+            let full = dir.join(candidate);
+            if full.is_file() {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub fn fs_detect_editors() -> Vec<EditorApp> {
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+
+    editor_candidates()
+        .iter()
+        .filter(|(_, command)| find_in_path(command, &path_dirs).is_some())
+        .map(|(name, command)| EditorApp {
+            name: name.to_string(),
+            command: command.to_string(),
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = std::process::Command::new("cmd");
+    // `start ""` needs the empty title arg so paths with spaces survive intact;
+    // CREATE_NO_WINDOW keeps the cmd shell from flashing on screen.
+    cmd.args(["/C", "start", "", app, path]);
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(target_os = "macos")]
+fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new("open");
+    cmd.args(["-a", app, path]);
+    cmd
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn build_open_with_command(app: &str, path: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(app);
+    cmd.arg(path);
+    cmd
+}
+
+#[tauri::command]
+pub fn fs_open_with(path: String, app: String) -> Result<(), String> {
+    let mut cmd = build_open_with_command(&app, &path);
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -76,6 +185,16 @@ pub fn fs_write_file(path: String, content: String) -> Result<(), String> {
     }
 
     fs::write(file_path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn fs_create_dir(path: String) -> Result<(), String> {
+    let dir_path = Path::new(&path);
+    if dir_path.exists() {
+        return Err(format!("Path already exists: {}", path));
+    }
+
+    fs::create_dir_all(dir_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -181,6 +300,113 @@ mod tests {
         assert_eq!(content, "");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_create_dir_creates_nested_directories() {
+        let dir = temp_dir("create_dir_nested");
+        let new_dir = dir.join("level1").join("level2");
+        let full_path = new_dir.to_string_lossy().to_string();
+
+        let res = fs_create_dir(full_path);
+        assert!(res.is_ok());
+        assert!(new_dir.is_dir());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_create_dir_already_exists_returns_err() {
+        let dir = temp_dir("create_dir_exists");
+        let existing = dir.join("existing");
+        fs::create_dir(&existing).unwrap();
+
+        let res = fs_create_dir(existing.to_string_lossy().to_string());
+        assert!(res.is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_fs_create_dir_file_conflict_returns_err() {
+        let dir = temp_dir("create_dir_file_conflict");
+        let file_path = dir.join("occupied.txt");
+        File::create(&file_path).unwrap();
+
+        let res = fs_create_dir(file_path.to_string_lossy().to_string());
+        assert!(res.is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_find_in_path_finds_executable_in_path_dir() {
+        let dir = temp_dir("find_in_path_hit");
+        // Windows resolves via PATHEXT so the shim name carries an extension
+        #[cfg(windows)]
+        let exe_name = "code.cmd";
+        #[cfg(not(windows))]
+        let exe_name = "code";
+        File::create(dir.join(exe_name)).unwrap();
+
+        let found = find_in_path("code", &[dir.clone()]);
+        assert_eq!(found, Some(dir.join(exe_name)));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_find_in_path_returns_none_when_missing() {
+        let dir = temp_dir("find_in_path_miss");
+
+        assert_eq!(find_in_path("definitely-not-installed-oppa", &[dir.clone()]), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_editor_candidates_are_well_formed() {
+        let candidates = editor_candidates();
+        assert!(!candidates.is_empty());
+        for (name, command) in candidates {
+            assert!(!name.is_empty());
+            assert!(!command.is_empty());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_build_open_with_command_uses_start_launcher() {
+        let cmd = build_open_with_command("code", "D:\\proj\\file.ts");
+        assert_eq!(cmd.get_program().to_string_lossy(), "cmd");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args, vec!["/C", "start", "", "code", "D:\\proj\\file.ts"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_build_open_with_command_uses_open_dash_a() {
+        let cmd = build_open_with_command("TextEdit", "/tmp/file.txt");
+        assert_eq!(cmd.get_program().to_string_lossy(), "open");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args, vec!["-a", "TextEdit", "/tmp/file.txt"]);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn test_build_open_with_command_executes_app_directly() {
+        let cmd = build_open_with_command("gedit", "/tmp/file.txt");
+        assert_eq!(cmd.get_program().to_string_lossy(), "gedit");
+        assert_eq!(
+            cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>(),
+            vec!["/tmp/file.txt"]
+        );
     }
 
     #[test]
