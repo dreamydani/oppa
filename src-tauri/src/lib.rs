@@ -180,6 +180,8 @@ pub fn run() {
             extensions::commands::list_extensions,
             extensions::commands::set_extension_enabled,
             extensions::commands::get_contributions,
+            extensions::commands::grant_extension_consent,
+            extensions::commands::get_extension_fingerprint,
             confirm_save_complete,
         ])
         .setup(move |app| {

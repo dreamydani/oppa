@@ -2,6 +2,7 @@
 // id (first wins), tracks which ids the user disabled, and persists that set
 // to extensions-state.json. Pure logic here; Tauri wrappers live in commands.rs.
 
+use super::consent::ExtensionConsents;
 use super::discovery::DiscoveredExtension;
 use super::manifest::ExtensionManifest;
 use serde::{Deserialize, Serialize};
@@ -10,10 +11,13 @@ use std::path::Path;
 
 pub const STATE_FILE_NAME: &str = "extensions-state.json";
 
+/// extensions-state.json v2: disabled ids + consent fingerprints + crash notes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ExtensionsStateFile {
     #[serde(default)]
     pub disabled_ids: Vec<String>,
+    #[serde(flatten)]
+    pub consents: ExtensionConsents,
 }
 
 /// Persist the disabled-id set, creating parent directories as needed.
@@ -39,6 +43,7 @@ pub fn load_state_at(path: &Path) -> ExtensionsStateFile {
 pub struct ExtensionRegistry {
     entries: Vec<DiscoveredExtension>,
     disabled_ids: BTreeSet<String>,
+    consents: ExtensionConsents,
 }
 
 impl ExtensionRegistry {
@@ -53,6 +58,7 @@ impl ExtensionRegistry {
                 // Spec: duplicate installed id = later one rejected with reason.
                 if !seen_ids.insert(id.clone()) {
                     entry.manifest = None;
+                    entry.entry_source = None;
                     entry.error = Some(format!(
                         "duplicate extension id '{id}' — an extension with this id is already loaded"
                     ));
@@ -63,7 +69,43 @@ impl ExtensionRegistry {
         Self {
             entries: resolved,
             disabled_ids: disabled_ids.into_iter().collect(),
+            consents: ExtensionConsents::default(),
         }
+    }
+
+    /// Attach persisted consent/error state (builder style, used at boot).
+    pub fn with_consents(mut self, consents: ExtensionConsents) -> Self {
+        self.consents = consents;
+        self
+    }
+
+    /// True when the stored consent matches the given fingerprint exactly.
+    pub fn is_consented(&self, id: &str, fingerprint: &str) -> bool {
+        self.consents.is_consented(id, fingerprint)
+    }
+
+    /// Record a fresh consent grant (and clear any prior crash note).
+    pub fn grant_consent(&mut self, id: &str, fingerprint: String) {
+        self.consents.grant(id, fingerprint);
+    }
+
+    /// Persist a crash/failure message for the panel.
+    pub fn record_error(&mut self, id: &str, message: String) {
+        self.consents.record_error(id, message);
+    }
+
+    /// Drop the crash note (e.g. on a fresh manual enable).
+    pub fn clear_error(&mut self, id: &str) {
+        self.consents.errors.remove(id);
+    }
+
+    /// Last recorded crash/failure message for the extension, if any.
+    pub fn error_for(&self, id: &str) -> Option<&String> {
+        self.consents.errors.get(id)
+    }
+
+    pub fn consents(&self) -> &ExtensionConsents {
+        &self.consents
     }
 
     pub fn entries(&self) -> &[DiscoveredExtension] {
@@ -85,6 +127,8 @@ impl ExtensionRegistry {
         }
         if enabled {
             self.disabled_ids.remove(id);
+            // A fresh manual enable clears any stale crash banner.
+            self.consents.errors.remove(id);
         } else {
             self.disabled_ids.insert(id.to_string());
         }
@@ -119,6 +163,8 @@ mod tests {
             is_builtin: true,
             source_label: m.name.clone(),
             manifest: Some(m),
+            entry_source: None,
+            fingerprint: "test-fp".into(),
             error: None,
         }
     }
@@ -143,6 +189,7 @@ mod tests {
         let path = temp_path("roundtrip");
         let state = ExtensionsStateFile {
             disabled_ids: vec!["a.b".into(), "c.d".into()],
+            consents: Default::default(),
         };
         save_state_at(&path, &state).unwrap();
         assert_eq!(load_state_at(&path), state);
@@ -221,6 +268,8 @@ mod tests {
             is_builtin: false,
             source_label: "broken".into(),
             manifest: None,
+            entry_source: None,
+            fingerprint: String::new(),
             error: Some("bad".into()),
         };
         let mut registry = ExtensionRegistry::from_discovery(vec![broken], vec![]);
@@ -237,13 +286,53 @@ mod tests {
             &path,
             &ExtensionsStateFile {
                 disabled_ids: registry.disabled_ids(),
+                consents: Default::default(),
             },
         )
         .unwrap();
 
-        let restored =
-            ExtensionRegistry::from_discovery(vec![ok_entry(PACK_A)], load_state_at(&path).disabled_ids);
+        let restored = ExtensionRegistry::from_discovery(
+            vec![ok_entry(PACK_A)],
+            load_state_at(&path).disabled_ids,
+        );
         assert!(!restored.is_enabled("acme.pack-a"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn consents_persist_through_state_file_round_trip() {
+        let path = temp_path("consent");
+        let mut registry = ExtensionRegistry::from_discovery(vec![ok_entry(PACK_A)], vec![])
+            .with_consents(Default::default());
+        assert!(!registry.is_consented("acme.pack-a", "test-fp"));
+
+        registry.grant_consent("acme.pack-a", "test-fp".into());
+        registry.record_error("acme.pack-b", "crashed hard".into());
+        save_state_at(
+            &path,
+            &ExtensionsStateFile {
+                disabled_ids: vec![],
+                consents: registry.consents().clone(),
+            },
+        )
+        .unwrap();
+
+        let loaded = load_state_at(&path);
+        let restored =
+            ExtensionRegistry::from_discovery(vec![ok_entry(PACK_A)], loaded.disabled_ids)
+                .with_consents(loaded.consents);
+        assert!(restored.is_consented("acme.pack-a", "test-fp"));
+        assert_eq!(restored.error_for("acme.pack-b").map(String::as_str), Some("crashed hard"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn v1_state_file_without_consents_still_loads() {
+        let path = temp_path("v1compat");
+        std::fs::write(&path, r#"{ "disabled_ids": ["a.b"] }"#).unwrap();
+        let state = load_state_at(&path);
+        assert_eq!(state.disabled_ids, vec!["a.b".to_string()]);
+        assert!(state.consents.consents.is_empty());
         fs::remove_file(&path).ok();
     }
 }
