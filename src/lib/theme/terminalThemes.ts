@@ -350,7 +350,10 @@ export function getTerminalTheme(id: TerminalThemeId): ITheme {
   // these theme slots; defaults are raised-alpha (stock ~0.2 is nearly
   // invisible) and spread first so explicit theme values win.
   return {
-    overviewRulerBorder: "transparent",
+    // Must be parseable hex, not the named color "transparent": xterm's
+    // css.toColor rejects named colors and falls back to #ffffff, painting a
+    // constant white 1px ruler outline at the gutter edge.
+    overviewRulerBorder: "#00000000",
     // Neutral translucent thumb: reads as a slim dark scrollbar on dark
     // themes without the near-white bar the previous 0.4-alpha light gray
     // produced at full height.

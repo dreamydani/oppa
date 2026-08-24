@@ -74,7 +74,9 @@ describe("terminalThemes catalog", () => {
 
   it("injects scrollbar slider slots into every returned theme", () => {
     const theme = getTerminalTheme("oppa_dark");
-    expect(theme.overviewRulerBorder).toBe("transparent");
+    // Regression: named "transparent" throws in xterm's css.toColor and falls
+    // back to its #ffffff default, painting a white 1px ruler outline.
+    expect(theme.overviewRulerBorder).toBe("#00000000");
     expect(theme.scrollbarSliderBackground).toBe("rgba(140, 140, 148, 0.28)");
     expect(theme.scrollbarSliderHoverBackground).toBe("rgba(140, 140, 148, 0.45)");
     expect(theme.scrollbarSliderActiveBackground).toBe("rgba(140, 140, 148, 0.6)");
