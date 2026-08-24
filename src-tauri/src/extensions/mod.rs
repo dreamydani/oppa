@@ -3,5 +3,6 @@
 pub mod commands;
 pub mod consent;
 pub mod discovery;
+pub mod host;
 pub mod manifest;
 pub mod registry;
