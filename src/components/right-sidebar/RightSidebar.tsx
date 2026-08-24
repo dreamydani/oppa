@@ -1,5 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
+import {
+  SIDEBAR_CLOSE_MS,
+  SIDEBAR_OPEN_MS,
+  SLIDE_EASING,
+  SlideDrawer,
+} from "../../lib/layout/sideDrawer";
 import { ActivityBar } from "./ActivityBar";
 import { FileExplorer } from "./FileExplorer";
 import { GitSourceControl } from "./GitSourceControl";
@@ -17,6 +23,28 @@ export function RightSidebar(): React.ReactElement {
   // cursor 1:1 instead of easing behind it.
   const [isResizing, setIsResizing] = useState(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
+  const asideRef = useRef<HTMLElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+
+  // Compositor drawer mirroring LeftSidebar (see sideDrawer.ts).
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const drawer = new SlideDrawer({
+      el,
+      innerEl: innerRef.current,
+      direction: "right",
+      openMs: SIDEBAR_OPEN_MS,
+      closeMs: SIDEBAR_CLOSE_MS,
+      easing: SLIDE_EASING,
+      gapPx: 4,
+      parallaxPx: 44,
+      suppressMotion: () =>
+        !document.querySelector(".app-container.app-booted"),
+    });
+    drawer.sync(rightSidebarOpen);
+    return () => drawer.dispose();
+  }, [rightSidebarOpen]);
 
   const handleRefresh = () => {
     setRefreshKey((prev) => prev + 1);
@@ -49,10 +77,11 @@ export function RightSidebar(): React.ReactElement {
 
   return (
     <aside
-      className={`right-sidebar${rightSidebarOpen ? "" : " closed"}${isResizing ? " is-resizing" : ""}`}
+      ref={asideRef}
+      className={`right-sidebar${isResizing ? " is-resizing" : ""}`}
       style={{ "--sidebar-w": `${rightSidebarWidth}px` } as React.CSSProperties}
     >
-      <div className="sidebar-slide-inner">
+      <div ref={innerRef} className="sidebar-slide-inner">
         <div className="right-sidebar-inner-row">
           <ActivityBar onRefresh={handleRefresh} />
           <div className="right-sidebar-content">

@@ -165,13 +165,6 @@
   background-color: var(--topbar-bg, #000000);
 }
 
-/* Until boot settles, sidebar state flips (sidebarOnLaunch) must not animate. */
-.app-container:not(.app-booted) .left-sidebar,
-.app-container:not(.app-booted) .right-sidebar,
-.app-container:not(.app-booted) .sidebar-slide-inner {
-  transition: none !important;
-}
-
 /* ==========================================================================
    TitleBar (Top Window Header)
    ========================================================================== */

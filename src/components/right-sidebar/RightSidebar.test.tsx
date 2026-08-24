@@ -92,12 +92,14 @@ describe("RightSidebar", () => {
     expect(screen.getByTitle("Refresh")).toBeDefined();
   });
 
-  it("renders with the closed class instead of unmounting when rightSidebarOpen is false", () => {
+  it("keeps a closed sidebar mounted, hidden via the drawer instead of unmounting", () => {
     useTerminalStore.setState({ rightSidebarOpen: false });
     const { container } = render(<RightSidebar />);
     const aside = container.querySelector("aside.right-sidebar");
     expect(aside).not.toBeNull();
-    expect(aside!.className).toContain("closed");
+    // Drawer snap path (pre-boot suppression in tests): detached + hidden.
+    expect((aside as HTMLElement).style.visibility).toBe("hidden");
+    expect((aside as HTMLElement).style.position).toBe("absolute");
   });
 
   it("exposes the store width via the --sidebar-w custom property", () => {

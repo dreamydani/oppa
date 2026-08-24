@@ -2,6 +2,12 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Sparkles, GitBranch } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
+import {
+  SIDEBAR_CLOSE_MS,
+  SIDEBAR_OPEN_MS,
+  SLIDE_EASING,
+  SlideDrawer,
+} from "../lib/layout/sideDrawer";
 import { WorktreePane } from "./worktree/WorktreePane";
 import {
   SearchIcon,
@@ -39,6 +45,31 @@ export function LeftSidebar(): React.ReactElement {
   // cursor 1:1 instead of easing behind it.
   const [isResizing, setIsResizing] = useState(false);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+
+  // Compositor drawer: transform-only open/close (see sideDrawer.ts). Inline
+  // motion styles are invisible to React's style diffing, so they survive
+  // re-renders; unmount/remount re-syncs from the store.
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const drawer = new SlideDrawer({
+      el,
+      innerEl: innerRef.current,
+      direction: "left",
+      openMs: SIDEBAR_OPEN_MS,
+      closeMs: SIDEBAR_CLOSE_MS,
+      easing: SLIDE_EASING,
+      gapPx: 4,
+      parallaxPx: 44,
+      // The sidebarOnLaunch flip must apply silently before boot settles.
+      suppressMotion: () =>
+        !document.querySelector(".app-container.app-booted"),
+    });
+    drawer.sync(leftSidebarOpen);
+    return () => drawer.dispose();
+  }, [leftSidebarOpen]);
 
   useEffect(() => {
     if (editingTabId) {
@@ -143,10 +174,11 @@ export function LeftSidebar(): React.ReactElement {
 
   return (
     <aside
-      className={`left-sidebar${leftSidebarOpen ? "" : " closed"}${isResizing ? " is-resizing" : ""}`}
+      ref={asideRef}
+      className={`left-sidebar${isResizing ? " is-resizing" : ""}`}
       style={{ "--sidebar-w": `${leftSidebarWidth}px` } as React.CSSProperties}
     >
-      <div className="sidebar-slide-inner">
+      <div ref={innerRef} className="sidebar-slide-inner">
         <div className="left-sidebar-top">
         <div className="sidebar-search-strip">
           <div className="sidebar-search-box">
