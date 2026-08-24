@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { useTerminalStore, DEFAULT_APP_SETTINGS } from "../store/terminalStore";
 import { getTerminalTheme } from "../lib/theme/terminalThemes";
+import {
+  beginLayoutAnimation,
+  endLayoutAnimation,
+  resetLayoutAnimationGateForTests,
+} from "../lib/layout/layoutAnimationGate";
 import { TerminalPane } from "./TerminalPane";
 import * as transport from "../lib/pty/transport";
 import * as opener from "@tauri-apps/plugin-opener";
@@ -219,6 +224,7 @@ function fireResize() {
 describe("TerminalPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetLayoutAnimationGateForTests();
     xtermState.instances.length = 0;
     addonState.fitInstances.length = 0;
     addonState.unicode11Instances.length = 0;
@@ -259,6 +265,7 @@ describe("TerminalPane", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    resetLayoutAnimationGateForTests();
     vi.useRealTimers();
   });
 
@@ -315,6 +322,31 @@ describe("TerminalPane", () => {
     // PTY resize is debounced (100ms) to avoid ConPTY prompt-redraw storms
     expect(ptyResizeMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(100);
+    expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
+  });
+
+  it("defers container-resize fits while a layout animation is active and commits once after it ends", async () => {
+    vi.useFakeTimers();
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    // Let the mount/settle/font fit passes land before arming the gate.
+    vi.advanceTimersByTime(500);
+    ptyResizeMock.mockClear();
+
+    beginLayoutAnimation("sidebar-left", 380);
+    term().cols = 120;
+    term().rows = 40;
+
+    fireResize();
+    fireResize();
+    // Stay inside the gate's safety-expiry window (duration + margin).
+    vi.advanceTimersByTime(400);
+    // Gate active: no fit, no PTY notify despite resizes.
+    expect(ptyResizeMock).not.toHaveBeenCalled();
+
+    endLayoutAnimation("sidebar-left");
+    vi.advanceTimersByTime(100);
+    expect(ptyResizeMock).toHaveBeenCalledTimes(1);
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 120, 40);
   });
 

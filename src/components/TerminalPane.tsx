@@ -19,6 +19,10 @@ import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import { planFullBleed } from "../lib/terminal/fullBleedFit";
+import {
+  isLayoutAnimating,
+  runWhenLayoutIdle,
+} from "../lib/layout/layoutAnimationGate";
 import { getTerminalTheme } from "../lib/theme/terminalThemes";
 import { TerminalSearch } from "./TerminalSearch";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
@@ -472,7 +476,21 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       };
       step();
     };
-    const ro = new ResizeObserver(runStableFit);
+    // During a layout animation (drawer slide, etc.) container sizes change
+    // every frame; defer so the grid commits exactly once after it ends.
+    let fitDeferredWhileAnimating = false;
+    const ro = new ResizeObserver(() => {
+      if (!isLayoutAnimating()) {
+        runStableFit();
+        return;
+      }
+      if (fitDeferredWhileAnimating) return;
+      fitDeferredWhileAnimating = true;
+      runWhenLayoutIdle(() => {
+        fitDeferredWhileAnimating = false;
+        if (!disposed) runStableFit();
+      });
+    });
     ro.observe(containerRef.current!);
     commitFitRef.current = commitFit;
 
