@@ -16,6 +16,7 @@ import {
 } from "../lib/pty/transport";
 import { subscribePtyData } from "../lib/pty/dataMultiplexer";
 import { AckCoalescer } from "../lib/pty/ackCoalescer";
+import { onNextFrame } from "../lib/layout/frameScheduler";
 import {
   acquireGlSlot,
   releaseGlSlot,
@@ -285,12 +286,20 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // fit-rounding leftover below the last row is seamless (no two-tone gap).
     paintSessionSurface(currentTheme.background);
 
-    // GPU renderer lifecycle under a process-wide context budget: the
-    // registry downgrades LRU panes to Canvas (never DOM) when a new pane
-    // needs a slot, and focus upgrades back.
+    // GPU renderer lifecycle under a process-wide context budget: every pane
+    // loads WebGL at mount (registry downgrades LRU panes to Canvas — never
+    // DOM — when a new pane needs a slot, and focus upgrades back). Renderer
+    // swaps re-measure cell metrics, so each swap schedules a refit: the
+    // stretch plan must match the renderer that will draw it.
     let activeRenderer: "webgl" | "canvas" | null = null;
     let webglAddon: WebglAddon | null = null;
     let canvasAddon: CanvasAddon | null = null;
+    const refitAfterRendererSwap = () => {
+      onNextFrame(() => {
+        if (disposed) return;
+        runWhenLayoutIdle(commitFit);
+      });
+    };
     const downgradeToCanvas = () => {
       if (activeRenderer !== "webgl") return;
       try {
@@ -301,10 +310,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         canvasAddon = new CanvasAddon();
         term.loadAddon(canvasAddon);
         activeRenderer = "canvas";
+        refitAfterRendererSwap();
       } catch {}
     };
     const ensureWebgl = (): void => {
       if (activeRenderer === "webgl") return;
+      const upgradedFromCanvas = activeRenderer === "canvas";
       acquireGlSlot(id, downgradeToCanvas);
       try {
         const gl = new WebglAddon();
@@ -314,7 +325,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           } catch {}
           downgradeToCanvas();
         });
-        if (activeRenderer === "canvas") {
+        if (upgradedFromCanvas) {
           try {
             canvasAddon?.dispose();
           } catch {}
@@ -323,6 +334,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         term.loadAddon(gl);
         webglAddon = gl;
         activeRenderer = "webgl";
+        if (upgradedFromCanvas) {
+          refitAfterRendererSwap();
+        }
       } catch {
         try {
           canvasAddon = new CanvasAddon();
@@ -332,6 +346,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }
     };
     ensureWebglRef.current = ensureWebgl;
+    // Mount-time load is mandatory: skipping it leaves unfocused panes on
+    // the DOM renderer (different cell metrics, worse glyphs) until focus.
+    ensureWebgl();
 
     if (restoredScrollback) {
       term.reset();
@@ -364,14 +381,18 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       fontSettleCancelled = true;
     });
 
-    // Settle-time refit: App applies root UI zoom in a parent effect AFTER
-    // this child effect runs, which shifts measured widths. A short delayed
-    // refit absorbs that pass without dropping any PTY output.
-    const settleTimer = setTimeout(() => {
-      if (disposed) return;
-      commitFit();
-    }, 150);
-    unsubs.push(() => clearTimeout(settleTimer));
+    // Startup quality settle: several transients land after the first fit
+    // (root UI zoom applied by a parent effect, drawer geometry, font swap,
+    // warm-reattach replay). Checkpoints revalidate the stretch plan until
+    // things converge; each is a near-free no-op when nothing changed, and
+    // they defer while a layout animation is in flight.
+    for (const settleDelayMs of [150, 450, 900]) {
+      const settleTimer = setTimeout(() => {
+        if (disposed) return;
+        runWhenLayoutIdle(commitFit);
+      }, settleDelayMs);
+      unsubs.push(() => clearTimeout(settleTimer));
+    }
 
     // Attach keyboard shortcut for Ctrl+F / Cmd+F and Escape
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
@@ -591,11 +612,14 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   ]);
 
   // Focus drives the GL budget: refresh recency so this pane is never the
-  // LRU victim while active, and upgrade back to WebGL if it was downgraded.
+  // LRU victim while active, upgrade back to WebGL if it was downgraded, and
+  // revalidate stretch+grid — a cheap no-op chain when healthy, a self-heal
+  // when any input (renderer, geometry, font) went stale since the last fit.
   useEffect(() => {
     if (!isFocused) return;
     touchGlSlot(id);
     ensureWebglRef.current?.();
+    runWhenLayoutIdle(() => commitFitRef.current?.());
   }, [isFocused, id]);
 
   useEffect(() => {

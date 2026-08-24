@@ -52,6 +52,9 @@ const addonState = vi.hoisted(() => ({
   webLinksInstances: [] as { handler?: (event: MouseEvent, uri: string) => void }[],
   webglInstances: [] as { onContextLoss: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; contextLossCallback?: () => void }[],
   canvasInstances: [] as unknown[],
+  // When true the WebglAddon constructor throws (simulates no-GL context),
+  // forcing the Canvas fallback so focus-upgrade paths can be exercised.
+  webglShouldThrow: false,
 }));
 
 vi.mock("@xterm/xterm", () => {
@@ -155,6 +158,9 @@ vi.mock("@xterm/addon-webgl", () => {
     dispose = vi.fn();
     contextLossCallback?: () => void;
     constructor() {
+      if (addonState.webglShouldThrow) {
+        throw new Error("webgl context unavailable");
+      }
       addonState.webglInstances.push(this);
     }
   }
@@ -253,6 +259,7 @@ describe("TerminalPane", () => {
     addonState.webLinksInstances.length = 0;
     addonState.webglInstances.length = 0;
     addonState.canvasInstances.length = 0;
+    addonState.webglShouldThrow = false;
     roState.callback = null;
     rafState.queue = [];
     // Deterministic frame pump for the fit coordinator (no global stubbing,
@@ -751,6 +758,74 @@ describe("TerminalPane", () => {
 
     expect(webglInstance.dispose).toHaveBeenCalled();
     expect(addonState.canvasInstances.length).toBe(1);
+  });
+
+  it("refits after a focus-driven Canvas→WebGL renderer swap (stale-stretch gap fix)", async () => {
+    vi.useFakeTimers();
+    // Mount without GL: pane falls back to Canvas, stretch plan is computed
+    // against Canvas cell metrics.
+    addonState.webglShouldThrow = true;
+    render(<TerminalPane id="abc" path={[1]} />);
+    await waitForSpawned();
+    expect(addonState.canvasInstances.length).toBe(1);
+    expect(addonState.webglInstances.length).toBe(0);
+
+    // Flush every startup fit pass (settle timer etc.) to get a baseline.
+    vi.advanceTimersByTime(1000);
+    const fitCalls = () => addonState.fitInstances[0]!.fit.mock.calls.length;
+    const baseline = fitCalls();
+
+    // GL becomes available; focusing the pane upgrades the renderer.
+    addonState.webglShouldThrow = false;
+    act(() => {
+      useTerminalStore.setState({ focusedPath: [1] });
+    });
+
+    expect(addonState.webglInstances.length).toBe(1); // mount attempt threw; swap created exactly one
+    pumpRaf(); // the post-swap refit is scheduled on the next frame
+    expect(fitCalls()).toBeGreaterThan(baseline);
+  });
+
+  it("revalidates grid + PTY size when a pane gains focus (self-heal)", async () => {
+    vi.useFakeTimers();
+    render(<TerminalPane id="abc" path={[1]} />);
+    await waitForSpawned();
+    vi.advanceTimersByTime(1000);
+    ptyResizeMock.mockClear();
+
+    // Stale geometry: the grid the PTY knows (80x24) no longer matches.
+    term().cols = 100;
+    term().rows = 30;
+
+    act(() => {
+      useTerminalStore.setState({ focusedPath: [1] });
+    });
+    pumpRaf();
+    vi.advanceTimersByTime(100);
+    expect(ptyResizeMock).toHaveBeenCalledWith("abc", 100, 30);
+  });
+
+  it("revalidates rendering at extended startup checkpoints (150/450/900ms)", async () => {
+    vi.useFakeTimers();
+    render(<TerminalPane id="abc" path={[1]} />);
+    await waitForSpawned();
+    const fitCalls = () => addonState.fitInstances[0]!.fit.mock.calls.length;
+    const initial = fitCalls();
+
+    // Startup transients (root zoom, drawer settle, late replay) land after
+    // the first fit; each checkpoint revalidates so the stretch plan
+    // converges without user intervention.
+    vi.advanceTimersByTime(200);
+    const after150 = fitCalls();
+    expect(after150).toBeGreaterThan(initial);
+
+    vi.advanceTimersByTime(300); // t=500ms: second checkpoint fired
+    const after450 = fitCalls();
+    expect(after450).toBeGreaterThan(after150);
+
+    vi.advanceTimersByTime(500); // t=1000ms: third checkpoint fired
+    const after900 = fitCalls();
+    expect(after900).toBeGreaterThan(after450);
   });
 
   it("opens URL via Tauri opener on link click with window.open fallback", async () => {
