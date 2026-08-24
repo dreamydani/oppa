@@ -351,9 +351,12 @@ export function getTerminalTheme(id: TerminalThemeId): ITheme {
   // invisible) and spread first so explicit theme values win.
   return {
     overviewRulerBorder: "transparent",
-    scrollbarSliderBackground: "rgba(180, 180, 185, 0.4)",
-    scrollbarSliderHoverBackground: "rgba(180, 180, 185, 0.6)",
-    scrollbarSliderActiveBackground: "rgba(180, 180, 185, 0.8)",
+    // Neutral translucent thumb: reads as a slim dark scrollbar on dark
+    // themes without the near-white bar the previous 0.4-alpha light gray
+    // produced at full height.
+    scrollbarSliderBackground: "rgba(140, 140, 148, 0.28)",
+    scrollbarSliderHoverBackground: "rgba(140, 140, 148, 0.45)",
+    scrollbarSliderActiveBackground: "rgba(140, 140, 148, 0.6)",
     ...base,
   };
 }

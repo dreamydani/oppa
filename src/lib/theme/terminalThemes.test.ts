@@ -75,9 +75,9 @@ describe("terminalThemes catalog", () => {
   it("injects scrollbar slider slots into every returned theme", () => {
     const theme = getTerminalTheme("oppa_dark");
     expect(theme.overviewRulerBorder).toBe("transparent");
-    expect(theme.scrollbarSliderBackground).toBe("rgba(180, 180, 185, 0.4)");
-    expect(theme.scrollbarSliderHoverBackground).toBe("rgba(180, 180, 185, 0.6)");
-    expect(theme.scrollbarSliderActiveBackground).toBe("rgba(180, 180, 185, 0.8)");
+    expect(theme.scrollbarSliderBackground).toBe("rgba(140, 140, 148, 0.28)");
+    expect(theme.scrollbarSliderHoverBackground).toBe("rgba(140, 140, 148, 0.45)");
+    expect(theme.scrollbarSliderActiveBackground).toBe("rgba(140, 140, 148, 0.6)");
     // Explicit theme values still win over the defaults.
     const customized = getTerminalTheme("dracula");
     expect(customized.background).toBe(TERMINAL_THEMES.dracula.background);

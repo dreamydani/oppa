@@ -987,8 +987,8 @@ describe("TerminalPane", () => {
     const { container } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
-    // 813x600 CSS px pane minus the 7px ruler band = the planner budget;
-    // with an 8x16 device cell the plan lands on spacing -1 / pitch 20.5/16.
+    // 813x600 CSS px pane minus the 4px ruler band = the planner budget;
+    // with an 8x16 device cell the plan lands on spacing 0 / pitch 20.5/16.
     const paneEl = container.querySelector(".terminal-pane")!;
     Object.defineProperty(paneEl, "getBoundingClientRect", {
       configurable: true,
@@ -1013,7 +1013,7 @@ describe("TerminalPane", () => {
     t.rows = 30;
 
     fireResize();
-    expect(t.options.letterSpacing).toBe(-1);
+    expect(t.options.letterSpacing).toBe(0);
     expect(t.options.lineHeight).toBeCloseTo(20.5 / 16, 10);
     // Well past the debounce AND the mount settle timer so fake-clock skew
     // from vi.waitFor polling cannot strand the pending resize.

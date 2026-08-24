@@ -106,7 +106,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       altClickMovesCursor: true,
       // Slim VS Code-style scrollbar: xterm's DOM slider reserves this width
       // (default 14) and overlays the canvas edge; FitAddon ignores it.
-      overviewRuler: { width: 7 },
+      // 4px pairs with the symmetric 4px left pad in TerminalPane.css so the
+      // grid sits centered with hairline gaps on both sides.
+      overviewRuler: { width: 4 },
       theme: currentTheme,
       allowProposedApi: true,
     });

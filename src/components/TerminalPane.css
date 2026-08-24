@@ -112,8 +112,20 @@
   width: 0;
 }
 
+/* Symmetric centering: FitAddon (and readFitBudget) subtract .xterm padding
+   plus the 4px ruler gutter from the grid budget, so a matching left pad
+   splits the leftover evenly — 4px | grid | 4px. */
+.terminal-pane .xterm {
+  padding-left: 4px;
+}
+
 .terminal-pane .xterm-scrollable-element > .scrollbar > .slider {
   border-radius: 4px;
+}
+
+/* Track stays invisible; only the thumb shows. */
+.terminal-pane .xterm-scrollable-element > .scrollbar {
+  background-color: transparent !important;
 }
 
 
