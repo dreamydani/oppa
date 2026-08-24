@@ -8,9 +8,10 @@ use std::fmt;
 
 pub const MANIFEST_FILE_NAME: &str = "oppa-extension.json";
 
-/// Closed set of host capabilities an extension may declare. M1 is declarative:
-/// contributions are pure data, so no capability exists yet and ANY entry fails.
-pub const KNOWN_CAPABILITIES: &[&str] = &[];
+/// Closed set of host capabilities an extension may declare (Phase 2 set).
+/// Declarative extensions need none; anything outside this list fails loudly.
+pub const KNOWN_CAPABILITIES: &[&str] =
+    &["notifications", "storage", "terminal:write", "events"];
 
 /// Hard limits keep a broken manifest from ballooning the registry.
 pub const MAX_CONTRIBUTIONS_PER_KIND: usize = 64;
@@ -96,6 +97,9 @@ pub struct ExtensionManifest {
     pub description: String,
     pub engines: Engines,
     pub capabilities: Vec<String>,
+    /// Entry script for scriptable extensions. Presence makes the extension
+    /// scriptable; must be a bare file name (no directory traversal).
+    pub main: Option<String>,
     pub contributes: Contributions,
 }
 
@@ -108,9 +112,15 @@ impl Default for ExtensionManifest {
             description: String::new(),
             engines: Engines::default(),
             capabilities: Vec::new(),
+            main: None,
             contributes: Contributions::default(),
         }
     }
+}
+
+/// True when this manifest ships executable code (Phase 2 scriptable extension).
+pub fn is_scriptable(m: &ExtensionManifest) -> bool {
+    m.main.is_some()
 }
 
 /// Parse JSON into a manifest without semantic validation (discovery uses this
@@ -124,6 +134,7 @@ pub fn validate_manifest(m: &ExtensionManifest) -> Result<(), ManifestError> {
     validate_id(&m.id)?;
     validate_version(&m.version)?;
     validate_capabilities(&m.capabilities)?;
+    validate_main(&m.main)?;
     validate_contribution_limits(m)?;
     validate_themes(m)
 }
@@ -169,11 +180,33 @@ fn validate_capabilities(capabilities: &[String]) -> Result<(), ManifestError> {
     for cap in capabilities {
         if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
             return Err(ManifestError(format!(
-                "unknown capability '{cap}': declarative extensions need none, host capabilities do not exist yet"
+                "unknown capability '{cap}': allowed capabilities are {KNOWN_CAPABILITIES:?}"
             )));
         }
     }
     Ok(())
+}
+
+/// `main` must be a bare file name — no separators, no traversal, sane charset.
+fn validate_main(main: &Option<String>) -> Result<(), ManifestError> {
+    let Some(name) = main else {
+        return Ok(());
+    };
+    let valid = !name.is_empty()
+        && name.len() <= 128
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(ManifestError(format!(
+            "invalid main '{name}': expected a bare file name (e.g. \"main.js\")"
+        )))
+    }
 }
 
 fn validate_contribution_limits(m: &ExtensionManifest) -> Result<(), ManifestError> {
@@ -264,6 +297,7 @@ mod tests {
             description: "Extra terminal themes.".into(),
             engines: Engines::default(),
             capabilities: vec![],
+            main: None,
             contributes: Contributions::default(),
         }
     }
@@ -331,18 +365,21 @@ mod tests {
     }
 
     #[test]
-    fn any_capability_fails_in_m1_closed_set() {
+    fn known_capabilities_pass_unknown_fail() {
         let mut m = base_manifest();
-        m.capabilities = vec!["terminal:write".into()];
+        m.capabilities = vec!["notifications".into(), "terminal:write".into()];
+        assert_eq!(validate_manifest(&m), Ok(()));
+
+        m.capabilities = vec!["network:fetch".into()];
         let err = validate_manifest(&m).unwrap_err();
         assert!(err.0.contains("unknown capability"));
     }
 
     #[test]
-    fn known_capability_placeholder_passes_when_added_to_set() {
-        // Guards that the closed-set check actually consults KNOWN_CAPABILITIES.
+    fn capability_check_consults_closed_set_not_prefixes() {
+        // Guards against a startswith/prefix implementation sneaking in.
         let mut m = base_manifest();
-        m.capabilities = vec!["future:capability".into()];
+        m.capabilities = vec!["notifications:extra".into()];
         assert!(validate_manifest(&m).is_err());
     }
 
@@ -445,5 +482,40 @@ mod tests {
         assert_eq!(m.engines, Engines::default());
         assert!(m.capabilities.is_empty());
         assert_eq!(validate_manifest(&m), Ok(()));
+    }
+
+    #[test]
+    fn scriptable_manifest_with_main_parses_and_flags() {
+        let json = r##"{
+            "id": "acme.notifier",
+            "name": "Notifier",
+            "version": "1.0.0",
+            "main": "main.js",
+            "capabilities": ["notifications", "events"]
+        }"##;
+        let m = parse_manifest(json).unwrap();
+        assert!(is_scriptable(&m));
+        assert_eq!(validate_manifest(&m), Ok(()));
+
+        // Declarative manifests stay non-scriptable.
+        assert!(!is_scriptable(&base_manifest()));
+    }
+
+    #[test]
+    fn rejects_path_traversal_in_main() {
+        for bad in ["../evil.js", "sub/dir/main.js", "back\\slash.js", "", ".."] {
+            let mut m = base_manifest();
+            m.main = Some(bad.into());
+            assert!(
+                validate_manifest(&m).is_err(),
+                "expected main '{bad}' to be rejected"
+            );
+        }
+        // Plain names pass.
+        for good in ["main.js", "entry-2.js", "index.mjs"] {
+            let mut m = base_manifest();
+            m.main = Some(good.into());
+            assert_eq!(validate_manifest(&m), Ok(()), "'{good}' should be valid");
+        }
     }
 }
