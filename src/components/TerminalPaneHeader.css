@@ -1,12 +1,12 @@
-/* Terminal Pane Header — colors follow the system theme tokens (never the
-   independent xterm terminal themes). */
+/* Terminal Pane Header — surface follows the session's live xterm theme bg
+   (--session-term-bg, set by TerminalPane) so header + canvas read as one
+   seamless surface; text/icon colors still follow the system theme tokens. */
 
 .terminal-pane-header {
   height: 34px;
   min-height: 34px;
   max-height: 34px;
-  background-color: var(--bg-terminal);
-  border-bottom: 1px solid var(--border);
+  background-color: var(--session-term-bg, var(--bg-terminal));
   box-shadow: inset 0 1px 0 var(--tint-hover);
   display: flex;
   align-items: center;
@@ -20,26 +20,11 @@
   position: relative;
   z-index: 10;
   border-radius: 6px 6px 0 0;
-  transition: border-color 0.15s ease;
-}
-
-.pane-leaf.focused .terminal-pane-header {
-  border-bottom-color: var(--border-strong);
-}
-
-/* Light system theme: header chrome goes light even though terminal content
-   keeps its own independent dark xterm themes. */
-[data-theme="light"] .terminal-pane-header {
-  background-color: var(--bg-sidebar);
 }
 
 /* Restore-glyph mask must always match the header surface above */
 .icon-minimize-mask {
-  fill: var(--bg-terminal);
-}
-
-[data-theme="light"] .icon-minimize-mask {
-  fill: var(--bg-sidebar);
+  fill: var(--session-term-bg, var(--bg-terminal));
 }
 
 .terminal-pane-header-left {
