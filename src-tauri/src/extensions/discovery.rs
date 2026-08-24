@@ -8,15 +8,18 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiscoveredExtension {
     pub is_builtin: bool,
+    /// Directory name / built-in label so errored entries can still be shown.
+    pub source_label: String,
     /// Present iff parse + validation succeeded.
     pub manifest: Option<ExtensionManifest>,
     /// Human-readable reason when the extension failed to load.
     pub error: Option<String>,
 }
 
-fn errored(is_builtin: bool, message: String) -> DiscoveredExtension {
+fn errored(is_builtin: bool, source_label: String, message: String) -> DiscoveredExtension {
     DiscoveredExtension {
         is_builtin,
+        source_label,
         manifest: None,
         error: Some(message),
     }
@@ -33,12 +36,13 @@ pub fn discover_builtins_from(manifest_jsons: &[&str]) -> Vec<DiscoveredExtensio
             Ok(m) => match validate_manifest(&m) {
                 Ok(()) => DiscoveredExtension {
                     is_builtin: true,
+                    source_label: m.name.clone(),
                     manifest: Some(m),
                     error: None,
                 },
-                Err(e) => errored(true, e.to_string()),
+                Err(e) => errored(true, "built-in".into(), e.to_string()),
             },
-            Err(e) => errored(true, e.to_string()),
+            Err(e) => errored(true, "built-in".into(), e.to_string()),
         })
         .collect()
 }
@@ -62,18 +66,28 @@ pub fn discover_user_extensions_at(dir: &Path) -> Vec<DiscoveredExtension> {
         if !manifest_path.is_file() {
             continue;
         }
+        let source_label = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".into());
         let display_path = manifest_path.display().to_string();
         match std::fs::read_to_string(&manifest_path) {
             Ok(json) => match parse_manifest(&json).and_then(|m| validate_manifest(&m).map(|_| m)) {
                 Ok(manifest) => discovered.push(DiscoveredExtension {
                     is_builtin: false,
+                    source_label,
                     manifest: Some(manifest),
                     error: None,
                 }),
-                Err(e) => discovered.push(errored(false, format!("{display_path}: {e}"))),
+                Err(e) => discovered.push(errored(
+                    false,
+                    source_label,
+                    format!("{display_path}: {e}"),
+                )),
             },
             Err(e) => discovered.push(errored(
                 false,
+                source_label,
                 format!("{display_path}: cannot be read ({e})"),
             )),
         }
