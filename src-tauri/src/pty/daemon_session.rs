@@ -250,7 +250,7 @@ impl DaemonSession {
         session: Arc<Self>,
         mut reader: Box<dyn std::io::Read + Send>,
         initial_command: Option<String>,
-        batch_rx: std::sync::mpsc::Receiver<crate::pty::output_batcher::BatchCommand>,
+        batch_rx: std::sync::mpsc::Receiver<BatchCommand>,
         batch_drained_tx: std::sync::mpsc::Sender<()>,
     ) {
         let id = session.id.clone();
