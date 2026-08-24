@@ -16,6 +16,11 @@ import {
 } from "../lib/pty/transport";
 import { subscribePtyData } from "../lib/pty/dataMultiplexer";
 import { AckCoalescer } from "../lib/pty/ackCoalescer";
+import {
+  acquireGlSlot,
+  releaseGlSlot,
+  touchGlSlot,
+} from "../lib/terminal/webglRegistry";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
@@ -50,6 +55,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
   const idRef = useRef(id);
   const parsedRef = useRef(0);
+  // Set by the mount effect; focus changes upgrade the renderer via registry.
+  const ensureWebglRef = useRef<(() => void) | null>(null);
 
   const status = useTerminalStore((s) => s.sessions[id]?.status);
   const session = useTerminalStore((s) => s.sessions[id]);
@@ -278,21 +285,53 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // fit-rounding leftover below the last row is seamless (no two-tone gap).
     paintSessionSurface(currentTheme.background);
 
-    // WebGL Hardware Acceleration with Canvas / DOM fallback
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-        try {
-          term.loadAddon(new CanvasAddon());
-        } catch {}
-      });
-      term.loadAddon(webgl);
-    } catch {
+    // GPU renderer lifecycle under a process-wide context budget: the
+    // registry downgrades LRU panes to Canvas (never DOM) when a new pane
+    // needs a slot, and focus upgrades back.
+    let activeRenderer: "webgl" | "canvas" | null = null;
+    let webglAddon: WebglAddon | null = null;
+    let canvasAddon: CanvasAddon | null = null;
+    const downgradeToCanvas = () => {
+      if (activeRenderer !== "webgl") return;
       try {
-        term.loadAddon(new CanvasAddon());
+        webglAddon?.dispose();
       } catch {}
-    }
+      webglAddon = null;
+      try {
+        canvasAddon = new CanvasAddon();
+        term.loadAddon(canvasAddon);
+        activeRenderer = "canvas";
+      } catch {}
+    };
+    const ensureWebgl = (): void => {
+      if (activeRenderer === "webgl") return;
+      acquireGlSlot(id, downgradeToCanvas);
+      try {
+        const gl = new WebglAddon();
+        gl.onContextLoss(() => {
+          try {
+            gl.dispose();
+          } catch {}
+          downgradeToCanvas();
+        });
+        if (activeRenderer === "canvas") {
+          try {
+            canvasAddon?.dispose();
+          } catch {}
+          canvasAddon = null;
+        }
+        term.loadAddon(gl);
+        webglAddon = gl;
+        activeRenderer = "webgl";
+      } catch {
+        try {
+          canvasAddon = new CanvasAddon();
+          term.loadAddon(canvasAddon);
+          activeRenderer = "canvas";
+        } catch {}
+      }
+    };
+    ensureWebglRef.current = ensureWebgl;
 
     if (restoredScrollback) {
       term.reset();
@@ -526,6 +565,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       commitFitRef.current = null;
       flushScrollback();
       ackCoalescer.dispose();
+      releaseGlSlot(idRef.current);
+      ensureWebglRef.current = null;
       unregisterSerializer(idRef.current);
       disposed = true;
       ro.disconnect();
@@ -548,6 +589,14 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     clearRestoredScrollback,
     dismissSessionRestoredBanner,
   ]);
+
+  // Focus drives the GL budget: refresh recency so this pane is never the
+  // LRU victim while active, and upgrade back to WebGL if it was downgraded.
+  useEffect(() => {
+    if (!isFocused) return;
+    touchGlSlot(id);
+    ensureWebglRef.current?.();
+  }, [isFocused, id]);
 
   useEffect(() => {
     const term = termRef.current;

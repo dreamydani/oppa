@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AckCoalescer } from "./ackCoalescer";
 
 describe("AckCoalescer", () => {
@@ -45,7 +45,7 @@ describe("AckCoalescer", () => {
 
   it("does nothing when flushed with zero pending bytes", () => {
     const flush = vi.fn();
-    const c = makeCoalescer(flush);
+    makeCoalescer(flush);
     queued.splice(0).forEach((cb) => cb());
     expect(flush).not.toHaveBeenCalled();
   });

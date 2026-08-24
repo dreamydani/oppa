@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { subscribePtyData, resetDataMultiplexerForTests } from "./dataMultiplexer";
-import * as transport from "./transport";
+
 import type { PtyDataPayload } from "./transport";
 
 const listenState = vi.hoisted(() => ({
