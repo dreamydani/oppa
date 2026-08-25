@@ -71,7 +71,7 @@ fn find_in_path(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_detect_editors() -> Vec<EditorApp> {
     let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
@@ -121,13 +121,13 @@ fn build_open_command(app: Option<&str>, path: &str) -> std::process::Command {
 }
 
 // app = None delegates to the OS default handler for the file type
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_open_with(path: String, app: Option<String>) -> Result<(), String> {
     let mut cmd = build_open_command(app.as_deref(), &path);
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read_dir(path: String) -> Result<Vec<FileEntry>, String> {
     let dir_path = Path::new(&path);
     if !dir_path.exists() {
@@ -170,7 +170,7 @@ pub fn fs_read_dir(path: String) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read_file(path: String) -> Result<String, String> {
     let file_path = Path::new(&path);
     if !file_path.exists() {
@@ -183,7 +183,7 @@ pub fn fs_read_file(path: String) -> Result<String, String> {
     fs::read_to_string(file_path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write_file(path: String, content: String) -> Result<(), String> {
     let file_path = Path::new(&path);
     if let Some(parent) = file_path.parent() {
@@ -195,7 +195,7 @@ pub fn fs_write_file(path: String, content: String) -> Result<(), String> {
     fs::write(file_path, content).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_create_dir(path: String) -> Result<(), String> {
     let dir_path = Path::new(&path);
     if dir_path.exists() {
@@ -205,7 +205,7 @@ pub fn fs_create_dir(path: String) -> Result<(), String> {
     fs::create_dir_all(dir_path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_create_file(path: String) -> Result<(), String> {
     let file_path = Path::new(&path);
     if file_path.exists() {

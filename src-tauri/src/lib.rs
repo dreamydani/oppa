@@ -349,7 +349,7 @@ pub fn run() {
 
 /// The renderer calls this after it finishes flushing the layout save during
 /// the close handshake, so the exit wait loop can stop early.
-#[tauri::command]
+#[tauri::command(async)]
 fn confirm_save_complete(app: tauri::AppHandle) {
     let flag = app.state::<Arc<AtomicBool>>();
     flag.store(true, Ordering::SeqCst);

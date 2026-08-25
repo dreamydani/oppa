@@ -120,25 +120,25 @@ fn presets_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_recents(app: AppHandle, recents: Vec<RecentWorkspace>) -> Result<(), String> {
     let path = recents_path(&app)?;
     save_recents_at(&path, &recents).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_recents(app: AppHandle) -> Result<Vec<RecentWorkspace>, String> {
     let path = recents_path(&app)?;
     load_recents_at(&path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_presets(app: AppHandle, presets: Vec<WorkspacePreset>) -> Result<(), String> {
     let path = presets_path(&app)?;
     save_presets_at(&path, &presets).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_presets(app: AppHandle) -> Result<Vec<WorkspacePreset>, String> {
     let path = presets_path(&app)?;
     load_presets_at(&path).map_err(|e| e.to_string())

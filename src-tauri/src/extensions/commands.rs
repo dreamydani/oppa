@@ -175,13 +175,13 @@ fn contributed_theme(manifest: &ExtensionManifest, theme: &ThemeContribution) ->
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_extensions(state: State<'_, ExtensionsState>) -> Result<Vec<ExtensionListItem>, String> {
     let registry = state.0.lock().map_err(|e| e.to_string())?;
     Ok(registry.entries().iter().map(|e| list_item(e, &registry)).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_extension_enabled(
     app: AppHandle,
     state: State<'_, ExtensionsState>,
@@ -261,7 +261,7 @@ pub fn apply_consent_grant(
 
 /// Grant consent for a scriptable extension's current fingerprint and enable it
 /// atomically. The renderer calls this after the user approves the dialog.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn grant_extension_consent(
     app: AppHandle,
     state: State<'_, ExtensionsState>,
@@ -276,7 +276,7 @@ pub fn grant_extension_consent(
 }
 
 /// The current fingerprint of an installed extension (for consent dialogs).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_extension_fingerprint(
     state: State<'_, ExtensionsState>,
     id: String,
@@ -290,7 +290,7 @@ pub fn get_extension_fingerprint(
         .ok_or_else(|| format!("extension '{id}' is not installed"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_contributions(state: State<'_, ExtensionsState>) -> Result<ContributionPayload, String> {
     let registry = state.0.lock().map_err(|e| e.to_string())?;
     Ok(contribution_payload_from(&registry.enabled_manifests()))

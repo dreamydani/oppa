@@ -1,5 +1,5 @@
 // Settings persistence. The Tauri-free core (`save_settings_at`, `load_settings_at`)
-// is kept separate from `#[tauri::command]` wrappers so logic is testable without Tauri runtime.
+// is kept separate from `#[tauri::command(async)]` wrappers so logic is testable without Tauri runtime.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -105,12 +105,12 @@ fn settings_path(app: &AppHandle) -> PathBuf {
     app.path().app_data_dir().unwrap().join("settings.json")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(app: AppHandle, settings_json: String) -> Result<(), String> {
     save_settings_at(&settings_path(&app), &settings_json).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings(app: AppHandle) -> Result<Option<String>, String> {
     load_settings_at(&settings_path(&app)).map_err(|e| e.to_string())
 }

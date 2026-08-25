@@ -2,7 +2,7 @@ use crate::browser::manager::BrowserManager;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Open or initialize a child webview for the built-in browser.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_open(
     app: AppHandle,
     url: String,
@@ -45,7 +45,7 @@ pub fn browser_open(
 }
 
 /// Navigate the built-in browser webview to a new URL.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_navigate(app: AppHandle, url: String) -> Result<(), String> {
     if let Some(mgr) = app.try_state::<BrowserManager>() {
         mgr.set_url(url.clone());
@@ -64,7 +64,7 @@ pub fn browser_navigate(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 /// Update position and size bounds of the child webview.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_set_bounds(
     app: AppHandle,
     x: i32,
@@ -90,7 +90,7 @@ pub fn browser_set_bounds(
 }
 
 /// Hide the child webview.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_hide(app: AppHandle) -> Result<(), String> {
     if let Some(mgr) = app.try_state::<BrowserManager>() {
         mgr.set_visible(false);
@@ -104,7 +104,7 @@ pub fn browser_hide(app: AppHandle) -> Result<(), String> {
 }
 
 /// Show the child webview.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_show(app: AppHandle) -> Result<(), String> {
     if let Some(mgr) = app.try_state::<BrowserManager>() {
         mgr.set_visible(true);
@@ -118,7 +118,7 @@ pub fn browser_show(app: AppHandle) -> Result<(), String> {
 }
 
 /// Navigate back in browser history.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_go_back(app: AppHandle) -> Result<(), String> {
     if let Some(webview_window) = app.get_webview_window("browser") {
         let _ = webview_window.eval("window.history.back();");
@@ -127,7 +127,7 @@ pub fn browser_go_back(app: AppHandle) -> Result<(), String> {
 }
 
 /// Navigate forward in browser history.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_go_forward(app: AppHandle) -> Result<(), String> {
     if let Some(webview_window) = app.get_webview_window("browser") {
         let _ = webview_window.eval("window.history.forward();");
@@ -136,7 +136,7 @@ pub fn browser_go_forward(app: AppHandle) -> Result<(), String> {
 }
 
 /// Reload the current page.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_reload(app: AppHandle) -> Result<(), String> {
     if let Some(webview_window) = app.get_webview_window("browser") {
         let _ = webview_window.eval("window.location.reload();");
@@ -145,7 +145,7 @@ pub fn browser_reload(app: AppHandle) -> Result<(), String> {
 }
 
 /// Open webview developer tools if supported.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_open_devtools(app: AppHandle) -> Result<(), String> {
     if let Some(webview_window) = app.get_webview_window("browser") {
         webview_window.open_devtools();

@@ -1,5 +1,5 @@
 // Layout + session-state persistence. The Tauri-free core (`save_layout_at`,
-// `load_layout_at`) is kept separate from the `#[tauri::command]` wrappers so
+// `load_layout_at`) is kept separate from the `#[tauri::command(async)]` wrappers so
 // the round-trip logic is testable without dragging Tauri's runtime into the
 // test binary (0xc0000139 constraint, see Task 3).
 
@@ -27,12 +27,12 @@ fn layout_path(app: &AppHandle) -> PathBuf {
     app.path().app_data_dir().unwrap().join("layout.json")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_layout(app: AppHandle, layout_json: String) -> Result<(), String> {
     save_layout_at(&layout_path(&app), &layout_json).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_layout(app: AppHandle) -> Result<Option<String>, String> {
     load_layout_at(&layout_path(&app)).map_err(|e| e.to_string())
 }

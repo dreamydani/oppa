@@ -106,7 +106,7 @@ pub fn parse_git_status_porcelain(stdout: &str) -> GitStatusResult {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(path: String) -> Result<GitStatusResult, String> {
     let dir = Path::new(&path);
     if !dir.exists() {

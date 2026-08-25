@@ -150,7 +150,7 @@ pub struct PtySpawnResultPayload {
 ///
 /// The emitter closures capture the `AppHandle` and forward output, exit, and
 /// cwd signals to the frontend as `pty:data` / `pty:exit` / `pty:cwd` events.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_spawn(
     manager: State<'_, PtyManager>,
     app: AppHandle,
@@ -254,14 +254,14 @@ pub fn pty_spawn(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
     manager
         .write(&id, data.as_bytes())
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_resize(
     manager: State<'_, PtyManager>,
     id: String,
@@ -271,27 +271,27 @@ pub fn pty_resize(
     manager.resize(&id, cols, rows).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     manager.kill(&id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_ack(manager: State<'_, PtyManager>, id: String, chars: usize) -> Result<(), String> {
     manager.ack(&id, chars)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<String> {
     pty_list_impl(&manager)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_disconnect(manager: State<'_, PtyManager>) -> Result<(), String> {
     manager.disconnect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_shutdown(manager: State<'_, PtyManager>) -> Result<(), String> {
     manager.shutdown()
 }
@@ -299,17 +299,17 @@ pub fn pty_shutdown(manager: State<'_, PtyManager>) -> Result<(), String> {
 // Worktree/repo commands: thin forwarders so the daemon stays the single owner
 // of the registry (the GUI process never touches worktrees.json directly).
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn repo_add(manager: State<'_, PtyManager>, path: String) -> Result<Vec<RepoRecord>, String> {
     manager.get_client()?.repo_add(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn repo_list(manager: State<'_, PtyManager>) -> Result<Vec<RepoRecord>, String> {
     manager.get_client()?.repo_list()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn worktree_create(
     manager: State<'_, PtyManager>,
@@ -335,7 +335,7 @@ pub fn worktree_create(
         .map(Some)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_list(manager: State<'_, PtyManager>) -> Result<Vec<WorktreeListEntry>, String> {
     manager.get_client()?.worktree_list()
 }
@@ -361,12 +361,12 @@ fn agent_profiles_impl() -> Vec<AgentProfileDto> {
 }
 
 /// Static catalog read in-process; the frontend never hardcodes agent lists.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn agent_profiles() -> Vec<AgentProfileDto> {
     agent_profiles_impl()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn worktree_create_agent(
     manager: State<'_, PtyManager>,
@@ -395,7 +395,7 @@ pub fn worktree_create_agent(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_show(
     manager: State<'_, PtyManager>,
     id: String,
@@ -403,7 +403,7 @@ pub fn worktree_show(
     manager.get_client()?.worktree_show(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_current(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -411,7 +411,7 @@ pub fn worktree_current(
     manager.get_client()?.worktree_current(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_set(
     manager: State<'_, PtyManager>,
     id: String,
@@ -432,7 +432,7 @@ pub fn worktree_set(
         .map(Some)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_remove(
     manager: State<'_, PtyManager>,
     id: String,
@@ -444,17 +444,17 @@ pub fn worktree_remove(
         .worktree_remove(&id, force, delete_branch)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_purge(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     manager.get_client()?.worktree_purge(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_ps(manager: State<'_, PtyManager>) -> Result<Vec<WorktreePsEntry>, String> {
     manager.get_client()?.worktree_ps()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_lineage(
     manager: State<'_, PtyManager>,
     id: String,
@@ -465,7 +465,7 @@ pub fn worktree_lineage(
 // Source-control commands: sc_* prefix avoids the legacy in-process git_status;
 // every one is a daemon forwarder so the daemon stays the single git owner.
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_status(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -473,7 +473,7 @@ pub fn sc_status(
     manager.get_client()?.sc_status(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_stage(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -482,7 +482,7 @@ pub fn sc_stage(
     manager.get_client()?.sc_stage(&cwd, &paths)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_unstage(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -491,7 +491,7 @@ pub fn sc_unstage(
     manager.get_client()?.sc_unstage(&cwd, &paths)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_discard(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -503,7 +503,7 @@ pub fn sc_discard(
         .sc_discard(&cwd, &paths, include_untracked)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_commit(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -512,7 +512,7 @@ pub fn sc_commit(
     manager.get_client()?.sc_commit(&cwd, &message)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_local_branches(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -520,7 +520,7 @@ pub fn sc_local_branches(
     manager.get_client()?.sc_local_branches(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_checkout(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -529,7 +529,7 @@ pub fn sc_checkout(
     manager.get_client()?.sc_checkout(&cwd, &branch)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_file_diff(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -542,7 +542,7 @@ pub fn sc_file_diff(
         .sc_file_diff(&cwd, &path, staged, compare_against_head)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_history(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -551,7 +551,7 @@ pub fn sc_history(
     manager.get_client()?.sc_history(&cwd, limit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_branch_compare(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -560,12 +560,12 @@ pub fn sc_branch_compare(
     manager.get_client()?.sc_branch_compare(&cwd, &base_ref)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_fetch(manager: State<'_, PtyManager>, cwd: String) -> Result<(), String> {
     manager.get_client()?.sc_fetch(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_pull(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -574,7 +574,7 @@ pub fn sc_pull(
     manager.get_client()?.sc_pull(&cwd, ff_only)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_fast_forward(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -582,7 +582,7 @@ pub fn sc_fast_forward(
     manager.get_client()?.sc_fast_forward(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_push(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -594,7 +594,7 @@ pub fn sc_push(
         .sc_push(&cwd, publish, force_with_lease)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_upstream_refresh(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -602,7 +602,7 @@ pub fn sc_upstream_refresh(
     manager.get_client()?.sc_upstream_refresh(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_generate_commit_message(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -610,7 +610,7 @@ pub fn sc_generate_commit_message(
     manager.get_client()?.sc_generate_commit_message(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sc_generate_pr_message(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -618,7 +618,7 @@ pub fn sc_generate_pr_message(
     manager.get_client()?.sc_generate_pr_message(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_comments_list(
     manager: State<'_, PtyManager>,
     worktree_id: String,
@@ -626,7 +626,7 @@ pub fn diff_comments_list(
     manager.get_client()?.diff_comments_list(&worktree_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_comment_add(
     manager: State<'_, PtyManager>,
     comment: NewDiffComment,
@@ -634,7 +634,7 @@ pub fn diff_comment_add(
     manager.get_client()?.diff_comment_add(comment)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_comment_update(
     manager: State<'_, PtyManager>,
     id: String,
@@ -643,12 +643,12 @@ pub fn diff_comment_update(
     manager.get_client()?.diff_comment_update(&id, &body)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_comment_delete(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     manager.get_client()?.diff_comment_delete(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diff_comments_mark_sent(
     manager: State<'_, PtyManager>,
     ids: Vec<String>,
@@ -656,7 +656,7 @@ pub fn diff_comments_mark_sent(
     manager.get_client()?.diff_comments_mark_sent(&ids)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn review_eligibility(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -664,7 +664,7 @@ pub fn review_eligibility(
     manager.get_client()?.review_eligibility(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_review(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -675,7 +675,7 @@ pub fn create_review(
     manager.get_client()?.create_review(&cwd, &title, &body, draft)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn review_status(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -683,7 +683,7 @@ pub fn review_status(
     manager.get_client()?.review_status(&cwd)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), String> {
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -691,7 +691,7 @@ pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), S
     storage.save(&id, &data).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_scrollback(app: AppHandle, id: String) -> Result<Option<String>, String> {
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -699,7 +699,7 @@ pub fn load_scrollback(app: AppHandle, id: String) -> Result<Option<String>, Str
     storage.load(&id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_scrollback(app: AppHandle, id: String) -> Result<(), String> {
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -707,7 +707,7 @@ pub fn delete_scrollback(app: AppHandle, id: String) -> Result<(), String> {
     storage.delete(&id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Result<(), String> {
     use tauri::Manager;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
