@@ -1,6 +1,9 @@
 pub mod agent_hook_installer;
 pub mod agent_hook_server;
+pub mod agent_handoff;
 pub mod agent_resume;
+pub mod cancellation;
+pub mod checkpoint;
 pub mod commands;
 pub mod daemon_client;
 pub mod daemon_server;
@@ -11,6 +14,8 @@ pub mod manager;
 pub mod osc_scanner;
 pub mod output_batcher;
 pub mod powershell_bootstrap;
+pub mod pr_poller;
+pub mod request_router;
 pub mod runtime_metadata;
 pub mod screen_mirror;
 pub mod shell_args;

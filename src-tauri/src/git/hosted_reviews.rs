@@ -596,7 +596,7 @@ pub fn pr_status_from_json(json: &str, now_ms: u64) -> Result<PrStatus, String> 
 }
 
 pub fn pr_status(
-    cwd: &Path,
+    _cwd: &Path,
     url: &str,
     gh_runner: &dyn Fn(&[&str]) -> Result<String, GhRunError>,
 ) -> Result<PrStatus, String> {

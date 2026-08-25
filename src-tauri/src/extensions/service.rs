@@ -1,4 +1,3 @@
-use std::time::Instant;
 
 // Supervisor for running extension engines: owns one RunningEngine per active
 // scriptable extension, fans host events out to all of them, and pumps crash
@@ -13,6 +12,8 @@ use super::host::{
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
+#[cfg(test)]
+use std::time::Instant;
 
 pub struct ExtensionHostService {
     engines: Mutex<HashMap<String, RunningEngine>>,

@@ -5,6 +5,7 @@ use crate::pty::daemon_client::{
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 

@@ -1,5 +1,4 @@
 ﻿// CLI-facing runtime discovery + authed connect; the `oppa-cli` binary is a thin wrapper over this module.
-use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
     BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,

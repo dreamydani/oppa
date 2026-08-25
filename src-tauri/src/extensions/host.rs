@@ -280,7 +280,7 @@ fn run_engine(
     services: HostServices,
     flags: InterruptFlags,
     receiver: mpsc::Receiver<EngineMessage>,
-    report_tx: &mpsc::Sender<EngineReport>,
+    _report_tx: &mpsc::Sender<EngineReport>,
 ) -> EngineResult<()> {
     let rt = Runtime::new().map_err(|e| format!("engine init failed: {e}"))?;
     rt.set_memory_limit(MEMORY_LIMIT_BYTES);

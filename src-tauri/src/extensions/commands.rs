@@ -1,7 +1,6 @@
 // Tauri-facing extension commands. All logic sits in path-taking helpers so it
 // stays testable without a Tauri runtime (same split as settings.rs/layout.rs).
 
-use super::consent::ExtensionConsents;
 use super::discovery::{discover_all_at, DiscoveredExtension};
 use super::manifest::{is_scriptable, ExtensionManifest, ThemeContribution};
 use super::registry::{
@@ -53,13 +52,6 @@ pub struct ContributedTheme {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ContributionPayload {
     pub themes: Vec<ContributedTheme>,
-}
-
-fn user_extensions_dir(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("extensions"))
 }
 
 fn state_file_path(app: &AppHandle) -> Option<PathBuf> {
