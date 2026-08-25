@@ -50,11 +50,7 @@ pub fn write_runtime_metadata(
     };
     let path = metadata_path(dir);
     let json = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
-    let mut tmp_name = path.as_os_str().to_os_string();
-    tmp_name.push(".tmp");
-    let tmp_path = PathBuf::from(tmp_name);
-    std::fs::write(&tmp_path, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp_path, &path).map_err(|e| e.to_string())?;
+    crate::atomic_file::write_atomic(&path, &json).map_err(|e| e.to_string())?;
     Ok(metadata)
 }
 

@@ -71,12 +71,9 @@ pub fn default_presets() -> Vec<WorkspacePreset> {
 }
 
 pub fn save_recents_at(path: &Path, recents: &[RecentWorkspace]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(recents)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, json)
+    crate::atomic_file::write_atomic(path, &json)
 }
 
 pub fn load_recents_at(path: &Path) -> std::io::Result<Vec<RecentWorkspace>> {
@@ -89,12 +86,9 @@ pub fn load_recents_at(path: &Path) -> std::io::Result<Vec<RecentWorkspace>> {
 }
 
 pub fn save_presets_at(path: &Path, presets: &[WorkspacePreset]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(presets)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, json)
+    crate::atomic_file::write_atomic(path, &json)
 }
 
 pub fn load_presets_at(path: &Path) -> std::io::Result<Vec<WorkspacePreset>> {

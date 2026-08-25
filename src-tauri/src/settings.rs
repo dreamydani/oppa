@@ -86,10 +86,7 @@ pub struct AppSettings {
 
 /// Persist settings.json to `path`, creating parent directories as needed.
 pub fn save_settings_at(path: &Path, json: &str) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(path, json)
+    crate::atomic_file::write_atomic(path, json)
 }
 
 /// Read settings.json from `path`; `Ok(None)` when the file does not exist.

@@ -22,12 +22,9 @@ pub struct ExtensionsStateFile {
 
 /// Persist the disabled-id set, creating parent directories as needed.
 pub fn save_state_at(path: &Path, state: &ExtensionsStateFile) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, json)
+    crate::atomic_file::write_atomic(path, &json)
 }
 
 /// Load the disabled-id set; missing or corrupt files fall back to defaults so

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const MAX_COMMENT_BODY_CHARS: usize = 4096;
 
@@ -75,14 +75,7 @@ fn load(path: &Path) -> CommentsFile {
 // Atomic via tmp+rename so a crash never leaves a truncated comment file.
 fn save(path: &Path, comments: &CommentsFile) -> Result<(), String> {
     let json = serde_json::to_string_pretty(comments).map_err(|e| e.to_string())?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let mut tmp_name = path.as_os_str().to_os_string();
-    tmp_name.push(".tmp");
-    let tmp_path = PathBuf::from(tmp_name);
-    std::fs::write(&tmp_path, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp_path, path).map_err(|e| e.to_string())
+    crate::atomic_file::write_atomic(path, &json).map_err(|e| e.to_string())
 }
 
 fn validate_new(comment: &NewDiffComment) -> Result<(), String> {
@@ -208,6 +201,7 @@ fn contains_comment(comments: &CommentsFile, id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn temp_store(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

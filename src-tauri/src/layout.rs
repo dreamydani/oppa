@@ -8,10 +8,7 @@ use tauri::{AppHandle, Manager};
 
 /// Persist layout.json to `path`, creating parent directories as needed.
 pub fn save_layout_at(path: &Path, json: &str) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(path, json)
+    crate::atomic_file::write_atomic(path, json)
 }
 
 /// Read layout.json from `path`; `Ok(None)` when the file has never been saved.
