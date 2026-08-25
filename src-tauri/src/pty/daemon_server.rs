@@ -19,6 +19,18 @@ use tokio::sync::{broadcast, Notify};
 use std::sync::mpsc::Receiver;
 #[cfg(test)]
 use crate::pty::runtime_metadata;
+#[cfg(test)]
+use crate::agents::catalog::build_launch_command;
+#[cfg(test)]
+use crate::git::worktree_registry::WorktreeRegistry;
+#[cfg(test)]
+use crate::pty::ipc_protocol::{ResumeKind, ResumePlan, DAEMON_PROTOCOL_VERSION};
+#[cfg(test)]
+use crate::pty::snapshot::{SessionSnapshot, SnapshotStorage};
+#[cfg(test)]
+use std::path::Path;
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(3);
 // Bounded so a stalled client cannot grow memory; lagged receivers resync by design
