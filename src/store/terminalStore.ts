@@ -594,6 +594,19 @@ let editorAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingWakeTabs = new Map<string, Promise<void>>();
 
+// Sessions whose terminal output changed since the last layout save.
+// Module-level (not state) so marking costs a Set.add per data chunk with
+// zero re-renders; saveLayout serializes only these buffers.
+const dirtyScrollbackIds = new Set<string>();
+
+export function markScrollbackDirty(id: string): void {
+  if (id) dirtyScrollbackIds.add(id);
+}
+
+function discardDirtyScrollback(id: string): void {
+  dirtyScrollbackIds.delete(id);
+}
+
 function triggerDebouncedSaveLayout(get: () => TerminalState, delayMs = 2000) {
   if (layoutSaveTimer) clearTimeout(layoutSaveTimer);
   layoutSaveTimer = setTimeout(() => {
@@ -658,10 +671,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { serializers };
     }),
 
-  cacheScrollback: (id, buffer) =>
+  cacheScrollback: (id, buffer) => {
+    markScrollbackDirty(id);
     set((state) => ({
       cachedScrollbacks: { ...state.cachedScrollbacks, [id]: buffer },
-    })),
+    }));
+  },
 
   setRestoredScrollback: (id, data) =>
     set((state) => ({
@@ -771,6 +786,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     } catch {
       // Session may already be dead (exit raced the kill) — mark it anyway.
     }
+    discardDirtyScrollback(id);
     set((state) => {
       const session = state.sessions[id];
       if (!session) return state;
@@ -911,7 +927,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
       };
     });
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
     return tabId;
   },
 
@@ -934,6 +950,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             await get().killSession(sId);
           }
           void deleteScrollback(sId).catch(() => {});
+          discardDirtyScrollback(sId);
         }
       }
 
@@ -989,7 +1006,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         });
       }
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   selectTab: (tabId) => {
@@ -1014,7 +1031,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (wasSleeping) {
       void get().wakeTab(tabId);
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   wakeTab: async (tabId: string) => {
@@ -1107,7 +1124,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         };
       });
 
-      void get().saveLayout().catch(() => {});
+      triggerDebouncedSaveLayout(get);
     })();
 
     pendingWakeTabs.set(tabId, wakePromise);
@@ -1124,7 +1141,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const tabs = currentTabs.map((t) => (t.id === tabId ? { ...t, title } : t));
       return { tabs };
     });
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   setLayout: (layout) =>
@@ -1204,7 +1221,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         focusedPath: nextFocusedPath,
       });
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   // Close the pane at `path` in the active tab (defaults to active tab focused pane).
@@ -1232,6 +1249,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
     if (removedId) {
       void deleteScrollback(removedId).catch(() => {});
+      discardDirtyScrollback(removedId);
     }
     const sessions = { ...get().sessions };
     delete sessions[removedId];
@@ -1259,7 +1277,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         focusedPath: nextFocusedPath,
       });
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   toggleMaximizePane: (id) => {
@@ -1356,7 +1374,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         focusedPath: nextFocusedPath,
       });
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   // Move source pane relative to target pane and focus the source pane.
@@ -1389,7 +1407,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         focusedPath: nextFocusedPath,
       });
     }
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   // Swap the currently focused pane with its adjacent sibling in direction dir.
@@ -1475,8 +1493,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       })),
     };
     await transportSaveLayout(JSON.stringify(snapshot));
+    // Serialize only buffers with new output since the last write — a tab
+    // switch or rename must not stringify every live terminal.
     const scrollbackPromises: Promise<void>[] = [];
     for (const s of Object.values(sessions)) {
+      if (!dirtyScrollbackIds.has(s.id)) continue;
+      // Clear per-id before awaiting: output landing mid-save re-marks it
+      // for the next pass instead of being lost.
+      discardDirtyScrollback(s.id);
       const buffer = serializers[s.id]?.() || cachedScrollbacks[s.id];
       if (buffer) {
         scrollbackPromises.push(saveScrollback(s.id, buffer).catch(() => {}));
@@ -1946,7 +1970,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
       };
     });
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
     return tabId;
   },
 
@@ -2004,7 +2028,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
     await get().addRecentWorkspace(recentEntry);
 
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
   },
 
   launchCustomWorkspace: async (config) => {
@@ -2061,7 +2085,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     };
     await get().addRecentWorkspace(recentEntry);
 
-    void get().saveLayout().catch(() => {});
+    triggerDebouncedSaveLayout(get);
     return tabId;
   },
 

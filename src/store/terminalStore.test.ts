@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useTerminalStore } from "./terminalStore";
+import { useTerminalStore, markScrollbackDirty } from "./terminalStore";
 import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
@@ -787,20 +787,44 @@ describe("terminalStore", () => {
   });
 
   describe("save-on-mutation", () => {
-    // The store persists the layout on every structural change so the saved
-    // file is always current even if the app is killed without the close
-    // handshake running.
+    // Structural changes persist through the shared 2s debounce so rapid
+    // interactions (tab switching, drag, splits) never trigger one disk
+    // write per action. The close handshake still saves immediately.
     beforeEach(() => {
       useTerminalStore.setState({ ready: true });
     });
 
-    it("createTab persists the new tab layout", async () => {
+    async function expectDebouncedSave(run: () => void | Promise<unknown>) {
+      vi.useFakeTimers();
+      try {
+        saveLayoutMock.mockClear();
+        await run();
+        expect(saveLayoutMock).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it("createTab persists the new tab layout after the debounce window", async () => {
       ptySpawnMock.mockResolvedValue(spawnRes("s2"));
-      await useTerminalStore.getState().createTab();
-      expect(saveLayoutMock).toHaveBeenCalled();
+      await expectDebouncedSave(() => useTerminalStore.getState().createTab());
     });
 
-    it("closeTab persists the layout after closing a tab", async () => {
+    it("selectTab does not persist synchronously on tab switch", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        ],
+        activeTabId: "t1",
+        ready: true,
+      });
+      await expectDebouncedSave(() => useTerminalStore.getState().selectTab("t2"));
+    });
+
+    it("closeTab persists the layout after closing a tab (debounced)", async () => {
       useTerminalStore.setState({
         tabs: [
           { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
@@ -812,50 +836,36 @@ describe("terminalStore", () => {
           s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
         },
       });
-      saveLayoutMock.mockClear();
-      await useTerminalStore.getState().closeTab("t2");
-      expect(saveLayoutMock).toHaveBeenCalled();
+      await expectDebouncedSave(() => useTerminalStore.getState().closeTab("t2"));
     });
 
-    it("selectTab persists the new active tab", async () => {
-      useTerminalStore.setState({
-        tabs: [
-          { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
-          { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
-        ],
-        activeTabId: "t1",
-        ready: true,
-      });
-      saveLayoutMock.mockClear();
-      useTerminalStore.getState().selectTab("t2");
-      await Promise.resolve();
-      expect(saveLayoutMock).toHaveBeenCalled();
-    });
-
-    it("renameTab persists the tab title change", async () => {
+    it("renameTab persists the tab title change (debounced)", async () => {
       useTerminalStore.setState({
         tabs: [{ id: "t1", title: "Old", layout: { type: "leaf", id: "s1" }, focusedPath: [] }],
         activeTabId: "t1",
         ready: true,
       });
-      saveLayoutMock.mockClear();
-      useTerminalStore.getState().renameTab("t1", "New Title");
-      await Promise.resolve();
-      expect(saveLayoutMock).toHaveBeenCalled();
+      await expectDebouncedSave(() => useTerminalStore.getState().renameTab("t1", "New Title"));
     });
 
-    it("splitPane persists the new arrangement", async () => {
+    it("splitPane persists the new arrangement (debounced)", async () => {
       ptySpawnMock.mockResolvedValue(spawnRes("s1"));
-      await useTerminalStore.getState().splitPane("h");
-      expect(saveLayoutMock).toHaveBeenCalled();
+      await expectDebouncedSave(() => useTerminalStore.getState().splitPane("h"));
     });
 
-    it("closePane persists the arrangement", async () => {
+    it("closePane persists the arrangement (debounced)", async () => {
       ptySpawnMock.mockResolvedValue(spawnRes("s1"));
-      await useTerminalStore.getState().splitPane("h");
-      saveLayoutMock.mockClear();
-      await useTerminalStore.getState().closePane();
-      expect(saveLayoutMock).toHaveBeenCalled();
+      vi.useFakeTimers();
+      try {
+        await useTerminalStore.getState().splitPane("h");
+        saveLayoutMock.mockClear();
+        await useTerminalStore.getState().closePane();
+        expect(saveLayoutMock).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(saveLayoutMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("setRatio updates the ratio without persisting (saveLayout deferred to drag end)", () => {
@@ -874,6 +884,54 @@ describe("terminalStore", () => {
       expect(layout.type === "split" && layout.ratio).toBe(0.75);
       // saveLayout is NOT called per-pixel; SplitDivider calls it once on drag end
       expect(saveLayoutMock).not.toHaveBeenCalled();
+    });
+
+    it("saveLayout serializes scrollback only for sessions with new output since the last save", async () => {
+      useTerminalStore.setState({
+        ready: true,
+        sessions: {
+          s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          s2: { id: "s2", title: "s2", status: "running", cols: 80, rows: 24 },
+        },
+        serializers: {
+          s1: () => "buffer-one",
+          s2: () => "buffer-two",
+        },
+      });
+      saveScrollbackMock.mockClear();
+
+      markScrollbackDirty("s1");
+      await useTerminalStore.getState().saveLayout();
+      let savedIds = saveScrollbackMock.mock.calls.map((c) => c[0]);
+      expect(savedIds).toContain("s1");
+      expect(savedIds).not.toContain("s2");
+
+      // No new output since → nothing rewritten.
+      saveScrollbackMock.mockClear();
+      await useTerminalStore.getState().saveLayout();
+      expect(saveScrollbackMock).not.toHaveBeenCalled();
+
+      // Fresh output on the other session re-marks only it.
+      markScrollbackDirty("s2");
+      await useTerminalStore.getState().saveLayout();
+      savedIds = saveScrollbackMock.mock.calls.map((c) => c[0]);
+      expect(savedIds).toEqual(["s2"]);
+    });
+
+    it("cacheScrollback marks the session dirty for the next layout save", async () => {
+      useTerminalStore.setState({
+        ready: true,
+        sessions: {
+          s9: { id: "s9", title: "s9", status: "running", cols: 80, rows: 24 },
+        },
+        serializers: {},
+        cachedScrollbacks: {},
+      });
+      saveScrollbackMock.mockClear();
+
+      useTerminalStore.getState().cacheScrollback("s9", "cached-buffer");
+      await useTerminalStore.getState().saveLayout();
+      expect(saveScrollbackMock.mock.calls.map((c) => c[0])).toEqual(["s9"]);
     });
 
     it("updateSessionCwd debounces layout persistence by 2000ms", async () => {
@@ -1121,6 +1179,7 @@ describe("terminalStore", () => {
           b: { type: "leaf", id: "b" },
         },
       });
+      markScrollbackDirty("a");
       await useTerminalStore.getState().saveLayout();
       expect(saveScrollbackMock).toHaveBeenCalledWith("a", "buffer-a-content");
       expect(saveScrollbackMock).not.toHaveBeenCalledWith("b", expect.anything());
@@ -1146,6 +1205,8 @@ describe("terminalStore", () => {
           id: "active",
         },
       });
+      markScrollbackDirty("active");
+      markScrollbackDirty("bg");
       await useTerminalStore.getState().saveLayout();
       expect(saveScrollbackMock).toHaveBeenCalledWith("active", "active-buffer");
       expect(saveScrollbackMock).toHaveBeenCalledWith("bg", "bg-cached-buffer");
@@ -2633,6 +2694,8 @@ describe("terminalStore", () => {
     });
 
     it("createWizardTab appends a new tab with isWizard=true and activates it", async () => {
+      vi.useFakeTimers();
+      try {
       useTerminalStore.setState({
         tabs: [{ id: "tab-1", title: "Shell", layout: { type: "leaf", id: "s-1" }, focusedPath: [] }],
         activeTabId: "tab-1",
@@ -2654,7 +2717,11 @@ describe("terminalStore", () => {
       expect(wizardTab?.focusedPath).toEqual([]);
       expect(state.layout).toEqual({ type: "leaf", id: "" });
       expect(state.wizardStep).toBe(1);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("createWizardTab generates unique non-colliding ID when tab-1 and tab-2 already exist", () => {
@@ -2721,6 +2788,8 @@ describe("terminalStore", () => {
     });
 
     it("launchWorkspaceForTab spawns sessions, updates tab layout, title, recents, and sets isWizard=false", async () => {
+      vi.useFakeTimers();
+      try {
       ptySpawnMock
         .mockResolvedValueOnce(spawnRes("w-1"))
         .mockResolvedValueOnce(spawnRes("w-2"));
@@ -2774,7 +2843,11 @@ describe("terminalStore", () => {
         terminal_count: 2,
       });
       expect(saveRecentsMock).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("launchWorkspaceForTab for a background tab updates that tab without disturbing active tab layout", async () => {
@@ -3234,6 +3307,8 @@ describe("terminalStore", () => {
     });
 
     it("swaps two leaf positions in single-tab layout and updates focusedPath to follow focused session", async () => {
+      vi.useFakeTimers();
+      try {
       useTerminalStore.setState({
         layout: {
           type: "split",
@@ -3263,10 +3338,16 @@ describe("terminalStore", () => {
       });
       // Focused session was p1 at [0]; after swap, p1 is at [1], so focusedPath becomes [1]
       expect(state.focusedPath).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("swaps leaves in the active tab of multi-tab state", async () => {
+      vi.useFakeTimers();
+      try {
       useTerminalStore.setState({
         tabs: [
           {
@@ -3311,7 +3392,11 @@ describe("terminalStore", () => {
       expect(tab1?.focusedPath).toEqual([0]);
       expect(state.layout).toEqual(tab1?.layout);
       expect(state.focusedPath).toEqual([0]);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("does nothing when swapping identical IDs or missing IDs", () => {
@@ -3343,6 +3428,8 @@ describe("terminalStore", () => {
     });
 
     it("moves source pane relative to target pane and updates focusedPath to sourceId", async () => {
+      vi.useFakeTimers();
+      try {
       useTerminalStore.setState({
         layout: {
           type: "split",
@@ -3372,10 +3459,16 @@ describe("terminalStore", () => {
       });
       // sourceId p1 is now at [1]
       expect(state.focusedPath).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("updates multi-tab active tab layout and focusedPath on movePane", async () => {
+      vi.useFakeTimers();
+      try {
       useTerminalStore.setState({
         tabs: [
           {
@@ -3421,7 +3514,11 @@ describe("terminalStore", () => {
       // sourceId p3 is now at [0, 0]
       expect(tab.focusedPath).toEqual([0, 0]);
       expect(state.focusedPath).toEqual([0, 0]);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(saveLayoutMock).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("does nothing when moving identical IDs or missing IDs", () => {

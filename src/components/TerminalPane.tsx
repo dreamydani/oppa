@@ -22,7 +22,7 @@ import {
   releaseGlSlot,
   touchGlSlot,
 } from "../lib/terminal/webglRegistry";
-import { useTerminalStore } from "../store/terminalStore";
+import { useTerminalStore, markScrollbackDirty } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import { planFullBleed } from "../lib/terminal/fullBleedFit";
@@ -488,6 +488,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         if (disposed) return;
         parsedRef.current +=
           typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
+        // Cheap Set.add: the next layout save re-serializes this buffer only.
+        markScrollbackDirty(id);
         term.write(p.data);
       }),
     );
