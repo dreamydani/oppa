@@ -8,8 +8,6 @@ import {
   ptyKill,
   ptyAck,
   ptyList,
-  ptyDisconnect,
-  ptyShutdown,
   saveLayout,
   loadLayout,
   saveScrollback,
@@ -78,18 +76,6 @@ describe("pty transport", () => {
     const result = await ptySpawn();
     expect(invokeMock).toHaveBeenCalledWith("pty_spawn", {});
     expect(result).toEqual(mockResult);
-  });
-
-  it("ptyDisconnect invokes pty_disconnect", async () => {
-    invokeMock.mockResolvedValue(undefined);
-    await ptyDisconnect();
-    expect(invokeMock).toHaveBeenCalledWith("pty_disconnect");
-  });
-
-  it("ptyShutdown invokes pty_shutdown", async () => {
-    invokeMock.mockResolvedValue(undefined);
-    await ptyShutdown();
-    expect(invokeMock).toHaveBeenCalledWith("pty_shutdown");
   });
 
   it("ptyWrite invokes pty_write with id and data", () => {

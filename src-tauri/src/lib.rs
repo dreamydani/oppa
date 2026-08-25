@@ -109,8 +109,6 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
-            pty::commands::pty_disconnect,
-            pty::commands::pty_shutdown,
             pty::commands::save_scrollback,
             pty::commands::load_scrollback,
             pty::commands::delete_scrollback,

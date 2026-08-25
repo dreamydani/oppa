@@ -13,7 +13,6 @@ pub mod output_batcher;
 pub mod powershell_bootstrap;
 pub mod runtime_metadata;
 pub mod screen_mirror;
-pub mod session;
 pub mod shell_args;
 pub mod snapshot;
 pub mod utf8_decoder;

@@ -20,7 +20,6 @@ pub struct BrowserManager {
     state: Arc<Mutex<BrowserState>>,
 }
 
-#[allow(dead_code)]
 impl BrowserManager {
     pub fn new() -> Self {
         Self {
@@ -57,6 +56,8 @@ impl BrowserManager {
         s.visible = visible;
     }
 
+    // Observation seam for unit tests; production reads state via commands.
+    #[cfg(test)]
     pub fn get_state(&self) -> BrowserState {
         self.state.lock().clone()
     }

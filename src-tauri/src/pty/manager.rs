@@ -40,7 +40,7 @@ impl PtyManager {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn with_socket_path(socket_path: &str) -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
@@ -61,20 +61,6 @@ impl PtyManager {
             .unwrap_or(0);
         let seq = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         format!("s-{now}-{seq}")
-    }
-
-    #[allow(dead_code)]
-    pub fn with_client(client: Arc<DaemonClient>) -> Self {
-        Self {
-            client: Arc::new(Mutex::new(Some(client))),
-            worktree_changed_cb: Mutex::new(None),
-            title_changed_cb: Mutex::new(None),
-            focus_requested_cb: Mutex::new(None),
-            git_changed_cb: Mutex::new(None),
-            pr_changed_cb: Mutex::new(None),
-            custom_socket_path: None,
-            next_id: AtomicU64::new(0),
-        }
     }
 
     /// Install the global worktree-event forwarder; re-applied on every reconnect.
@@ -194,28 +180,6 @@ impl PtyManager {
         )
     }
 
-    /// Spawn a new shell session and return its id.
-    #[allow(dead_code)]
-    pub fn spawn(
-        &self,
-        shell: Option<String>,
-        cwd: Option<String>,
-        cols: u16,
-        rows: u16,
-        _args: Vec<String>,
-        on_data: Option<OnData>,
-        on_exit: Option<OnExit>,
-        on_cwd: Option<OnCwd>,
-    ) -> Result<String, String> {
-        let id = self.next_id();
-        let client = self.get_client()?;
-        client.register_callbacks(&id, on_data, on_exit, on_cwd);
-        let _ = client.create_session_channels(&id);
-
-        client.create_or_attach(&id, cols, rows, cwd, shell, false, None)?;
-        Ok(id)
-    }
-
     /// Write input bytes to the session PTY.
     pub fn write(&self, id: &str, data: &[u8]) -> std::io::Result<()> {
         let client = self
@@ -262,7 +226,6 @@ impl PtyManager {
     }
 
     /// Disconnect from the daemon without stopping running sessions.
-    #[allow(dead_code)]
     pub fn disconnect(&self) -> Result<(), String> {
         if let Some(client) = self.client.lock().as_ref() {
             client.disconnect()
@@ -271,24 +234,14 @@ impl PtyManager {
         }
     }
 
-    /// Request the daemon to terminate all sessions and shut down.
-    #[allow(dead_code)]
-    pub fn shutdown(&self) -> Result<(), String> {
-        if let Some(client) = self.client.lock().as_ref() {
-            client.shutdown()
-        } else {
-            Ok(())
-        }
-    }
-
     /// Take output channel for test observation.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn take_output(&self, id: &str) -> Option<Receiver<Vec<u8>>> {
         self.get_client().ok().and_then(|c| c.take_output(id))
     }
 
     /// Take exit channel for test observation.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn take_exit(&self, id: &str) -> Option<Receiver<Option<i32>>> {
         self.get_client().ok().and_then(|c| c.take_exit(id))
     }
@@ -388,9 +341,10 @@ pub(crate) mod tests {
         let (manager, cancel_token, server_thread) = setup_test_server_and_manager();
         let sh = sh_path();
 
-        let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
-            .expect("spawn");
+        let id = manager.next_id();
+        manager
+            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None)
+            .expect("create_or_attach");
 
         let rx = manager.take_output(&id).expect("output channel");
         manager.write(&id, b"echo hi\n").expect("write");
@@ -481,18 +435,21 @@ pub(crate) mod tests {
             let _ = exit_tx.send(code);
         });
 
-        let id = manager
-            .spawn(
-                Some(sh),
-                None,
+        let id = manager.next_id();
+        manager
+            .create_or_attach(
+                &id,
                 80,
                 24,
-                Vec::new(),
+                None,
+                Some(sh),
                 Some(on_data),
                 Some(on_exit),
                 None,
+                false,
+                None,
             )
-            .expect("spawn");
+            .expect("create_or_attach");
 
         manager.write(&id, b"echo callback_test\n").expect("write");
 
@@ -521,9 +478,10 @@ pub(crate) mod tests {
         let (manager, cancel_token, server_thread) = setup_test_server_and_manager();
         let sh = sh_path();
 
-        let id = manager
-            .spawn(Some(sh), None, 80, 24, Vec::new(), None, None, None)
-            .expect("spawn");
+        let id = manager.next_id();
+        manager
+            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None)
+            .expect("create_or_attach");
 
         manager.resize(&id, 120, 40).expect("resize");
         manager.ack(&id, 512).expect("ack");

@@ -407,13 +407,13 @@ impl DaemonClient {
     }
 
     /// Take the session's test output receiver.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn take_output(&self, session_id: &str) -> Option<Receiver<Vec<u8>>> {
         self.out_rx_map.lock().remove(session_id)
     }
 
     /// Take the session's test exit receiver.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn take_exit(&self, session_id: &str) -> Option<Receiver<Option<i32>>> {
         self.exit_rx_map.lock().remove(session_id)
     }
@@ -543,20 +543,6 @@ impl DaemonClient {
             Ok(DaemonResponse::Error(e)) => Err(e),
             Err(e) if e.contains("connection closed") => Ok(()),
             Ok(other) => Err(format!("unexpected response for Disconnect: {other:?}")),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Request the daemon to terminate all sessions and shut down.
-    #[allow(dead_code)]
-    pub fn shutdown(&self) -> Result<(), String> {
-        let req = DaemonRequest::Shutdown;
-        match self.send_request(req) {
-            Ok(DaemonResponse::Ok) => Ok(()),
-            Ok(DaemonResponse::Error(e)) if e.contains("connection closed") => Ok(()),
-            Ok(DaemonResponse::Error(e)) => Err(e),
-            Err(e) if e.contains("connection closed") => Ok(()),
-            Ok(other) => Err(format!("unexpected response for Shutdown: {other:?}")),
             Err(e) => Err(e),
         }
     }

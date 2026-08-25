@@ -617,7 +617,6 @@ impl DaemonSession {
         self.foreground_command.lock().clone()
     }
 
-    #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
         self.child.lock().try_wait().ok().flatten().is_none()
     }

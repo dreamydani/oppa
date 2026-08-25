@@ -6,10 +6,8 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
-#[allow(dead_code)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[cfg(target_os = "windows")]
-#[allow(dead_code)]
 const DETACHED_PROCESS: u32 = 0x00000008;
 
 /// Probes whether a daemon server is actively listening on the given socket path.
@@ -29,7 +27,6 @@ pub fn probe_daemon(socket_path: &str) -> bool {
 }
 
 /// Spawns a detached background daemon process running `executable_path --daemon`.
-#[allow(dead_code)]
 pub fn spawn_detached_daemon(executable_path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -64,7 +61,6 @@ pub fn spawn_detached_daemon(executable_path: &Path) -> Result<(), String> {
 
 /// Ensures the daemon is running; probes the socket, launches the detached daemon if missing,
 /// and awaits readiness up to 5 seconds.
-#[allow(dead_code)]
 pub fn ensure_daemon_running() -> Result<(), String> {
     let socket_path = crate::pty::ipc_protocol::get_daemon_socket_path();
     let exe_path = std::env::current_exe()
@@ -131,7 +127,6 @@ pub fn restart_stale_daemon(socket_path: &str) -> Result<(), String> {
 }
 
 /// Helper allowing custom socket and executable paths for testing.
-#[allow(dead_code)]
 pub fn ensure_daemon_running_at(socket_path: &str, executable_path: &Path) -> Result<(), String> {
     if probe_daemon(socket_path) {
         return Ok(());

@@ -67,12 +67,6 @@ export function ptyAck(id: string, chars: number): Promise<void> {
 export function ptyList(): Promise<string[]> {
   return invoke("pty_list");
 }
-export function ptyDisconnect(): Promise<void> {
-  return invoke("pty_disconnect");
-}
-export function ptyShutdown(): Promise<void> {
-  return invoke("pty_shutdown");
-}
 export function saveLayout(layoutJson: string): Promise<void> {
   return invoke("save_layout", { layoutJson });
 }
@@ -209,12 +203,6 @@ export function worktreeCreateAgent(
 export function worktreeList(): Promise<WorktreeListEntry[]> {
   return invoke("worktree_list");
 }
-export function worktreeShow(id: string): Promise<WorktreeRecord | null> {
-  return invoke("worktree_show", { id });
-}
-export function worktreeCurrent(cwd: string): Promise<WorktreeRecord | null> {
-  return invoke("worktree_current", { cwd });
-}
 export function worktreeSet(
   id: string,
   opts: WorktreeSetOptions,
@@ -233,9 +221,6 @@ export function worktreePurge(id: string): Promise<void> {
 }
 export function worktreePs(): Promise<WorktreePsEntry[]> {
   return invoke("worktree_ps");
-}
-export function worktreeLineage(id: string): Promise<WorktreeRecord[]> {
-  return invoke("worktree_lineage", { id });
 }
 export function repoAdd(path: string): Promise<RepoRecord[]> {
   return invoke("repo_add", { path });
@@ -425,9 +410,6 @@ export function scPush(
   forceWithLease: boolean,
 ): Promise<PushOutcome> {
   return invoke("sc_push", { cwd, publish, forceWithLease });
-}
-export function scUpstreamRefresh(cwd: string): Promise<UpstreamStatus> {
-  return invoke("sc_upstream_refresh", { cwd });
 }
 
 export interface CommitMessage {

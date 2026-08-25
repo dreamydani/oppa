@@ -158,11 +158,6 @@ impl DaemonServer {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn with_gh_search_path(self, dir: PathBuf) -> Self {
-        self.with_fake_gh_dir(dir)
-    }
-
     pub fn set_auth_token(&mut self, token: Option<String>) {
         self.auth_token = token;
     }
@@ -171,7 +166,6 @@ impl DaemonServer {
         self.global_events.subscribe()
     }
 
-    #[allow(dead_code)]
     pub fn sessions(&self) -> Arc<Mutex<HashMap<String, Arc<DaemonSession>>>> {
         Arc::clone(&self.sessions)
     }

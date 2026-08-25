@@ -286,16 +286,6 @@ pub fn pty_list(manager: State<'_, PtyManager>) -> Vec<String> {
     pty_list_impl(&manager)
 }
 
-#[tauri::command(async)]
-pub fn pty_disconnect(manager: State<'_, PtyManager>) -> Result<(), String> {
-    manager.disconnect()
-}
-
-#[tauri::command(async)]
-pub fn pty_shutdown(manager: State<'_, PtyManager>) -> Result<(), String> {
-    manager.shutdown()
-}
-
 // Worktree/repo commands: thin forwarders so the daemon stays the single owner
 // of the registry (the GUI process never touches worktrees.json directly).
 
@@ -728,12 +718,6 @@ fn pty_list_impl(manager: &PtyManager) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pty::session::default_shell;
-
-    #[test]
-    fn default_shell_is_nonempty() {
-        assert!(!default_shell().is_empty());
-    }
 
     #[test]
     fn pty_list_empty_on_fresh_manager() {
