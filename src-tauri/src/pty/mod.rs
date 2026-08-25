@@ -17,6 +17,7 @@ pub mod powershell_bootstrap;
 pub mod pr_poller;
 pub mod request_router;
 pub mod runtime_metadata;
+pub mod pause_gate;
 pub mod screen_mirror;
 pub mod shell_args;
 pub mod snapshot;

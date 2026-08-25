@@ -16,8 +16,6 @@ use tokio::sync::{broadcast, Notify};
 
 // Test-only items referenced by this module's tests via super::*
 #[cfg(test)]
-use std::sync::mpsc::Receiver;
-#[cfg(test)]
 use crate::pty::runtime_metadata;
 #[cfg(test)]
 use crate::agents::catalog::build_launch_command;

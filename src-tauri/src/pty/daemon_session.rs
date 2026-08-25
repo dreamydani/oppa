@@ -1,6 +1,7 @@
 use crate::pty::ipc_protocol::DaemonEvent;
 use crate::pty::osc_scanner::{OscEvent, OscScanner};
 use crate::pty::output_batcher::{new_drain, run_batcher, BatchCommand, OutputDrain, DEFAULT_FLUSH_INTERVAL_MS};
+use crate::pty::pause_gate::PauseGate;
 use crate::pty::snapshot::AgentSessionRef;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
@@ -60,7 +61,8 @@ pub struct DaemonSession {
     pub rows: AtomicU16,
     pub pid: u32,
     pub pending_bytes: Arc<AtomicUsize>,
-    pub paused: Arc<AtomicBool>,
+    // Condvar gate: ack() releases the paused reader instantly (no poll tick)
+    pub paused: Arc<PauseGate>,
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
     pub seq: Arc<AtomicU64>,
     // Coalesces reader chunks into larger Data events; finish() must run
@@ -228,7 +230,7 @@ impl DaemonSession {
             rows: AtomicU16::new(rows),
             pid,
             pending_bytes: Arc::new(AtomicUsize::new(0)),
-            paused: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(PauseGate::new()),
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
             output_drain,
@@ -309,11 +311,13 @@ impl DaemonSession {
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
             loop {
-                if paused.load(Ordering::SeqCst) {
+                if paused.wait_while_paused(POLL_INTERVAL) {
+                    // Timed out still paused. ack() normally releases us via
+                    // the condvar; this re-check covers any missed wake.
                     if pending.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
-                        paused.store(false, Ordering::SeqCst);
+                        paused.unpause();
+                        continue;
                     }
-                    std::thread::sleep(POLL_INTERVAL);
                     continue;
                 }
 
@@ -323,7 +327,7 @@ impl DaemonSession {
                         let chunk = &buf[..n];
                         pending.fetch_add(n, Ordering::SeqCst);
                         if pending.load(Ordering::SeqCst) > HIGH_WATERMARK_BYTES {
-                            paused.store(true, Ordering::SeqCst);
+                            paused.pause();
                         }
 
                         // ConPTY handshake
@@ -473,7 +477,9 @@ impl DaemonSession {
             })
             .unwrap_or(0);
         if self.pending_bytes.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
-            self.paused.store(false, Ordering::SeqCst);
+            // Condvar wake: the paused reader resumes on this call, not at
+            // its next poll tick.
+            self.paused.unpause();
         }
         Ok(())
     }
