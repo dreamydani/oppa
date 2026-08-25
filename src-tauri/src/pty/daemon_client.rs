@@ -15,6 +15,7 @@ use crate::pty::ipc_protocol::{
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,6 +49,9 @@ struct SessionCallbacks {
 /// Client adapter connecting to the detached background daemon over IPC.
 pub struct DaemonClient {
     write_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    // Flipped false by the reader task on EOF/pipe error so queued-only
+    // requests (write/ack) fail fast instead of piling up undelivered.
+    connected: Arc<AtomicBool>,
     request_lock: Arc<Mutex<()>>,
     callbacks: Arc<Mutex<HashMap<String, SessionCallbacks>>>,
     out_tx_map: Arc<Mutex<HashMap<String, Sender<Vec<u8>>>>>,
@@ -77,6 +81,7 @@ impl DaemonClient {
         let rt = Arc::new(runtime);
 
         let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let connected = Arc::new(AtomicBool::new(true));
         let callbacks = Arc::new(Mutex::new(HashMap::<String, SessionCallbacks>::new()));
         let out_tx_map = Arc::new(Mutex::new(HashMap::<String, Sender<Vec<u8>>>::new()));
         let exit_tx_map = Arc::new(Mutex::new(HashMap::<String, Sender<Option<i32>>>::new()));
@@ -149,6 +154,7 @@ impl DaemonClient {
         });
 
         // Spawn async reader task
+        let connected_reader = Arc::clone(&connected);
         let callbacks_clone = Arc::clone(&callbacks);
         let out_tx_map_clone = Arc::clone(&out_tx_map);
         let exit_tx_map_clone = Arc::clone(&exit_tx_map);
@@ -256,12 +262,14 @@ impl DaemonClient {
                     "connection closed by daemon".to_string(),
                 ));
             }
+            connected_reader.store(false, Ordering::SeqCst);
             out_rx_map_clone.lock().clear();
             exit_rx_map_clone.lock().clear();
         });
 
         let client = Self {
             write_tx,
+            connected,
             request_lock,
             callbacks,
             out_tx_map,
@@ -440,16 +448,41 @@ impl DaemonClient {
     }
 
     /// Write input data to the session PTY.
-    pub fn write(&self, session_id: &str, data: &str) -> Result<(), String> {
-        let req = DaemonRequest::Write {
-            session_id: session_id.to_string(),
-            data: data.to_string(),
-        };
-        match self.send_request(req)? {
-            DaemonResponse::Ok => Ok(()),
-            DaemonResponse::Error(e) => Err(e),
-            other => Err(format!("unexpected response for Write: {other:?}")),
+    /// Queue a request without waiting for the daemon's response.
+    /// Used for high-frequency paths (keystrokes, ACKs) where a round trip
+    /// would stall the caller; delivery failure surfaces through the reader
+    /// task flipping `connected`, not through this return value.
+    fn queue_request(
+        write_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+        connected: &AtomicBool,
+        req: DaemonRequest,
+        err_context: &str,
+    ) -> Result<(), String> {
+        if !connected.load(Ordering::SeqCst) {
+            return Err("daemon disconnected".to_string());
         }
+        let mut json = serde_json::to_string(&req)
+            .map_err(|e| format!("failed to serialize {err_context}: {e}"))?;
+        json.push('\n');
+        write_tx
+            .send(json)
+            .map_err(|e| format!("failed to queue {err_context}: {e}"))?;
+        Ok(())
+    }
+
+    pub fn write(&self, session_id: &str, data: &str) -> Result<(), String> {
+        // Fire-and-forget: keystrokes must never block on a pipe round trip
+        // (the old send_request path held the global request lock and waited
+        // up to 5s per keypress). A dead pipe fails fast via `connected`.
+        Self::queue_request(
+            &self.write_tx,
+            &self.connected,
+            DaemonRequest::Write {
+                session_id: session_id.to_string(),
+                data: data.to_string(),
+            },
+            "write",
+        )
     }
 
     /// Resize the session PTY.
@@ -468,17 +501,15 @@ impl DaemonClient {
 
     /// Acknowledge processed output bytes for backpressure release.
     pub fn ack(&self, session_id: &str, chars: usize) -> Result<(), String> {
-        let req = DaemonRequest::Ack {
-            session_id: session_id.to_string(),
-            chars,
-        };
-        let mut json =
-            serde_json::to_string(&req).map_err(|e| format!("failed to serialize ack: {e}"))?;
-        json.push('\n');
-        self.write_tx
-            .send(json)
-            .map_err(|e| format!("failed to queue ack: {e}"))?;
-        Ok(())
+        Self::queue_request(
+            &self.write_tx,
+            &self.connected,
+            DaemonRequest::Ack {
+                session_id: session_id.to_string(),
+                chars,
+            },
+            "ack",
+        )
     }
 
     /// Kill the session child process.
@@ -1330,5 +1361,103 @@ mod tests {
         client.disconnect().expect("disconnect");
         cancel_token.cancel();
         let _ = server_thread.join();
+    }
+
+    // Answers the Hello handshake, then never replies to anything again —
+    // used to prove write() no longer blocks on a daemon response.
+    fn spawn_silent_server(socket_path: &str) -> std::thread::JoinHandle<()> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let path = socket_path.to_string();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                #[cfg(target_os = "windows")]
+                {
+                    use tokio::net::windows::named_pipe::ServerOptions;
+                    let mut server = ServerOptions::new()
+                        .first_pipe_instance(true)
+                        .create(&path)
+                        .unwrap();
+                    server.connect().await.unwrap();
+                    let (reader, mut writer) = tokio::io::split(server);
+                    let mut line = String::new();
+                    BufReader::new(reader)
+                        .read_line(&mut line)
+                        .await
+                        .unwrap();
+                    let hello_ok = serde_json::to_string(&DaemonResponse::HelloOk {
+                        protocol_version: DAEMON_PROTOCOL_VERSION,
+                    })
+                    .unwrap();
+                    writer
+                        .write_all(format!("{hello_ok}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let (reader, mut writer) = tokio::io::split(stream);
+                    let mut line = String::new();
+                    BufReader::new(&mut reader).read_line(&mut line).await.unwrap();
+                    let hello_ok = serde_json::to_string(&DaemonResponse::HelloOk {
+                        protocol_version: crate::pty::ipc_protocol::DAEMON_PROTOCOL_VERSION,
+                    })
+                    .unwrap();
+                    writer
+                        .write_all(format!("{hello_ok}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    }
+                }
+            });
+        })
+    }
+
+    #[test]
+    fn write_is_fire_and_forget_when_daemon_stops_responding() {
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-silent-write-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-silent-write-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let _server_thread = spawn_silent_server(&socket_path);
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect to silent server");
+
+        let start = std::time::Instant::now();
+        let result = client.write("silent-session", "x");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "write() blocked {elapsed:?} waiting for a daemon response"
+        );
+        assert!(result.is_ok(), "queued write must succeed: {result:?}");
+
+        client.disconnect().ok();
     }
 }
