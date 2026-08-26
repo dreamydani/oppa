@@ -305,6 +305,14 @@ export function createWorktreeRegistrySlice(
     },
 
     removeWorktree: async (id, force = false, deleteBranch = false) => {
+      if (force) {
+        const state = get();
+        for (const [sId, session] of Object.entries(state.sessions)) {
+          if (session.worktreeId === id) {
+            await get().killSession(sId).catch(() => {});
+          }
+        }
+      }
       await worktreeRemove(id, force, deleteBranch);
       await get().loadWorktrees();
     },

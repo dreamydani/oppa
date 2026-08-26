@@ -177,8 +177,9 @@ mod tests {
         for i in 0..5 {
             drain.send_chunk(vec![b'a' + i]);
         }
-        std::thread::sleep(Duration::from_millis(80));
-        let first = events.try_recv().expect("expected one batch");
+        let first = events
+            .recv_timeout(Duration::from_millis(300))
+            .expect("expected one batch");
         assert_eq!(first.1, 5);
         assert!(events.try_recv().is_err(), "must be exactly one event");
         let _ = drain.finish();

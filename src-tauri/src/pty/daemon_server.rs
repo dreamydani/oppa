@@ -144,6 +144,7 @@ impl DaemonServer {
         self.sessions
             .lock()
             .iter()
+            .filter(|(_, session)| session.is_alive())
             .map(|(session_id, session)| LiveSession {
                 session_id: session_id.clone(),
                 cwd: session.cwd(),
@@ -2140,6 +2141,60 @@ mod tests {
             }),
             DaemonResponse::Ok
         );
+    }
+
+    #[tokio::test]
+    async fn test_worktree_force_remove_kills_bound_pane_and_proceeds() {
+        let s = crate::git::test_support::sandbox("v3-force-remove");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+
+        match server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        }) {
+            DaemonResponse::RepoRecords(repos) => assert_eq!(repos.len(), 1),
+            other => panic!("expected RepoRecords, got {other:?}"),
+        }
+        let created = expect_record_one(
+            server.handle_request(v3_create_request(&s.repo, "force-bound")),
+            "create",
+        );
+
+        match server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "force-pane".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: Some(created.id.clone()),
+            extra_env: Vec::new(),
+        }) {
+            DaemonResponse::SessionAttached(res) => assert!(res.is_new),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
+
+        // Without force: rejected due to live session
+        match server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: false,
+            delete_branch: false,
+        }) {
+            DaemonResponse::Error(e) => assert!(e.contains("force-pane"), "got: {e}"),
+            other => panic!("expected blocked removal, got {other:?}"),
+        }
+
+        // With force: kills bound session and completes removal
+        match server.handle_request(DaemonRequest::WorktreeRemove {
+            id: created.id.clone(),
+            force: true,
+            delete_branch: false,
+        }) {
+            DaemonResponse::Ok => {}
+            other => panic!("expected Ok, got {other:?}"),
+        }
+
+        // Session is removed from daemon map
+        assert!(!server.sessions().lock().contains_key("force-pane"));
     }
 
     #[tokio::test]

@@ -378,6 +378,28 @@ impl DaemonServer {
                 delete_branch,
             } => match self.worktree_registry_path.as_deref() {
                 Some(registry_path) => {
+                    if force {
+                        let mut sessions = self.sessions.lock();
+                        let registry = WorktreeRegistry::load(registry_path);
+                        if let Some(record) = registry.worktrees.get(&id) {
+                            let session_ids_to_kill: Vec<String> = sessions
+                                .iter()
+                                .filter(|(_, s)| {
+                                    s.worktree_id.as_deref() == Some(record.id.as_str())
+                                        || s.cwd()
+                                            .as_deref()
+                                            .map(|cwd| session_cwd_inside(cwd, record))
+                                            .unwrap_or(false)
+                                })
+                                .map(|(sid, _)| sid.clone())
+                                .collect();
+                            for sid in session_ids_to_kill {
+                                if let Some(s) = sessions.remove(&sid) {
+                                    let _ = s.kill();
+                                }
+                            }
+                        }
+                    }
                     let live_sessions = self.live_sessions();
                     match worktree_remove(registry_path, &id, force, delete_branch, &live_sessions)
                     {

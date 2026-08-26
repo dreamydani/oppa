@@ -171,6 +171,30 @@ describe("WorktreePane", () => {
     });
   });
 
+  it("shows Force Remove when remove is rejected by live sessions and clicking it retries with force", async () => {
+    worktreeRemoveMock.mockRejectedValueOnce(
+      "cannot remove worktree demo::C:/ws/feat-a: live sessions present: s-1 (cwd inside worktree)",
+    );
+    worktreeRemoveMock.mockResolvedValueOnce(undefined);
+
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /remove/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: /force remove/i })).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /force remove/i }));
+
+    await vi.waitFor(() => {
+      expect(worktreeRemoveMock).toHaveBeenLastCalledWith("demo::C:/ws/feat-a", true, false);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+  });
+
   it("purge is only offered for retired tombstones", () => {
     render(<WorktreePane />);
 

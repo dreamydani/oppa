@@ -4227,6 +4227,30 @@ describe("terminalStore", () => {
       expect(worktreeListMock).toHaveBeenCalled();
     });
 
+    it("removeWorktree with force=true kills bound GUI sessions and passes force flag", async () => {
+      worktreeRemoveMock.mockResolvedValue(undefined);
+      worktreeListMock.mockResolvedValue([]);
+      const killSessionSpy = vi.spyOn(useTerminalStore.getState(), "killSession").mockResolvedValue(undefined);
+
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", status: "running", worktreeId: "demo::C:/ws/feat-a" } as any,
+          s2: { id: "s2", status: "running", worktreeId: "demo::C:/ws/other" } as any,
+        },
+      });
+
+      await useTerminalStore.getState().removeWorktree("demo::C:/ws/feat-a", true);
+
+      expect(killSessionSpy).toHaveBeenCalledWith("s1");
+      expect(killSessionSpy).not.toHaveBeenCalledWith("s2");
+      expect(worktreeRemoveMock).toHaveBeenCalledWith(
+        "demo::C:/ws/feat-a",
+        true,
+        false,
+      );
+      expect(worktreeListMock).toHaveBeenCalled();
+    });
+
     it("purgeWorktree drops a tombstone and refreshes", async () => {
       worktreePurgeMock.mockResolvedValue(undefined);
       worktreeListMock.mockResolvedValue([]);

@@ -225,11 +225,11 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     setConfirmTarget(record);
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (force = false) => {
     if (!confirmTarget) return;
     try {
       if (confirmMode === "remove") {
-        await removeWorktree(confirmTarget.id);
+        await removeWorktree(confirmTarget.id, force);
       } else if (confirmMode === "purge") {
         await purgeWorktree(confirmTarget.id);
       } else {
@@ -614,13 +614,23 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                className={`wt-btn${confirmMode === "remove" || confirmMode === "purge" ? " danger" : ""}`}
-                onClick={() => void handleConfirm()}
-              >
-                {confirmMode === "purge" ? "Purge" : confirmMode === "merge" ? "Merge" : "Remove"}
-              </button>
+              {confirmMode === "remove" && actionError?.includes("live sessions present") ? (
+                <button
+                  type="button"
+                  className="wt-btn danger"
+                  onClick={() => void handleConfirm(true)}
+                >
+                  Force Remove
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`wt-btn${confirmMode === "remove" || confirmMode === "purge" ? " danger" : ""}`}
+                  onClick={() => void handleConfirm(false)}
+                >
+                  {confirmMode === "purge" ? "Purge" : confirmMode === "merge" ? "Merge" : "Remove"}
+                </button>
+              )}
             </div>
           </div>
         </div>
