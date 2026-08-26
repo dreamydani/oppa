@@ -291,3 +291,71 @@ describe("FileExplorer context menus", () => {
     expect(row.className).toContain("selected");
   });
 });
+
+describe("FileExplorer large-directory cap", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+    setupStore();
+  });
+
+  function mockHugeDir(count: number): void {
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === "/mock/workspace") {
+        return [
+          { name: "big", path: "/mock/workspace/big", is_dir: true, size: 0 },
+        ];
+      }
+      if (path === "/mock/workspace/big") {
+        return Array.from({ length: count }, (_, i) => ({
+          name: `file-${String(i).padStart(4, "0")}.txt`,
+          path: `/mock/workspace/big/file-${String(i).padStart(4, "0")}.txt`,
+          is_dir: false,
+          size: i,
+        }));
+      }
+      return [];
+    });
+  }
+
+  it("caps rendered children and reveals the rest on demand", async () => {
+    mockHugeDir(250);
+    const { container } = render(<FileExplorer />);
+    await waitFor(() => {
+      expect(screen.getByText("big")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("big"));
+    await waitFor(() => {
+      expect(screen.getByText("file-0000.txt")).toBeDefined();
+    });
+
+    const rows = container.querySelectorAll(".file-tree-item");
+    // 1 dir row + capped children + the "show more" toggle
+    expect(rows.length).toBe(202);
+    expect(screen.queryByText("file-0249.txt")).toBeNull();
+    expect(screen.getByText(/show 50 more/i)).toBeDefined();
+
+    fireEvent.click(screen.getByText(/show 50 more/i));
+    expect(screen.getByText("file-0249.txt")).toBeDefined();
+    // 1 dir row + all children, toggle gone
+    expect(container.querySelectorAll(".file-tree-item").length).toBe(251);
+  });
+
+  it("does not cap small directories", async () => {
+    mockStaticTree();
+    const { container } = render(<FileExplorer />);
+    await waitFor(() => {
+      expect(screen.getByText("src")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("src"));
+    await waitFor(() => {
+      expect(screen.getByText("main.rs")).toBeDefined();
+    });
+    expect(screen.queryByText(/show \d+ more/i)).toBeNull();
+    // 2 root rows + 1 child under src
+    expect(container.querySelectorAll(".file-tree-item").length).toBe(3);
+  });
+});

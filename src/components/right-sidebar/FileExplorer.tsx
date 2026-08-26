@@ -29,6 +29,11 @@ interface TreeNodeProps {
   onContextMenuRow: (e: React.MouseEvent, entry: FileEntry) => void;
 }
 
+// Children are lazy-loaded per expand, so total DOM is bounded by what the
+// user opens; this caps any single directory (node_modules-scale listings)
+// behind a "show more" toggle instead of virtualizing the whole tree.
+const MAX_VISIBLE_CHILDREN = 200;
+
 // Windows cwds use backslashes; keep new-child paths consistent with the parent
 function joinChildPath(parentDir: string, name: string): string {
   const sep = parentDir.includes("\\") ? "\\" : "/";
@@ -56,10 +61,15 @@ function FileTreeNode({
   onContextMenuRow,
 }: TreeNodeProps): React.ReactElement {
   const isExpanded = expandedPaths.has(entry.path);
+  const [revealAll, setRevealAll] = useState(false);
   // Editor selection applies to files only; right-click highlights any row
   const isSelected =
     (!entry.is_dir && activeEditorPath === entry.path) || selectedRowPath === entry.path;
   const children = dirChildren[entry.path] ?? [];
+  const capped = entry.is_dir && !revealAll && children.length > MAX_VISIBLE_CHILDREN;
+  const visibleChildren = capped
+    ? children.slice(0, MAX_VISIBLE_CHILDREN)
+    : children;
 
   return (
     <div className="file-tree-node">
@@ -96,7 +106,7 @@ function FileTreeNode({
 
       {entry.is_dir && isExpanded && (
         <div className="file-tree-children">
-          {children.map((child) => (
+          {visibleChildren.map((child) => (
             <FileTreeNode
               key={child.path}
               entry={child}
@@ -112,6 +122,19 @@ function FileTreeNode({
               onContextMenuRow={onContextMenuRow}
             />
           ))}
+          {capped && (
+            <button
+              type="button"
+              className="file-tree-item file-tree-show-more"
+              style={{ paddingLeft: `${(depth + 1) * 14 + 8}px` }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setRevealAll(true);
+              }}
+            >
+              Show {children.length - MAX_VISIBLE_CHILDREN} more
+            </button>
+          )}
           {creation?.parentDir === entry.path ? renderNewNodeInput(depth + 1) : null}
         </div>
       )}
