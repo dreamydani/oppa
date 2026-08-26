@@ -199,6 +199,7 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -861,6 +862,25 @@ describe("TerminalPane", () => {
     const workingBySessionId = useTerminalStore.getState().workingBySessionId;
     expect(workingBySessionId["hyd-idle"]).toBe(false);
     expect(workingBySessionId["hyd-busy"]).toBe(true);
+  });
+
+  it("hydrates statusBySessionId from the attach result when an agent status rides along", async () => {
+    ptySpawnMock.mockResolvedValueOnce({
+      id: "hyd-agent",
+      is_new: true,
+      agent_status: {
+        state: "blocked",
+        interactive_prompt: "Allow write access to /tmp?",
+        state_started_at_ms: 1,
+        updated_at_ms: 2,
+        origin: "hook",
+      },
+    });
+    await useTerminalStore.getState().spawnSession("C:/tmp");
+
+    const entry = useTerminalStore.getState().statusBySessionId["hyd-agent"];
+    expect(entry?.state).toBe("blocked");
+    expect(entry?.interactive_prompt).toBe("Allow write access to /tmp?");
   });
 
   it("clears terminal buffer and cached scrollback when Clear Scrollback is invoked from header menu", async () => {

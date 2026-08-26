@@ -29,6 +29,8 @@ import type {
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./slices/terminalSessionsSlice";
 import { createSessionActivitySlice } from "./slices/sessionActivitySlice";
 import type { SessionActivitySlice } from "./slices/sessionActivitySlice";
+import { createAgentStatusSlice } from "./slices/agentStatusSlice";
+import type { AgentStatusSlice } from "./slices/agentStatusSlice";
 import { createPaneLayoutSlice } from "./slices/paneLayoutSlice";
 import type { PaneLayoutSlice, TabState } from "./slices/paneLayoutSlice";
 import { createWorkspaceLaunchSlice } from "./slices/workspaceLaunchSlice";
@@ -105,6 +107,7 @@ export { selectProjectTree, extractRepoName };
 export type { SessionInfo, SessionStatus, TerminalSession };
 export { DEFAULT_COLS, DEFAULT_ROWS };
 export { markScrollbackDirty, detectEditorLanguage };
+export { createAgentStatusSlice } from "./slices/agentStatusSlice";
 export type {
   BranchNode,
   ProjectNode,
@@ -126,6 +129,7 @@ export type { EditorViewMode };
 export interface TerminalState
   extends SessionSlice,
     SessionActivitySlice,
+    AgentStatusSlice,
     PaneLayoutSlice,
     WorkspaceLaunchSlice,
     AppChromeSlice,
@@ -145,6 +149,7 @@ type SliceSet = (
 export const useTerminalStore = create<TerminalState>()((set, get) => ({
   ...createSessionsSlice(set as SliceSet, get),
   ...createSessionActivitySlice(),
+  ...createAgentStatusSlice(),
   ...createPaneLayoutSlice(set as SliceSet, get),
   ...createWorkspaceLaunchSlice(set as SliceSet, get),
   ...createAppChromeSlice(set as SliceSet, get),
@@ -163,6 +168,7 @@ import {
   onTitleChanged,
   onFocusRequested,
   onSessionWorking,
+  onAgentStatus,
   onGitChanged,
   onPrChanged,
 } from "../lib/pty/transport";
@@ -204,6 +210,17 @@ void onSessionWorking(({ sessionId, working }) => {
   if (useTerminalStore.getState().workingBySessionId[sessionId] === working) return;
   useTerminalStore.setState((state) => ({
     workingBySessionId: { ...state.workingBySessionId, [sessionId]: working },
+  }));
+});
+
+// Hook-classified rich status entries are edge-triggered like SessionWorking;
+// the whole entry rides in so panes/pills never infer agent state themselves.
+void onAgentStatus(({ paneKey, entry }) => {
+  if (!paneKey) return;
+  const statuses = useTerminalStore.getState().statusBySessionId;
+  if (statuses[paneKey]?.updated_at_ms === entry.updated_at_ms) return;
+  useTerminalStore.setState((state) => ({
+    statusBySessionId: { ...state.statusBySessionId, [paneKey]: entry },
   }));
 });
 

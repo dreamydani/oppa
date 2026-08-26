@@ -166,6 +166,10 @@ export function createSessionsSlice(
         // Attach result carries the daemon's current working/idle so dots are
         // correct immediately on warm reattach.
         const working = typeof res !== "string" ? (res.working ?? false) : false;
+        // Last hook-classified rich status rides the attach result so pills show
+        // truth instantly (e.g. a finished or blocked agent on cold reattach).
+        const agentStatus =
+          typeof res !== "string" ? (res.agent_status ?? undefined) : undefined;
 
         const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
@@ -205,6 +209,9 @@ export function createSessionsSlice(
               },
             },
             workingBySessionId: { ...state.workingBySessionId, [id]: working },
+            ...(agentStatus
+              ? { statusBySessionId: { ...state.statusBySessionId, [id]: agentStatus } }
+              : {}),
           };
         });
         return id;

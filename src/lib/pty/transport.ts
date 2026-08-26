@@ -23,6 +23,25 @@ export interface ResumePlan {
   kind: "agent-resume" | "command-relaunch";
 }
 
+// Mirrors src-tauri/agents/status.rs (snake_case, field clamps preserved).
+export type AgentStatusState = "working" | "blocked" | "waiting" | "done";
+export type StatusOrigin = "hook" | "quiet";
+
+export interface AgentStatusEntry {
+  state: AgentStatusState;
+  prompt?: string;
+  agent_type?: string | null;
+  model?: string | null;
+  tool_name?: string | null;
+  tool_input?: string | null;
+  interactive_prompt?: string | null;
+  interrupted?: boolean | null;
+  turn_completed_at_ms?: number | null;
+  state_started_at_ms: number;
+  updated_at_ms: number;
+  origin: StatusOrigin;
+}
+
 export interface PtySpawnResult {
   id: string;
   is_new: boolean;
@@ -37,6 +56,8 @@ export interface PtySpawnResult {
   resume_declined_reason?: string | null;
   // Mirrors CreateOrAttachResult.working: hydrates working/idle dots on attach
   working?: boolean;
+  // Hydrates the last hook-classified rich status on warm/cold reattach
+  agent_status?: AgentStatusEntry | null;
 }
 
 
@@ -287,6 +308,27 @@ export interface SessionWorkingPayload {
 }
 export async function onSessionWorking(cb: (p: SessionWorkingPayload) => void) {
   return listen<SessionWorkingPayload>("session-working", (e) => cb(e.payload));
+}
+
+// Edge-triggered hook-classified status entries; the payload mirrors the Rust
+// AgentStatusPayload verbatim (pane_key === session_id in the daemon registry).
+export interface AgentStatusPayload {
+  paneKey: string;
+  entry: AgentStatusEntry;
+}
+export async function onAgentStatus(cb: (p: AgentStatusPayload) => void) {
+  return listen<AgentStatusPayload>("agent-status", (e) => {
+    // Normalize snake_case wire key to the camelCase used across the store.
+    const raw = e.payload as unknown as {
+      pane_key?: string;
+      paneKey?: string;
+      entry: AgentStatusEntry;
+    };
+    cb({
+      paneKey: raw.paneKey ?? raw.pane_key ?? "",
+      entry: raw.entry,
+    });
+  });
 }
 
 // ---- IPC v4 source-control surface; every shape mirrors its serde struct verbatim ----
