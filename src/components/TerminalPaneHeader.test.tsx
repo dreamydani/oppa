@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import * as transport from "../lib/pty/transport";
-import { TerminalPaneHeader } from "./TerminalPaneHeader";
+import { TerminalPaneHeader, resolveRepoForCwd } from "./TerminalPaneHeader";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn().mockResolvedValue("s2"),
@@ -606,6 +606,154 @@ describe("TerminalPaneHeader", () => {
 
       fireEvent.mouseDown(screen.getByTestId("outside"));
       expect(container.querySelector(".terminal-pane-header-switcher-panel")).toBeNull();
+    });
+  });
+
+  describe("Split Chooser Popover", () => {
+    beforeEach(() => {
+      useTerminalStore.setState({ repos: [] });
+    });
+
+    function repoRecord(overrides: Partial<transport.RepoRecord> = {}): transport.RepoRecord {
+      return {
+        repo_id: "demo",
+        path: "/home/user/project",
+        default_base_ref: null,
+        worktree_base_path: null,
+        ...overrides,
+      };
+    }
+
+    it("resolveRepoForCwd picks the longest repo path that prefixes the cwd", () => {
+      const repos = [
+        repoRecord({ repo_id: "mono", path: "D:/repos" }),
+        repoRecord({ repo_id: "backend", path: "D:/repos/backend" }),
+      ];
+
+      expect(resolveRepoForCwd("D:\\repos\\backend\\sub\\app", repos)?.repo_id).toBe("backend");
+      expect(resolveRepoForCwd("D:/repos/other", repos)?.repo_id).toBe("mono");
+      expect(resolveRepoForCwd("D:/elsewhere", repos)).toBeNull();
+      expect(resolveRepoForCwd(undefined, repos)).toBeNull();
+    });
+
+    it("opens the chooser from the split caret while main split buttons stay instant", () => {
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      expect(screen.queryByText("Same directory")).toBeNull();
+
+      fireEvent.click(screen.getByTitle("Split Right Options"));
+      expect(screen.getByText("Same directory")).toBeTruthy();
+      expect(screen.getByText("New branch…")).toBeTruthy();
+
+      // Main button still executes its split immediately (no popover needed).
+      fireEvent.click(screen.getByTitle("Split Down"));
+      void vi.waitFor(() => {
+        expect(useTerminalStore.getState().layout.type).toBe("split");
+      });
+    });
+
+    it("choosing Same directory invokes splitPane once with the expected args and closes", async () => {
+      const splitSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPane")
+        .mockResolvedValue(undefined);
+      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      render(<TerminalPaneHeader id="s1" path={[0]} />);
+
+      fireEvent.click(screen.getByTitle("Split Down Options"));
+      fireEvent.click(screen.getByText("Same directory"));
+
+      expect(splitSpy).toHaveBeenCalledTimes(1);
+      expect(splitSpy).toHaveBeenCalledWith("v", [0]);
+      expect(openSheetSpy).not.toHaveBeenCalled();
+      expect(screen.queryByText("Same directory")).toBeNull();
+    });
+
+    it("choosing New branch… opens the fleet sheet prefilled with the resolved repo and count=1 without splitting", async () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            cwd: "D:\\repos\\backend\\sub\\app",
+          },
+        },
+        repos: [
+          repoRecord({ repo_id: "mono", path: "D:/repos" }),
+          repoRecord({ repo_id: "backend", path: "D:/repos/backend", default_base_ref: "main" }),
+        ],
+      });
+      const splitSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPane")
+        .mockResolvedValue(undefined);
+      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("Split Right Options"));
+      fireEvent.click(screen.getByText("New branch…"));
+
+      expect(openSheetSpy).toHaveBeenCalledTimes(1);
+      expect(openSheetSpy).toHaveBeenCalledWith({ repoPath: "D:/repos/backend", count: 1 });
+      expect(splitSpy).not.toHaveBeenCalled();
+      expect(screen.queryByText("New branch…")).toBeNull();
+    });
+
+    it("choosing New branch… without a resolvable repo opens the sheet unprefilled", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "Terminal 1",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            cwd: "/home/nowhere",
+          },
+        },
+        repos: [repoRecord()],
+      });
+      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("Split Right Options"));
+      fireEvent.click(screen.getByText("New branch…"));
+
+      expect(openSheetSpy).toHaveBeenCalledTimes(1);
+      expect(openSheetSpy).toHaveBeenCalledWith();
+    });
+
+    it("closes the chooser on Escape without side effects", () => {
+      const splitSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPane")
+        .mockResolvedValue(undefined);
+      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("Split Right Options"));
+      expect(screen.getByText("Same directory")).toBeTruthy();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(screen.queryByText("Same directory")).toBeNull();
+      expect(splitSpy).not.toHaveBeenCalled();
+      expect(openSheetSpy).not.toHaveBeenCalled();
+    });
+
+    it("closes the chooser on outside click", () => {
+      render(
+        <div>
+          <div data-testid="outside">Outside</div>
+          <TerminalPaneHeader id="s1" path={[]} />
+        </div>,
+      );
+
+      fireEvent.click(screen.getByTitle("Split Right Options"));
+      expect(screen.getByText("Same directory")).toBeTruthy();
+
+      fireEvent.mouseDown(screen.getByTestId("outside"));
+      expect(screen.queryByText("Same directory")).toBeNull();
     });
   });
 });

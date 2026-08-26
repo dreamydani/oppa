@@ -175,6 +175,23 @@
   background-color: var(--tint-active);
 }
 
+/* Split chooser: icon + caret combo per direction; popover reuses menu styles */
+.terminal-pane-header-split-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.terminal-pane-header-split-caret {
+  width: 13px;
+  margin-left: -5px;
+  padding: 0;
+}
+
+.terminal-pane-header-split-popover {
+  min-width: 150px;
+}
+
 /* Terminal switcher dropdown (project-title ▾): lists every tab's session
    with working/idle dot + worktree branch chip. */
 .terminal-pane-header-switcher-btn {

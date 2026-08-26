@@ -3,6 +3,7 @@ import { ChevronDown, X } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
+import type { RepoRecord } from "../lib/pty/transport";
 import { focus as focusLeaf } from "../lib/pane-manager/layout";
 import {
   usePaneDragStore,
@@ -103,6 +104,29 @@ export function sessionDisplayTitle(
   return title || "terminal";
 }
 
+// Owning repo for a session cwd: longest registered repo path that prefixes
+// it. Case-insensitive because drive-letter/shell casing varies on Windows.
+export function resolveRepoForCwd(
+  cwd: string | undefined,
+  repos: RepoRecord[],
+): RepoRecord | null {
+  if (!cwd) return null;
+  const normalizePath = (p: string) =>
+    p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const cwdNorm = normalizePath(cwd);
+  let best: RepoRecord | null = null;
+  let bestLen = -1;
+  for (const repo of repos) {
+    const repoNorm = normalizePath(repo.path);
+    const isPrefix = cwdNorm === repoNorm || cwdNorm.startsWith(`${repoNorm}/`);
+    if (isPrefix && repoNorm.length > bestLen) {
+      best = repo;
+      bestLen = repoNorm.length;
+    }
+  }
+  return best;
+}
+
 export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProps) {
   const session = useTerminalStore((s) => s.sessions[id]);
   const renameSession = useTerminalStore((s) => s.renameSession);
@@ -110,6 +134,8 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
+  const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
+  const repos = useTerminalStore((s) => s.repos);
   const closePane = useTerminalStore((s) => s.closePane);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const movePane = useTerminalStore((s) => s.movePane);
@@ -125,12 +151,17 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
   const [isDraggingLocal, setIsDraggingLocal] = useState(false);
+  // Direction of the open split chooser popover ("h" right / "v" down), if any.
+  const [splitChooserDir, setSplitChooserDir] = useState<"h" | "v" | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const switcherBtnRef = useRef<HTMLButtonElement>(null);
   const switcherPanelRef = useRef<HTMLDivElement>(null);
+  const splitChooserPanelRef = useRef<HTMLDivElement>(null);
+  const splitRightCaretRef = useRef<HTMLButtonElement>(null);
+  const splitDownCaretRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -295,6 +326,58 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     };
   }, [isSwitcherOpen]);
 
+  // Split chooser: same close contract as the switcher (outside mousedown + Esc).
+  useEffect(() => {
+    if (!splitChooserDir) return;
+    const chooserCaretRef =
+      splitChooserDir === "h" ? splitRightCaretRef : splitDownCaretRef;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        splitChooserPanelRef.current &&
+        !splitChooserPanelRef.current.contains(target) &&
+        chooserCaretRef.current &&
+        !chooserCaretRef.current.contains(target)
+      ) {
+        setSplitChooserDir(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSplitChooserDir(null);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [splitChooserDir]);
+
+  const toggleSplitChooser = useCallback((dir: "h" | "v") => {
+    setSplitChooserDir((prev) => (prev === dir ? null : dir));
+  }, []);
+
+  const splitSameDirectory = useCallback(
+    (dir: "h" | "v") => {
+      setSplitChooserDir(null);
+      void splitPane(dir, path);
+    },
+    [path, splitPane],
+  );
+
+  // New branch…: seed the fleet sheet from this pane's owning repo; when the
+  // cwd maps to no registered repo the sheet opens unprefilled and the user
+  // picks there.
+  const splitNewBranch = useCallback(() => {
+    setSplitChooserDir(null);
+    const repo = resolveRepoForCwd(session?.cwd, repos);
+    if (repo) {
+      openFleetSheet({ repoPath: repo.path, count: 1 });
+    } else {
+      openFleetSheet();
+    }
+  }, [openFleetSheet, repos, session?.cwd]);
+
   return (
     <div className="terminal-pane-header">
       <div className="terminal-pane-header-left">
@@ -452,25 +535,69 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           <IconGlobe />
         </button>
 
-        <button
-          className="terminal-pane-header-btn"
-          title="Split Down"
-          aria-label="Split Down"
-          onClick={() => void splitPane("v", path)}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <IconSplitDown />
-        </button>
+        <span className="terminal-pane-header-split-group">
+          <button
+            className="terminal-pane-header-btn"
+            title="Split Down"
+            aria-label="Split Down"
+            onClick={() => void splitPane("v", path)}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <IconSplitDown />
+          </button>
+          <button
+            ref={splitDownCaretRef}
+            type="button"
+            className="terminal-pane-header-btn terminal-pane-header-split-caret"
+            title="Split Down Options"
+            aria-label="Split Down Options"
+            aria-expanded={splitChooserDir === "v"}
+            aria-haspopup="menu"
+            onClick={() => toggleSplitChooser("v")}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <ChevronDown size={9} strokeWidth={2.6} />
+          </button>
+          {splitChooserDir === "v" && (
+            <SplitChooserPopover
+              panelRef={splitChooserPanelRef}
+              onSameDirectory={() => splitSameDirectory("v")}
+              onNewBranch={splitNewBranch}
+            />
+          )}
+        </span>
 
-        <button
-          className="terminal-pane-header-btn"
-          title="Split Right"
-          aria-label="Split Right"
-          onClick={() => void splitPane("h", path)}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <IconSplitRight />
-        </button>
+        <span className="terminal-pane-header-split-group">
+          <button
+            className="terminal-pane-header-btn"
+            title="Split Right"
+            aria-label="Split Right"
+            onClick={() => void splitPane("h", path)}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <IconSplitRight />
+          </button>
+          <button
+            ref={splitRightCaretRef}
+            type="button"
+            className="terminal-pane-header-btn terminal-pane-header-split-caret"
+            title="Split Right Options"
+            aria-label="Split Right Options"
+            aria-expanded={splitChooserDir === "h"}
+            aria-haspopup="menu"
+            onClick={() => toggleSplitChooser("h")}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <ChevronDown size={9} strokeWidth={2.6} />
+          </button>
+          {splitChooserDir === "h" && (
+            <SplitChooserPopover
+              panelRef={splitChooserPanelRef}
+              onSameDirectory={() => splitSameDirectory("h")}
+              onNewBranch={splitNewBranch}
+            />
+          )}
+        </span>
 
         <button
           className="terminal-pane-header-btn"
@@ -496,6 +623,44 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       {isSwitcherOpen && (
         <TerminalSwitcherMenu onClose={() => setIsSwitcherOpen(false)} panelRef={switcherPanelRef} />
       )}
+    </div>
+  );
+}
+
+function SplitChooserPopover({
+  panelRef,
+  onSameDirectory,
+  onNewBranch,
+}: {
+  panelRef: React.RefObject<HTMLDivElement | null>;
+  onSameDirectory: () => void;
+  onNewBranch: () => void;
+}) {
+  return (
+    <div
+      ref={panelRef}
+      className="terminal-pane-header-menu terminal-pane-header-split-popover"
+      role="menu"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className="terminal-pane-header-menu-item"
+        onClick={onSameDirectory}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        Same directory
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="terminal-pane-header-menu-item"
+        onClick={onNewBranch}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        New branch…
+      </button>
     </div>
   );
 }
