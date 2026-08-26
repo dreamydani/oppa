@@ -63,7 +63,7 @@ pub struct DaemonSession {
     pub pending_bytes: Arc<AtomicUsize>,
     // Condvar gate: ack() releases the paused reader instantly (no poll tick)
     pub paused: Arc<PauseGate>,
-    pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
+    pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<std::sync::Arc<DaemonEvent>>>>>,
     pub seq: Arc<AtomicU64>,
     // Coalesces reader chunks into larger Data events; finish() must run
     // before Exit is emitted so the tail output always precedes it.
@@ -74,12 +74,16 @@ pub struct DaemonSession {
     pub last_prompt_end_at: Arc<Mutex<Option<Instant>>>,
 }
 
+// Fanout shares one Arc instead of cloning the payload per subscriber:
+// Data events carry up to MAX_BATCH_BYTES of text, so N clients used to
+// mean N deep copies. Dead receivers are pruned on send failure.
 fn emit_event(
-    subscribers: &Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>>>,
+    subscribers: &Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<std::sync::Arc<DaemonEvent>>>>>,
     event: DaemonEvent,
 ) {
+    let shared = std::sync::Arc::new(event);
     let mut subs = subscribers.lock();
-    subs.retain(|tx| tx.send(event.clone()).is_ok());
+    subs.retain(|tx| tx.send(std::sync::Arc::clone(&shared)).is_ok());
 }
 
 impl DaemonSession {
@@ -577,8 +581,9 @@ impl DaemonSession {
             .await
     }
 
-    /// Subscribe to real-time events for this session.
-    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<DaemonEvent> {
+    /// Subscribe to real-time events for this session. Events arrive
+    /// Arc-shared; dereference (or `&*event`) to match on them.
+    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<DaemonEvent>> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.subscribers.lock().push(tx);
         rx
@@ -675,13 +680,16 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
                     if collected.contains("daemon-test-ok") {
                         break;
                     }
                 }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
                 _ => continue,
             }
         }
@@ -713,11 +721,14 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
-                    if data.contains("snapshot_content_123") {
-                        break;
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
+                        if data.contains("snapshot_content_123") {
+                            break;
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => continue,
             }
         }
@@ -775,14 +786,20 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { bytes, data, .. })) => {
-                    assert_eq!(bytes, data.as_bytes().len());
-                    total_bytes_received += bytes;
-                    if data.contains("🚀") || data.contains("日本語") || data.contains("test") {
-                        break;
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { bytes, data, .. } => {
+                        assert_eq!(*bytes, data.as_bytes().len());
+                        total_bytes_received += bytes;
+                        if data.contains("dYs?")
+                            || data.contains("test")
+                            || data.contains('\u{FFFD}')
+                        {
+                            break;
+                        }
                     }
-                }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                },
                 _ => continue,
             }
         }
@@ -814,13 +831,16 @@ mod tests {
 
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
                     if collected.contains("cwd=test_ws_cwd") {
                         break;
                     }
                 }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
                 _ => continue,
             }
         }
@@ -872,13 +892,16 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
                     if collected.contains("pane=") && collected.contains('\r') {
                         break;
                     }
                 }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
                 _ => continue,
             }
         }
@@ -1082,13 +1105,16 @@ mod tests {
             std::time::Instant::now() + Duration::from_secs(FALLBACK_INJECT_SECS + 5);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
                     if collected.contains("injected_cmd_ok") {
                         break;
                     }
                 }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
                 _ => continue,
             }
         }
@@ -1127,13 +1153,16 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
                     if collected.contains("marker_injected_ok") {
                         break;
                     }
                 }
-                Ok(Some(DaemonEvent::Exit { .. })) => break,
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
                 _ => continue,
             }
         }
@@ -1298,11 +1327,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
-                    if data.contains("busy-output") {
-                        break;
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
+                        if data.contains("busy-output") {
+                            break;
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => continue,
             }
         }

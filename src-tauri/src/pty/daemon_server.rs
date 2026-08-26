@@ -235,11 +235,13 @@ async fn handle_wait_for(
                     break;
                 }
                 match tokio::time::timeout(deadline - now, rx.recv()).await {
-                    Ok(Some(DaemonEvent::Exit { code, .. })) => {
-                        result = (true, code);
-                        break;
+                    Ok(Some(event)) => {
+                        if let DaemonEvent::Exit { code, .. } = &*event {
+                            result = (true, *code);
+                            break;
+                        }
+                        continue;
                     }
-                    Ok(Some(_)) => continue,
                     Ok(None) => break,
                     Err(_elapsed) => break,
                 }
@@ -1067,12 +1069,15 @@ mod tests {
         let mut collected = String::new();
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-                Ok(Some(DaemonEvent::Data { data, .. })) => {
-                    collected.push_str(&data);
-                    if collected.contains("claude") {
-                        break;
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
+                        collected.push_str(data);
+                        if collected.contains("claude") {
+                            break;
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => continue,
             }
         }
