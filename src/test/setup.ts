@@ -67,6 +67,29 @@ vi.mock("@monaco-editor/react", () => {
   };
 });
 
+// Local-Monaco wiring (localMonaco.ts) must never pull the real package or
+// spin real workers inside vitest: stub the package, the loader, and the
+// single worker-boundary module.
+vi.mock("monaco-editor", () => ({
+  __esModule: true,
+  default: {},
+  Environment: {},
+  languages: {},
+  editor: {},
+}));
+vi.mock("@monaco-editor/loader", () => ({
+  __esModule: true,
+  default: { config: vi.fn() },
+}));
+vi.mock("../lib/monaco/monacoWorkers", () => ({
+  __esModule: true,
+  editorWorker: class MockWorker {},
+  jsonWorker: class MockWorker {},
+  cssWorker: class MockWorker {},
+  htmlWorker: class MockWorker {},
+  tsWorker: class MockWorker {},
+}));
+
 afterEach(() => {
   cleanup();
 });

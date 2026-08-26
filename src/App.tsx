@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { PlusIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
@@ -12,7 +12,13 @@ import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModa
 import { WorktreeCreateModal } from "./components/worktree/WorktreeCreateModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
-import { EditorViewport } from "./components/editor/EditorViewport";
+// Lazy: the Monaco chunk (~MBs) should load only when the editor mode is
+// actually opened; terminal-first sessions never pay for it.
+const EditorViewport = lazy(() =>
+  import("./components/editor/EditorViewport").then((m) => ({
+    default: m.EditorViewport,
+  })),
+);
 import { SettingsView } from "./components/settings/SettingsView";
 import { useTerminalStore } from "./store/terminalStore";
 import {
@@ -159,7 +165,10 @@ function App() {
       useTerminalStore.getState().updateSessionCwd(p.id, p.cwd);
     });
     return () => {
-      void unlistenPromise.then((unlisten) => unlisten());
+      // onPtyCwd may be a stub returning undefined in tests; tolerate it.
+      void Promise.resolve(unlistenPromise).then((unlisten) =>
+        unlisten?.(),
+      );
     };
   }, []);
 
@@ -173,7 +182,9 @@ function App() {
       onExtensionCrashed((payload) => handleExtensionCrash(payload)),
     ];
     return () => {
-      void Promise.all(unlisteners).then((fns) => fns.forEach((fn) => fn()));
+      void Promise.all(unlisteners).then((fns) =>
+        fns.forEach((fn) => fn?.()),
+      );
     };
   }, []);
 
@@ -439,7 +450,9 @@ function App() {
                 height: "100%",
               }}
             >
-              <EditorViewport />
+              <Suspense fallback={null}>
+                {activeAppMode === "editor" && <EditorViewport />}
+              </Suspense>
             </div>
           </main>
           {activeAppMode !== "browser" && <RightSidebar />}

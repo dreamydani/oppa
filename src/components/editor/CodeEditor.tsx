@@ -12,6 +12,9 @@ import Editor, {
 } from "@monaco-editor/react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { registerDiffSelectionGetter } from "./diffSelectionBridge";
+// Side-effect import: pins @monaco-editor/react to the locally bundled
+// Monaco + workers instead of its CDN default.
+import "../../lib/monaco/localMonaco";
 import {
   mapToMonacoLanguage,
   defineOppaMonacoThemes,

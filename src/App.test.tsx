@@ -711,7 +711,7 @@ describe("App", () => {
     });
   });
 
-  it("renders EditorViewport in main-viewport when activeAppMode is 'editor'", () => {
+  it("renders EditorViewport in main-viewport when activeAppMode is 'editor'", async () => {
     useTerminalStore.setState({
       activeAppMode: "editor",
       leftSidebarOpen: true,
@@ -719,7 +719,12 @@ describe("App", () => {
     });
     const { container } = render(<App />);
 
-    expect(container.querySelector(".main-viewport .editor-viewport")).not.toBeNull();
+    // The editor is lazy-mounted; the chunk resolves a tick later.
+    await vi.waitFor(() => {
+      expect(
+        container.querySelector(".main-viewport .editor-viewport"),
+      ).not.toBeNull();
+    });
     const editorWrapper = container.querySelector(".editor-viewport-view") as HTMLElement;
     const terminalWrapper = container.querySelector(".terminal-viewport-view") as HTMLElement;
     expect(editorWrapper.style.display).toBe("flex");
