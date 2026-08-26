@@ -7,6 +7,11 @@ import type { MergeModeInput } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
+import {
+  consumeAutoStatusOnFinish,
+  resetAutoStatusOnFinish,
+  selectWorktreeFinished,
+} from "../../store/slices/worktreeRegistrySlice";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import "./worktree.css";
 
@@ -124,6 +129,34 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     }
     return byWorktree;
   }, [sessions]);
+
+  // F11 finished state per card: retired cards never count as finished.
+  const finishedByWorktreeId = useMemo(() => {
+    const finished: Record<string, boolean> = {};
+    for (const { record } of worktrees) {
+      finished[record.id] =
+        !record.retired && selectWorktreeFinished({ sessions, workingBySessionId }, record.id);
+    }
+    return finished;
+  }, [worktrees, sessions, workingBySessionId]);
+
+  // Auto-status is a side effect, so it lives here — never in the selector.
+  // consume/reset keep it to one call per finish transition (F11).
+  useEffect(() => {
+    for (const { record } of worktrees) {
+      if (
+        finishedByWorktreeId[record.id] &&
+        consumeAutoStatusOnFinish(record.id) &&
+        record.workspace_status === "in-progress"
+      ) {
+        void setWorktreeStatus(record.id, "in-review").catch((e) =>
+          console.error("auto in-review on finish failed:", e),
+        );
+      } else if (!finishedByWorktreeId[record.id]) {
+        resetAutoStatusOnFinish(record.id);
+      }
+    }
+  }, [finishedByWorktreeId, worktrees, setWorktreeStatus]);
 
   const openLinkedTerminal = (sessionId: string) => {
     const tab = tabs.find((t) => findLeafPath(t.layout, sessionId) !== null);
@@ -330,6 +363,11 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                       >
                         <span className="status-dot" />
                         {STATUS_LABELS[record.workspace_status]}
+                      </span>
+                    )}
+                    {!record.retired && finishedByWorktreeId[record.id] && (
+                      <span className="worktree-finished-chip" title="All linked agents idle">
+                        finished
                       </span>
                     )}
                     {record.retired && (

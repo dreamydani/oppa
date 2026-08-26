@@ -71,7 +71,8 @@
 .worktree-status-chip,
 .worktree-retired-chip,
 .worktree-missing-chip,
-.worktree-live-chip {
+.worktree-live-chip,
+.worktree-finished-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -134,6 +135,13 @@
 .worktree-live-chip {
   color: #3fb950;
   background: rgba(63, 185, 80, 0.08);
+}
+
+/* F11 finished badge — emerald like the completed dot / live chip */
+.worktree-finished-chip {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.35);
 }
 
 /* Linked terminals on a card — same dot language as the header dropdown */

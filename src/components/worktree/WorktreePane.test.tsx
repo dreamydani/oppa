@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 import { WorktreePane } from "./WorktreePane";
 import { useTerminalStore } from "../../store/terminalStore";
+import {
+  resetAutoStatusAppliedForTests,
+  selectWorktreeFinished,
+} from "../../store/slices/worktreeRegistrySlice";
 import * as transport from "../../lib/pty/transport";
 import type { PushOutcome, SourceControlStatus, WorktreeRecord } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
@@ -760,6 +764,162 @@ describe("finishWorktree store orchestration", () => {
 
     expect(outcome).toEqual({ ok: false, stage: "status", reason: expect.stringMatching(/unknown worktree nope/) });
     expect(scStatusMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorktreePane finished detection", () => {
+  const WID = "demo::C:/ws/feat-a";
+
+  function boundSession(id: string, overrides: Partial<SessionInfo> = {}): SessionInfo {
+    return {
+      id,
+      title: "",
+      status: "running",
+      cwd: "C:/ws/feat-a",
+      cols: 80,
+      rows: 24,
+      worktreeId: WID,
+      ...overrides,
+    };
+  }
+
+  function registryEntry(
+    workspaceStatus: WorktreeRecord["workspace_status"] = "in-progress",
+  ): { record: WorktreeRecord; missing_on_disk: boolean } {
+    return {
+      record: record({
+        id: WID,
+        name: "feat-a",
+        display_name: "Feat A",
+        branch: "feat-a",
+        workspace_status: workspaceStatus,
+      }),
+      missing_on_disk: false,
+    };
+  }
+
+  function seedFinishedCard(
+    workspaceStatus: WorktreeRecord["workspace_status"],
+    sessions: Record<string, SessionInfo>,
+    workingBySessionId: Record<string, boolean>,
+  ) {
+    useTerminalStore.setState({
+      worktrees: [registryEntry(workspaceStatus)],
+      worktreeLiveSessions: {},
+      reviewByCwd: {},
+      prStatusByWorktreeId: {},
+      sessions,
+      workingBySessionId,
+      tabs: [],
+      activeTabId: "",
+    } as unknown as Record<string, unknown>);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAutoStatusAppliedForTests();
+    // Reloads triggered by setWorktreeStatus must keep the seeded card mounted.
+    worktreeListMock.mockResolvedValue([registryEntry()]);
+    worktreePsMock.mockResolvedValue([]);
+    worktreeSetMock.mockResolvedValue(null);
+  });
+
+  it("selector counts a worktree finished only with ≥1 live session and all idle", () => {
+    seedFinishedCard("todo", {}, {});
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+
+    useTerminalStore.setState({
+      sessions: { s1: boundSession("s1") },
+      workingBySessionId: { s1: true },
+    });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+
+    useTerminalStore.setState({ workingBySessionId: { s1: false } });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(true);
+
+    // Exited sessions never count toward the linked set.
+    useTerminalStore.setState({ sessions: { gone: boundSession("gone", { status: "exited" }) } });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+  });
+
+  it("shows the finished chip only while every linked session is idle", () => {
+    seedFinishedCard("todo", {}, {});
+    render(<WorktreePane />);
+    const card = () => screen.getByText("Feat A").closest(".worktree-card")!;
+
+    // No linked terminals -> never finished.
+    expect(card().querySelector(".worktree-finished-chip")).toBeNull();
+
+    useTerminalStore.setState({
+      sessions: { s1: boundSession("s1") },
+      workingBySessionId: { s1: true },
+    });
+    expect(card().querySelector(".worktree-finished-chip")).toBeNull();
+
+    act(() => {
+      useTerminalStore.setState({ workingBySessionId: { s1: false } });
+    });
+    expect(card().querySelector(".worktree-finished-chip")).not.toBeNull();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+
+    // Any session flipping back to working drops the chip immediately.
+    act(() => {
+      useTerminalStore.setState({
+        sessions: { s1: boundSession("s1"), s2: boundSession("s2") },
+        workingBySessionId: { s1: false, s2: true },
+      });
+    });
+    expect(card().querySelector(".worktree-finished-chip")).toBeNull();
+  });
+
+  it("promotes in-progress to in-review exactly once per finish and not on rerenders", async () => {
+    seedFinishedCard("in-progress", { s1: boundSession("s1") }, { s1: false });
+    const { rerender } = render(<WorktreePane />);
+
+    await vi.waitFor(() => {
+      expect(worktreeSetMock).toHaveBeenCalledTimes(1);
+    });
+    expect(worktreeSetMock).toHaveBeenCalledWith(WID, { workspaceStatus: "in-review" });
+
+    // Flush the post-call reload so its state swap lands before rerender checks.
+    await act(async () => {});
+    await act(async () => {
+      useTerminalStore.setState({ reviewByCwd: {} });
+    });
+    rerender(<WorktreePane />);
+    await act(async () => {});
+    expect(worktreeSetMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaving finished clears the chip and re-arms auto-status for the next finish", async () => {
+    seedFinishedCard("in-progress", { s1: boundSession("s1") }, { s1: false });
+    render(<WorktreePane />);
+    await vi.waitFor(() => expect(worktreeSetMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      useTerminalStore.setState({ workingBySessionId: { s1: true } });
+    });
+    const card = screen.getByText("Feat A").closest(".worktree-card")!;
+    expect(card.querySelector(".worktree-finished-chip")).toBeNull();
+
+    await act(async () => {
+      useTerminalStore.setState({ workingBySessionId: { s1: false } });
+    });
+    expect(card.querySelector(".worktree-finished-chip")).not.toBeNull();
+    await vi.waitFor(() => expect(worktreeSetMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("never auto-promotes when the current status is not in-progress", async () => {
+    for (const status of ["todo", "completed"] as const) {
+      seedFinishedCard(status, { s1: boundSession("s1") }, { s1: false });
+      const { unmount } = render(<WorktreePane />);
+      await act(async () => {});
+      expect(
+        screen.getByText("Feat A").closest(".worktree-card")!.querySelector(".worktree-finished-chip"),
+      ).not.toBeNull();
+      expect(worktreeSetMock).not.toHaveBeenCalled();
+      unmount();
+    }
   });
 });
 

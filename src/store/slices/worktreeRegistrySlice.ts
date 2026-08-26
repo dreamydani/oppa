@@ -36,6 +36,45 @@ type Set = (
     | ((state: TerminalState) => Partial<TerminalState>),
 ) => void;
 
+// F11 optional auto-status on finish; a GeneralSettings field may replace this
+// module default later (deliberately kept out of the settings schema for now).
+export const AUTO_STATUS_ON_FINISH = true;
+
+// Finished stretches already handled: membership suppresses repeat calls while
+// a worktree stays finished; removal on leaving finished re-arms the next one.
+const autoStatusAppliedIds = new Set<string>();
+
+/** One-shot gate: true only on the first observation of a finished stretch. */
+export function consumeAutoStatusOnFinish(worktreeId: string): boolean {
+  if (!AUTO_STATUS_ON_FINISH || autoStatusAppliedIds.has(worktreeId)) return false;
+  autoStatusAppliedIds.add(worktreeId);
+  return true;
+}
+
+/** Leaving finished re-arms auto-status for future finish transitions. */
+export function resetAutoStatusOnFinish(worktreeId: string): void {
+  autoStatusAppliedIds.delete(worktreeId);
+}
+
+/** Test hook: module bookkeeping must not leak between test cases. */
+export function resetAutoStatusAppliedForTests(): void {
+  autoStatusAppliedIds.clear();
+}
+
+// F11: finished = at least one linked live session and every one of them idle.
+export function selectWorktreeFinished(
+  state: Pick<TerminalState, "sessions" | "workingBySessionId">,
+  worktreeId: string,
+): boolean {
+  let linkedCount = 0;
+  for (const session of Object.values(state.sessions)) {
+    if (session.worktreeId !== worktreeId || session.status === "exited") continue;
+    linkedCount += 1;
+    if (state.workingBySessionId[session.id]) return false;
+  }
+  return linkedCount > 0;
+}
+
 export interface WorktreeCreateInput {
   repoPath: string;
   name?: string;
