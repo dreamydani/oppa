@@ -198,6 +198,7 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
+  onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -848,6 +849,18 @@ describe("TerminalPane", () => {
     const header = container.querySelector(".terminal-pane-header");
     expect(header).not.toBeNull();
     expect(header?.textContent).toContain("my-custom-title");
+  });
+
+  it("hydrates workingBySessionId from the attach result, defaulting to idle when absent", async () => {
+    ptySpawnMock.mockResolvedValueOnce({ id: "hyd-idle", is_new: true });
+    await useTerminalStore.getState().spawnSession("C:/tmp");
+
+    ptySpawnMock.mockResolvedValueOnce({ id: "hyd-busy", is_new: true, working: true });
+    await useTerminalStore.getState().spawnSession("C:/tmp");
+
+    const workingBySessionId = useTerminalStore.getState().workingBySessionId;
+    expect(workingBySessionId["hyd-idle"]).toBe(false);
+    expect(workingBySessionId["hyd-busy"]).toBe(true);
   });
 
   it("clears terminal buffer and cached scrollback when Clear Scrollback is invoked from header menu", async () => {

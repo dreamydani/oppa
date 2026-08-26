@@ -1,6 +1,7 @@
 // Terminal store composer: assembles the domain slices into one zustand
 // store and keeps the public facade stable. Every slice owns one concern:
 //   terminalSessionsSlice  live PTY sessions + scrollback registry
+//   sessionActivitySlice   per-session working/idle dots
 //   paneLayoutSlice        tabs, layout tree, save/restore pipeline
 //   workspaceLaunchSlice   wizard, launcher, recents/presets, launch flows
 //   appChromeSlice         sidebars, settings view, modals
@@ -26,6 +27,8 @@ import type {
   TerminalSession,
 } from "./slices/terminalSessionsSlice";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./slices/terminalSessionsSlice";
+import { createSessionActivitySlice } from "./slices/sessionActivitySlice";
+import type { SessionActivitySlice } from "./slices/sessionActivitySlice";
 import { createPaneLayoutSlice } from "./slices/paneLayoutSlice";
 import type { PaneLayoutSlice, TabState } from "./slices/paneLayoutSlice";
 import { createWorkspaceLaunchSlice } from "./slices/workspaceLaunchSlice";
@@ -113,6 +116,7 @@ export type { EditorViewMode };
 
 export interface TerminalState
   extends SessionSlice,
+    SessionActivitySlice,
     PaneLayoutSlice,
     WorkspaceLaunchSlice,
     AppChromeSlice,
@@ -131,6 +135,7 @@ type SliceSet = (
 
 export const useTerminalStore = create<TerminalState>()((set, get) => ({
   ...createSessionsSlice(set as SliceSet, get),
+  ...createSessionActivitySlice(),
   ...createPaneLayoutSlice(set as SliceSet, get),
   ...createWorkspaceLaunchSlice(set as SliceSet, get),
   ...createAppChromeSlice(set as SliceSet, get),
@@ -148,6 +153,7 @@ import {
   onWorktreeChanged,
   onTitleChanged,
   onFocusRequested,
+  onSessionWorking,
   onGitChanged,
   onPrChanged,
 } from "../lib/pty/transport";
@@ -181,6 +187,15 @@ void onFocusRequested(({ id }) => {
   state.selectTab(tab.id);
   const path = tab.focusedPath ? findLeafPath(tab.layout, id) : null;
   if (path) state.focusPane(path);
+});
+
+// Edge-triggered working/idle flips hydrate the switcher dots.
+void onSessionWorking(({ sessionId, working }) => {
+  // Events are edge-triggered; skip no-op flips so idle sessions stay quiet.
+  if (useTerminalStore.getState().workingBySessionId[sessionId] === working) return;
+  useTerminalStore.setState((state) => ({
+    workingBySessionId: { ...state.workingBySessionId, [sessionId]: working },
+  }));
 });
 
 // Daemon-side git mutations (any client, incl. CLI) refresh the panel; task 7

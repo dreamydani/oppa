@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, screen } from "@testing-library/react";
+import { render, fireEvent, screen, act } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
+import * as transport from "../lib/pty/transport";
 import { TerminalPaneHeader } from "./TerminalPaneHeader";
 
 vi.mock("../lib/pty/transport", () => ({
@@ -35,9 +36,32 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
+  onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
 }));
+
+// Module-init subscriptions register during import; capture before clearAllMocks runs.
+const sessionWorkingHandler = vi.mocked(transport.onSessionWorking).mock.calls[0]?.[0];
+
+function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): transport.WorktreeRecord {
+  return {
+    id: "wt-1",
+    repo_id: "demo",
+    name: "fix-login-flow",
+    display_name: null,
+    branch: "fix-login-flow",
+    path: "C:/ws/fix-login-flow",
+    base_ref: "main",
+    parent_worktree_id: null,
+    child_worktree_ids: [],
+    workspace_status: "in-progress",
+    retired: false,
+    created_at_ms: 1723900000000,
+    linked_pr_url: null,
+    ...overrides,
+  };
+}
 
 describe("TerminalPaneHeader", () => {
   beforeEach(() => {
@@ -471,6 +495,117 @@ describe("TerminalPaneHeader", () => {
 
       expect(useTerminalStore.getState().sessions["s1"].isRestored).toBe(false);
       expect(screen.queryByRole("status", { name: /session restored/i })).toBeNull();
+    });
+  });
+
+  describe("Terminal Switcher Dropdown", () => {
+    beforeEach(() => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: {
+            id: "s1",
+            title: "fix login flow",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            cwd: "C:/ws/main",
+            worktreeId: "wt-1",
+          },
+          s2: {
+            id: "s2",
+            title: "api server",
+            status: "running",
+            cols: 80,
+            rows: 24,
+            cwd: "C:/ws/main",
+          },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+          { id: "tab-2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        worktrees: [{ record: worktreeRecord(), missing_on_disk: false }],
+        workingBySessionId: {},
+      });
+    });
+
+    it("lists every tab's session title with a branch chip only on the worktree-bound row", () => {
+      const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+
+      const panel = container.querySelector(".terminal-pane-header-switcher-panel")!;
+      expect(panel.textContent).toContain("fix login flow");
+      expect(panel.textContent).toContain("api server");
+
+      const chips = panel.querySelectorAll(".terminal-pane-header-switcher-branch");
+      expect(chips.length).toBe(1);
+      expect(chips[0].textContent).toBe("fix-login-flow");
+    });
+
+    it("renders the working/idle dot from workingBySessionId and updates live from events", () => {
+      useTerminalStore.setState({ workingBySessionId: { s1: true } });
+      const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+
+      let dots = container.querySelectorAll(".terminal-pane-header-working-dot");
+      expect(dots.length).toBe(2);
+      expect(dots[0].classList.contains("working")).toBe(true);
+      expect(dots[1].classList.contains("working")).toBe(false);
+
+      act(() => sessionWorkingHandler?.({ sessionId: "s2", working: true }));
+      dots = container.querySelectorAll(".terminal-pane-header-working-dot");
+      expect(dots[0].classList.contains("working")).toBe(true);
+      expect(dots[1].classList.contains("working")).toBe(true);
+
+      act(() => sessionWorkingHandler?.({ sessionId: "s1", working: false }));
+      dots = container.querySelectorAll(".terminal-pane-header-working-dot");
+      expect(dots[0].classList.contains("working")).toBe(false);
+      expect(dots[1].classList.contains("working")).toBe(true);
+    });
+
+    it("highlights the active tab row", () => {
+      const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+
+      const rows = container.querySelectorAll(".terminal-pane-header-switcher-row");
+      expect(rows.length).toBe(2);
+      expect(rows[0].className).toContain("active");
+      expect(rows[1].className).not.toContain("active");
+    });
+
+    it("selects the clicked tab and closes the dropdown", () => {
+      const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).not.toBeNull();
+
+      fireEvent.click(screen.getByText("api server").closest("button")!);
+
+      expect(useTerminalStore.getState().activeTabId).toBe("tab-2");
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).toBeNull();
+    });
+
+    it("closes the dropdown on Escape", () => {
+      const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).not.toBeNull();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).toBeNull();
+    });
+
+    it("closes the dropdown on outside click", () => {
+      const { container } = render(
+        <div>
+          <div data-testid="outside">Outside</div>
+          <TerminalPaneHeader id="s1" path={[]} />
+        </div>,
+      );
+      fireEvent.click(screen.getByTitle("Switch Terminal"));
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).not.toBeNull();
+
+      fireEvent.mouseDown(screen.getByTestId("outside"));
+      expect(container.querySelector(".terminal-pane-header-switcher-panel")).toBeNull();
     });
   });
 });
