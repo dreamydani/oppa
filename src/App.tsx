@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { PlusIcon } from "./components/icons/MinimalIcons";
 import { TitleBar } from "./components/TitleBar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useGlobalFailureSurface } from "./lib/errors/globalFailureSurface";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
@@ -367,12 +369,14 @@ function App() {
   // shell that loadLayout then replaces (an orphaned pty).
   if (!ready) return null;
   return (
-    <div className={`app-container${booted ? " app-booted" : ""}`}>
-      <TitleBar />
-      {isSettingsOpen ? (
-        <SettingsView />
-      ) : (
-        <div className="workspace-container">
+    <ErrorBoundary label="the app">
+      <GlobalFailureBanner />
+      <div className={`app-container${booted ? " app-booted" : ""}`}>
+        <TitleBar />
+        {isSettingsOpen ? (
+          <SettingsView />
+        ) : (
+          <div className="workspace-container">
           <div className="soft-edge-left" />
           <div className="soft-edge-right" />
           {activeAppMode !== "browser" && <LeftSidebar />}
@@ -448,6 +452,43 @@ function App() {
           work from any mode/tab (the host pushes events app-wide). */}
       <ExtensionConsentModal />
       <ExtensionToasts />
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+// Non-fatal surface for async failures boundaries cannot catch: fire-and-forget
+// IPC rejections and window errors. Latest failure renders as a dismissible bar.
+function GlobalFailureBanner() {
+  const failure = useGlobalFailureSurface();
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  if (!failure || dismissed === failure) return null;
+  return (
+    <div
+      role="alert"
+      style={{
+        position: "fixed",
+        bottom: 36,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        maxWidth: "80vw",
+        padding: "8px 12px",
+        borderRadius: 8,
+        background: "var(--bg-secondary, #2a2a2a)",
+        color: "var(--text-primary, #ddd)",
+        border: "1px solid rgba(255, 120, 120, 0.35)",
+        fontSize: 12,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+      }}
+    >
+      <span style={{ wordBreak: "break-word" }}>Background error: {failure}</span>
+      <button type="button" onClick={() => setDismissed(failure)}>
+        Dismiss
+      </button>
     </div>
   );
 }
