@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createGridLayout } from "./gridLayout";
+import { createGridLayout, buildMultiBranchGridLayout } from "./gridLayout";
 import type { Layout } from "./layout";
 
 // Helper to extract leaf IDs in depth-first traversal order
@@ -105,3 +105,73 @@ describe("createGridLayout", () => {
     expect(extractLeafIds(layout)).toEqual(["s1", "s2", "", ""]);
   });
 });
+
+describe("buildMultiBranchGridLayout", () => {
+  it("returns empty leaf for 0 leaves", () => {
+    expect(buildMultiBranchGridLayout([])).toEqual({ type: "leaf", id: "" });
+  });
+
+  it("returns single leaf for 1 leaf", () => {
+    expect(buildMultiBranchGridLayout(["s1"])).toEqual({ type: "leaf", id: "s1" });
+  });
+
+  it("returns vertical split for 2 leaves", () => {
+    expect(buildMultiBranchGridLayout(["s1", "s2"])).toEqual({
+      type: "split",
+      dir: "v",
+      ratio: 0.5,
+      a: { type: "leaf", id: "s1" },
+      b: { type: "leaf", id: "s2" },
+    });
+  });
+
+  it("returns top 2 + wide bottom 1 for 3 leaves", () => {
+    expect(buildMultiBranchGridLayout(["s1", "s2", "s3"])).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s1" },
+        b: { type: "leaf", id: "s2" },
+      },
+      b: { type: "leaf", id: "s3" },
+    });
+  });
+
+  it("returns 2x2 grid for 4 leaves", () => {
+    expect(buildMultiBranchGridLayout(["s1", "s2", "s3", "s4"])).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s1" },
+        b: { type: "leaf", id: "s2" },
+      },
+      b: {
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s3" },
+        b: { type: "leaf", id: "s4" },
+      },
+    });
+  });
+
+  it("returns balanced binary split for N > 4 leaves (e.g. 5, 6)", () => {
+    const ids = ["s1", "s2", "s3", "s4", "s5", "s6"];
+    const layout = buildMultiBranchGridLayout(ids);
+    expect(extractLeafIds(layout)).toEqual(ids);
+    expect(layout.type).toBe("split");
+    if (layout.type === "split") {
+      expect(layout.dir).toBe("h");
+      expect(layout.ratio).toBe(0.5);
+    }
+  });
+});
+

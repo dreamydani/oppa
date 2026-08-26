@@ -215,8 +215,14 @@ describe("ProjectTreeView", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
   });
 
-  it("action buttons (+ Worktree, Fleet) trigger respective modals", () => {
+  it("action buttons (+ Worktree, Fleet, Tile Grid) trigger respective actions", () => {
+    const tileSpy = vi.spyOn(useTerminalStore.getState(), "tileProjectBranches");
+
     render(<ProjectTreeView />);
+
+    const tileBtn = screen.getByTitle("Tile branches in grid");
+    fireEvent.click(tileBtn);
+    expect(tileSpy).toHaveBeenCalledWith("repo-1");
 
     const addBtn = screen.getByTitle("New Worktree");
     fireEvent.click(addBtn);

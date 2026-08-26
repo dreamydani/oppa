@@ -4692,7 +4692,193 @@ describe("terminalStore", () => {
       expect(tree[1].totalLiveSessions).toBe(1);
     });
   });
+
+  describe("tileProjectBranches and focusBranchPane actions", () => {
+    it("tileProjectBranches builds a 3-branch grid layout and creates/selects a grid tab", async () => {
+      let spawnCount = 0;
+      ptySpawnMock.mockImplementation(async () => {
+        spawnCount++;
+        return { id: `s-spawned-${spawnCount}`, is_new: true, is_warm: false, cols: 80, rows: 24, cwd: "" };
+      });
+
+      useTerminalStore.setState({
+        repos: [{ repo_id: "repo-oppa", path: "C:/projects/oppa", default_base_ref: "main", worktree_base_path: null }],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-1",
+              repo_id: "repo-oppa",
+              name: "feat-a",
+              branch: "feat-a",
+              path: "C:/projects/oppa/wt-1",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-2",
+              repo_id: "repo-oppa",
+              name: "feat-b",
+              branch: "feat-b",
+              path: "C:/projects/oppa/wt-2",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-3",
+              repo_id: "repo-oppa",
+              name: "feat-c",
+              branch: "feat-c",
+              path: "C:/projects/oppa/wt-3",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {},
+        tabs: [],
+        activeTabId: "",
+      });
+
+      const tabId = await useTerminalStore.getState().tileProjectBranches("repo-oppa");
+      const state = useTerminalStore.getState();
+
+      expect(tabId).toBeDefined();
+      expect(state.activeTabId).toBe(tabId);
+      const tab = state.tabs.find((t) => t.id === tabId);
+      expect(tab).toBeDefined();
+      expect(tab?.title).toBe("oppa (Grid)");
+
+      // 3 branches layout: top row 2 (dir v) + bottom row 1 wide (dir h outer)
+      expect(tab?.layout).toEqual({
+        type: "split",
+        dir: "h",
+        ratio: 0.5,
+        a: {
+          type: "split",
+          dir: "v",
+          ratio: 0.5,
+          a: { type: "leaf", id: "s-spawned-1" },
+          b: { type: "leaf", id: "s-spawned-2" },
+        },
+        b: { type: "leaf", id: "s-spawned-3" },
+      });
+    });
+
+    it("tileProjectBranches reuses live sessions for worktrees and filters by worktreeIds", async () => {
+      ptySpawnMock.mockImplementation(async () => ({ id: "s-new", is_new: true, is_warm: false, cols: 80, rows: 24, cwd: "" }));
+
+      useTerminalStore.setState({
+        repos: [{ repo_id: "repo-oppa", path: "C:/projects/oppa", default_base_ref: "main", worktree_base_path: null }],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-1",
+              repo_id: "repo-oppa",
+              name: "feat-a",
+              branch: "feat-a",
+              path: "C:/projects/oppa/wt-1",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-2",
+              repo_id: "repo-oppa",
+              name: "feat-b",
+              branch: "feat-b",
+              path: "C:/projects/oppa/wt-2",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {
+          "s-live-1": {
+            id: "s-live-1",
+            title: "Live",
+            status: "running",
+            worktreeId: "wt-1",
+            cwd: "C:/projects/oppa/wt-1",
+            cols: 80,
+            rows: 24,
+          },
+        },
+        tabs: [],
+        activeTabId: "",
+      });
+
+      const tabId = await useTerminalStore.getState().tileProjectBranches("repo-oppa", ["wt-1", "wt-2"]);
+      const state = useTerminalStore.getState();
+
+      const tab = state.tabs.find((t) => t.id === tabId);
+      expect(tab?.layout).toEqual({
+        type: "split",
+        dir: "v",
+        ratio: 0.5,
+        a: { type: "leaf", id: "s-live-1" },
+        b: { type: "leaf", id: "s-new" },
+      });
+    });
+
+    it("focusBranchPane focuses existing tab and pane if worktree session is already open", async () => {
+      useTerminalStore.setState({
+        sessions: {
+          "s-1": { id: "s-1", title: "s-1", status: "running", worktreeId: "wt-target", cwd: "/a", cols: 80, rows: 24 },
+          "s-2": { id: "s-2", title: "s-2", status: "running", worktreeId: "wt-other", cwd: "/b", cols: 80, rows: 24 },
+        },
+        tabs: [
+          {
+            id: "tab-1",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.5,
+              a: { type: "leaf", id: "s-2" },
+              b: { type: "leaf", id: "s-1" },
+            },
+            focusedPath: [0],
+          },
+          {
+            id: "tab-2",
+            layout: { type: "leaf", id: "s-2" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-2",
+      });
+
+      await useTerminalStore.getState().focusBranchPane("wt-target");
+
+      expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
+      expect(useTerminalStore.getState().focusedPath).toEqual([1]);
+    });
+
+    it("focusBranchPane spawns new tab with createTab when worktree session is not open", async () => {
+      const createTabSpy = vi.spyOn(useTerminalStore.getState(), "createTab");
+
+      useTerminalStore.setState({
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-unopened",
+              name: "new-branch",
+              path: "C:/projects/oppa/wt-new",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {},
+        tabs: [],
+        activeTabId: "",
+      });
+
+      await useTerminalStore.getState().focusBranchPane("wt-unopened");
+
+      expect(createTabSpy).toHaveBeenCalledWith("C:/projects/oppa/wt-new", "wt-unopened");
+    });
+  });
 });
+
 
 
 

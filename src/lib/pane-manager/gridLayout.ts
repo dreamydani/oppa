@@ -72,3 +72,41 @@ export function createGridLayout(count: number, sessionIds: string[]): Layout {
 
   return build1D(rowLayouts, "v");
 }
+
+// Generates a balanced multi-branch grid layout according to branch count:
+// - 0 leaves: empty leaf
+// - 1 leaf: single leaf
+// - 2 leaves: vertical split (dir "v")
+// - 3 leaves: 2 top + 1 wide bottom (dir "h" outer, dir "v" top)
+// - 4 leaves: 2x2 grid (dir "h" outer, dir "v" top, dir "v" bottom)
+// - N > 4: balanced recursive binary split
+export function buildMultiBranchGridLayout(leafIds: string[]): Layout {
+  if (!leafIds || leafIds.length === 0) {
+    return { type: "leaf", id: "" };
+  }
+  if (leafIds.length === 1) {
+    return { type: "leaf", id: leafIds[0] };
+  }
+  if (leafIds.length === 2) {
+    return {
+      type: "split",
+      dir: "v",
+      ratio: 0.5,
+      a: { type: "leaf", id: leafIds[0] },
+      b: { type: "leaf", id: leafIds[1] },
+    };
+  }
+
+  const mid = Math.ceil(leafIds.length / 2);
+  const left = leafIds.slice(0, mid);
+  const right = leafIds.slice(mid);
+
+  return {
+    type: "split",
+    dir: "h",
+    ratio: 0.5,
+    a: buildMultiBranchGridLayout(left),
+    b: buildMultiBranchGridLayout(right),
+  };
+}
+

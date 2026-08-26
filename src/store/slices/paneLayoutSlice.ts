@@ -40,6 +40,8 @@ import {
   leafIds,
 } from "./layoutQueries";
 import { triggerDebouncedSaveLayout } from "./layoutSaveScheduler";
+import { buildMultiBranchGridLayout } from "../../lib/pane-manager/gridLayout";
+import { extractRepoName } from "./worktreeRegistrySlice";
 
 type Set = (
   partial:
@@ -86,6 +88,8 @@ export interface PaneLayoutSlice {
   swapPanes: (sourceId: string, targetId: string) => void;
   movePane: (sourceId: string, targetId: string, zone: DropZone) => void;
   swapFocusedPane: (dir: "left" | "right" | "up" | "down") => void;
+  tileProjectBranches: (repoId: string, worktreeIds?: string[]) => Promise<string>;
+  focusBranchPane: (worktreeId: string) => Promise<void>;
   saveLayout: () => Promise<void>;
   loadLayout: () => Promise<void>;
 }
@@ -630,6 +634,137 @@ export function createPaneLayoutSlice(
       }
       if (!targetId || targetId === sourceId) return;
       get().swapPanes(sourceId, targetId);
+    },
+
+    tileProjectBranches: async (repoId, worktreeIds) => {
+      const state = get();
+      const allWorktrees = state.worktrees ?? [];
+      const targetWorktrees = allWorktrees.filter((w) => {
+        const matchRepo =
+          w.record.repo_id === repoId ||
+          (!w.record.repo_id && repoId === "orphaned") ||
+          (!repoId && !w.record.repo_id);
+        const matchId = worktreeIds ? worktreeIds.includes(w.record.id) : true;
+        return matchRepo && matchId && !w.record.retired;
+      });
+
+      const sessionIds: string[] = [];
+
+      for (const wt of targetWorktrees) {
+        // Reuse live session if one already exists for this worktree
+        const currentSessions = get().sessions;
+        const liveSession = Object.values(currentSessions).find(
+          (s) => s.worktreeId === wt.record.id && s.status !== "exited",
+        );
+
+        if (liveSession) {
+          sessionIds.push(liveSession.id);
+        } else {
+          // Spawn a session for this worktree
+          const spawnedId = await get().spawnSession(
+            wt.record.path,
+            undefined,
+            undefined,
+            undefined,
+            wt.record.id,
+          );
+          sessionIds.push(spawnedId);
+        }
+      }
+
+      // If no matching worktrees found, check if a repo exists to spawn a base session
+      if (sessionIds.length === 0) {
+        const repo = state.repos.find((r) => r.repo_id === repoId);
+        if (repo) {
+          const spawnedId = await get().spawnSession(repo.path);
+          sessionIds.push(spawnedId);
+        }
+      }
+
+      const gridLayout = buildMultiBranchGridLayout(sessionIds);
+      const repo = get().repos.find((r) => r.repo_id === repoId);
+      const repoName = extractRepoName(
+        repo?.path ?? targetWorktrees[0]?.record.path ?? "",
+        repoId,
+      );
+      const title = `${repoName} (Grid)`;
+
+      const currentTabs = getSyncedTabs(get());
+      let tabId = "";
+      let updatedTabs: TabState[] = [];
+
+      if (
+        currentTabs.length === 1 &&
+        currentTabs[0].layout.type === "leaf" &&
+        !currentTabs[0].layout.id
+      ) {
+        tabId = currentTabs[0].id;
+        updatedTabs = [
+          {
+            id: tabId,
+            title,
+            layout: gridLayout,
+            focusedPath: firstLeafPath(gridLayout),
+          },
+        ];
+      } else {
+        tabId = generateNextTabId(currentTabs);
+        const newTab: TabState = {
+          id: tabId,
+          title,
+          layout: gridLayout,
+          focusedPath: firstLeafPath(gridLayout),
+        };
+        updatedTabs = [...currentTabs, newTab];
+      }
+
+      set((s) => ({
+        tabs: updatedTabs,
+        activeTabId: tabId,
+        layout: gridLayout,
+        focusedPath: firstLeafPath(gridLayout),
+        tabFocusHistory: [tabId, ...s.tabFocusHistory.filter((id) => id !== tabId)],
+      }));
+
+      triggerDebouncedSaveLayout(get);
+      return tabId;
+    },
+
+    focusBranchPane: async (worktreeId) => {
+      const state = get();
+      const currentTabs = getSyncedTabs(state);
+      let foundTab: TabState | null = null;
+      let foundSessionId: string | null = null;
+
+      for (const tab of currentTabs) {
+        if (tab.isWizard) continue;
+        const ids = leafIds(tab.layout);
+        const matchedLiveId = ids.find(
+          (id) =>
+            state.sessions[id]?.worktreeId === worktreeId &&
+            state.sessions[id]?.status !== "exited",
+        );
+        const matchedAnyId = ids.find(
+          (id) => state.sessions[id]?.worktreeId === worktreeId,
+        );
+        const chosenId = matchedLiveId ?? matchedAnyId;
+        if (chosenId) {
+          foundTab = tab;
+          foundSessionId = chosenId;
+          break;
+        }
+      }
+
+      if (foundTab && foundSessionId) {
+        const path =
+          findLeafPath(foundTab.layout, foundSessionId) ?? firstLeafPath(foundTab.layout);
+        get().selectTab(foundTab.id);
+        get().focusPane(path);
+      } else {
+        const wtEntry = state.worktrees.find((w) => w.record.id === worktreeId);
+        const targetPath = wtEntry?.record.path;
+        await get().createTab(targetPath, worktreeId);
+      }
     },
 
     // Persist the current multi-tab layout, session state, UI view state, and active scrollbacks.

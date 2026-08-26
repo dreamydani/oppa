@@ -6,6 +6,7 @@ import {
   Folder,
   GitBranch,
   GitMerge,
+  LayoutGrid,
   Layers,
   MoreHorizontal,
   Plus,
@@ -15,7 +16,6 @@ import { useTerminalStore, selectProjectTree } from "../../store/terminalStore";
 import type { BranchNode, ProjectNode } from "../../store/terminalStore";
 import type { MergeModeInput, WorktreeRecord } from "../../lib/pty/transport";
 import { findLeafPath } from "../../lib/pane-manager/layout";
-import { leafIds } from "../../store/slices/layoutQueries";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import "./worktree.css";
 import "./ProjectTreeView.css";
@@ -50,6 +50,8 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
 
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
+  const tileProjectBranches = useTerminalStore((s) => s.tileProjectBranches);
+  const focusBranchPane = useTerminalStore((s) => s.focusBranchPane);
   const createTab = useTerminalStore((s) => s.createTab);
   const selectTab = useTerminalStore((s) => s.selectTab);
   const focusPane = useTerminalStore((s) => s.focusPane);
@@ -116,24 +118,7 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
   }, [projectTree, filter]);
 
   const handleBranchClick = (branch: BranchNode) => {
-    // Find active tab containing any session linked to this worktree
-    const activeTabWithBranch = tabs.find((tab) => {
-      const leafSessionIds = leafIds(tab.layout);
-      return leafSessionIds.some((sId) => sessions[sId]?.worktreeId === branch.worktreeId);
-    });
-
-    if (activeTabWithBranch) {
-      selectTab(activeTabWithBranch.id);
-      const targetSessionId = leafIds(activeTabWithBranch.layout).find(
-        (sId) => sessions[sId]?.worktreeId === branch.worktreeId,
-      );
-      if (targetSessionId) {
-        const path = findLeafPath(activeTabWithBranch.layout, targetSessionId);
-        if (path) focusPane(path);
-      }
-    } else {
-      void createTab(branch.path, branch.worktreeId);
-    }
+    void focusBranchPane(branch.worktreeId);
   };
 
   const handleOpenLinkedTerminal = (sessionId: string) => {
@@ -257,6 +242,18 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
               )}
 
               <div className="project-header-actions">
+                <button
+                  type="button"
+                  className="project-action-btn"
+                  title="Tile branches in grid"
+                  aria-label="Tile branches in grid"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void tileProjectBranches(project.repoId);
+                  }}
+                >
+                  <LayoutGrid size={13} />
+                </button>
                 <button
                   type="button"
                   className="project-action-btn"
