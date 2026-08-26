@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, screen } from "@testing-library/react";
+import { render, fireEvent, screen, act } from "@testing-library/react";
 import { WorktreePane } from "./WorktreePane";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as transport from "../../lib/pty/transport";
 import type { WorktreeRecord } from "../../lib/pty/transport";
+import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
@@ -272,5 +273,116 @@ describe("WorktreePane", () => {
     render(<WorktreePane />);
     fireEvent.click(screen.getByTestId("pr-open-link"));
     await vi.waitFor(() => expect(vi.mocked(openUrl)).toHaveBeenCalledWith(url));
+  });
+});
+
+describe("WorktreePane linked terminals", () => {
+  const WID = "demo::C:/ws/feat-a";
+
+  function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
+    return {
+      id: "s-fix",
+      title: "",
+      status: "running",
+      cwd: "C:/ws/feat-a",
+      cols: 80,
+      rows: 24,
+      ...overrides,
+    };
+  }
+
+  function seedStore(sessions: Record<string, SessionInfo>, extra: Record<string, unknown> = {}) {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({
+            id: WID,
+            name: "feat-a",
+            display_name: "Feat A",
+            branch: "feat-a",
+            workspace_status: "in-progress",
+          }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: {},
+      reviewByCwd: {},
+      prStatusByWorktreeId: {},
+      sessions,
+      workingBySessionId: {},
+      tabs: [],
+      activeTabId: "",
+      ...extra,
+    });
+  }
+
+  it("lists linked terminal titles with a working/idle dot on the bound card", () => {
+    seedStore(
+      { "s-fix": session({ id: "s-fix", title: "fix-login-timeout", worktreeId: WID }) },
+      { workingBySessionId: { "s-fix": true } },
+    );
+    render(<WorktreePane />);
+
+    const card = screen.getByText("Feat A").closest(".worktree-card")!;
+    expect(card.textContent).toContain("1 terminal");
+    const row = card.querySelector(".worktree-terminal-row")!;
+    expect(row.textContent).toContain("fix-login-timeout");
+    expect(row.querySelector(".worktree-terminal-dot")!.className).toContain("working");
+
+    // Idle transition flips the dot in place.
+    act(() => {
+      useTerminalStore.setState({ workingBySessionId: { "s-fix": false } });
+    });
+    expect(row.querySelector(".worktree-terminal-dot")!.className).not.toContain("working");
+  });
+
+  it("excludes exited bound sessions from the linked list", () => {
+    seedStore({
+      gone: session({ id: "gone", title: "done-deal", status: "exited", worktreeId: WID }),
+      alive: session({ id: "alive", title: "still-going", worktreeId: WID }),
+    });
+    render(<WorktreePane />);
+
+    const card = screen.getByText("Feat A").closest(".worktree-card")!;
+    const titles = Array.from(card.querySelectorAll(".worktree-terminal-title")).map(
+      (el) => el.textContent,
+    );
+    expect(titles).toEqual(["still-going"]);
+  });
+
+  it("clicking a linked terminal selects the tab containing it", () => {
+    seedStore(
+      { "s-fix": session({ id: "s-fix", title: "fix-login-timeout", worktreeId: WID }) },
+      {
+        tabs: [
+          { id: "t1", layout: { type: "leaf", id: "other" }, focusedPath: [] },
+          {
+            id: "t2",
+            layout: {
+              type: "split",
+              dir: "h" as const,
+              ratio: 0.5,
+              a: { type: "leaf" as const, id: "x1" },
+              b: { type: "leaf" as const, id: "s-fix" },
+            },
+            focusedPath: [1],
+          },
+        ],
+        activeTabId: "t1",
+      },
+    );
+    render(<WorktreePane />);
+
+    fireEvent.click(screen.getByText("fix-login-timeout"));
+    expect(useTerminalStore.getState().activeTabId).toBe("t2");
+  });
+
+  it("shows no terminal rows for an unbound worktree", () => {
+    seedStore({ stray: session({ id: "stray", title: "stray" }) });
+    render(<WorktreePane />);
+
+    const card = screen.getByText("Feat A").closest(".worktree-card")!;
+    expect(card.querySelector(".worktree-terminals")).toBeNull();
+    expect(card.querySelectorAll(".worktree-terminal-row").length).toBe(0);
   });
 });

@@ -3,7 +3,12 @@ import { ExternalLink, GitBranch, MoreHorizontal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
+import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
+import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { findLeafPath } from "../../lib/pane-manager/layout";
 import "./worktree.css";
+
+const NO_LINKED_TERMINALS: SessionInfo[] = [];
 
 function prNumberFromUrl(url: string): string | null {
   const m = url.match(/\/pull\/(\d+)/);
@@ -47,6 +52,10 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const purgeWorktree = useTerminalStore((s) => s.purgeWorktree);
   const createTab = useTerminalStore((s) => s.createTab);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
+  const sessions = useTerminalStore((s) => s.sessions);
+  const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const tabs = useTerminalStore((s) => s.tabs);
+  const selectTab = useTerminalStore((s) => s.selectTab);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -82,6 +91,24 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
       : worktrees;
     return sortEntries(visible);
   }, [worktrees, filter]);
+
+  // Live bound sessions per worktree id — one join pass, recomputed only when
+  // the sessions map identity changes (idle sessions never trigger it).
+  const linkedByWorktreeId = useMemo(() => {
+    const byWorktree = new Map<string, SessionInfo[]>();
+    for (const session of Object.values(sessions)) {
+      if (!session.worktreeId || session.status === "exited") continue;
+      const list = byWorktree.get(session.worktreeId);
+      if (list) list.push(session);
+      else byWorktree.set(session.worktreeId, [session]);
+    }
+    return byWorktree;
+  }, [sessions]);
+
+  const openLinkedTerminal = (sessionId: string) => {
+    const tab = tabs.find((t) => findLeafPath(t.layout, sessionId) !== null);
+    if (tab) selectTab(tab.id);
+  };
 
   const startRename = (record: WorktreeRecord) => {
     setRenamingId(record.id);
@@ -175,6 +202,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
           sorted.map(({ record, missing_on_disk }) => {
             const live = liveSessions[record.id] ?? 0;
             const isEditing = renamingId === record.id;
+            const linked = linkedByWorktreeId.get(record.id) ?? NO_LINKED_TERMINALS;
 
             return (
               <div
@@ -266,6 +294,38 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                       <span className="worktree-live-chip">{live} live</span>
                     )}
                   </div>
+                  {linked.length > 0 && (
+                    <div className="worktree-terminals">
+                      <div className="worktree-terminals-label">
+                        {linked.length} terminal{linked.length === 1 ? "" : "s"}
+                      </div>
+                      <div className="worktree-terminals-list">
+                        {linked.map((session) => {
+                          const isWorking = workingBySessionId[session.id] ?? false;
+                          return (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className="worktree-terminal-row"
+                              title={`Switch to ${sessionDisplayTitle(session)}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openLinkedTerminal(session.id);
+                              }}
+                            >
+                              <span
+                                className={`worktree-terminal-dot${isWorking ? " working" : ""}`}
+                                aria-hidden="true"
+                              />
+                              <span className="worktree-terminal-title">
+                                {sessionDisplayTitle(session)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button
