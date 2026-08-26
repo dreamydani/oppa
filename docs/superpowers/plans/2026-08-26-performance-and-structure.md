@@ -84,10 +84,13 @@ Acceptance: new rust unit tests green; existing layout/settings tests green.
 ## Later phases (not started this pass)
 
 - B: split terminalStore into domain slices; split daemon_server router;
-  resolve dead code inventory.
+  resolve dead code inventory. → DONE 2026-08-26 (commits 8c7ad85, 9c9c922,
+  20b8850).
 - C: condvar backpressure resume, Arc<DaemonEvent> fanout, CommandError type.
+  → DONE 2026-08-26 except CommandError (deferred — see ledger ruling):
+  commits f53f440, 5d93621, 5759a9b.
 - D: ErrorBoundary, Monaco local bundling + manualChunks, FileExplorer
-  virtualization, wheel batching.
+  virtualization, wheel batching. → still open.
 
 ## Rules
 
