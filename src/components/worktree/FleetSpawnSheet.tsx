@@ -164,7 +164,8 @@ export function FleetSpawnSheet(): React.ReactElement | null {
         sharedPrompt: sharedPrompt.trim() || undefined,
         slots: slots.map(toPayload),
       });
-      const finalized: RowOutcome[] = result.results.map((r) =>
+      const rawResults = Array.isArray(result) ? result : (result?.results ?? []);
+      const finalized: RowOutcome[] = rawResults.map((r) =>
         r.ok && r.record
           ? { status: "ok", branch: r.record.branch, record: r.record, sessionId: r.session_id }
           : { status: "error", error: r.error ?? "Unknown failure" },

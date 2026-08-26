@@ -300,4 +300,29 @@ describe("FleetSpawnSheet", () => {
     ).toBeNull();
     expect(removeButtons.length).toBeGreaterThan(0);
   });
+
+  it("handles direct array responses from backend without map errors", async () => {
+    // Backend commands return raw arrays (Vec<FleetSlotResult>)
+    worktreeCreateFleetMock.mockResolvedValue([okSlot(0), okSlot(1)] as unknown as transport.FleetSpawnResult);
+    vi.mocked(transport.ptySpawn).mockResolvedValue({
+      id: "agent-0",
+      is_new: false,
+      snapshot: null,
+    });
+
+    render(<FleetSpawnSheet />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    setSlotAgent(1, "Claude Code");
+    setSlotAgent(2, "Claude Code");
+    fireEvent.click(screen.getByRole("button", { name: /review fleet/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm launch/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: /^done$/i })).toBeTruthy();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

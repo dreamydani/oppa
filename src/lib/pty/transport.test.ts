@@ -28,8 +28,9 @@ import {
   onWorktreeChanged,
   onTitleChanged,
   onFocusRequested,
+  worktreeCreateFleet,
 } from "./transport";
-import type { PtySpawnResult } from "./transport";
+import type { PtySpawnResult, FleetSlotResult } from "./transport";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -323,6 +324,23 @@ describe("pty transport", () => {
     handler({ payload: { id: "s9" } });
     expect(cb).toHaveBeenCalledWith({ id: "s9" });
     expect(result).toBe(unlisten);
+  });
+
+  it("worktreeCreateFleet normalizes raw array response from backend into { results }", async () => {
+    const rawSlots: FleetSlotResult[] = [
+      { index: 0, ok: true, record: null, session_id: "s0", error: null },
+      { index: 1, ok: false, record: null, session_id: null, error: "failed" },
+    ];
+    invokeMock.mockResolvedValue(rawSlots);
+    const result = await worktreeCreateFleet({
+      repoPath: "/repo",
+      slots: [{ name: null, agent: "claude", command: null, prompt: null }],
+    });
+    expect(invokeMock).toHaveBeenCalledWith("worktree_create_fleet", {
+      repoPath: "/repo",
+      slots: [{ name: null, agent: "claude", command: null, prompt: null }],
+    });
+    expect(result).toEqual({ results: rawSlots });
   });
 });
 

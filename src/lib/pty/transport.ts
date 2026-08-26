@@ -231,11 +231,15 @@ export type FleetSpawnOptions = {
   slots: FleetSlotInput[];
 };
 
-export function worktreeCreateFleet(opts: FleetSpawnOptions): Promise<FleetSpawnResult> {
-  return invoke<FleetSpawnResult>(
+export async function worktreeCreateFleet(opts: FleetSpawnOptions): Promise<FleetSpawnResult> {
+  const raw = await invoke<FleetSlotResult[] | FleetSpawnResult>(
     "worktree_create_fleet",
     opts as unknown as Record<string, unknown>,
   );
+  if (Array.isArray(raw)) {
+    return { results: raw };
+  }
+  return raw ?? { results: [] };
 }
 export function worktreeList(): Promise<WorktreeListEntry[]> {
   return invoke("worktree_list");
