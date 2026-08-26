@@ -7,6 +7,7 @@ import {
   repoList,
   worktreeCreate,
   worktreeCreateAgent,
+  worktreeCreateFleet,
   worktreeList,
   worktreeSet,
   worktreeRemove,
@@ -14,6 +15,8 @@ import {
   worktreePs,
 } from "../../lib/pty/transport";
 import type {
+  FleetSlotInput,
+  FleetSpawnResult,
   RepoRecord,
   WorktreeAgentHandoff,
   WorktreeListEntry,
@@ -42,6 +45,13 @@ export interface WorktreeCreateAgentInput extends WorktreeCreateInput {
   command?: string;
 }
 
+export interface FleetSpawnInput {
+  repoPath: string;
+  baseRef?: string;
+  sharedPrompt?: string;
+  slots: FleetSlotInput[];
+}
+
 export interface WorktreeRegistrySlice {
   worktrees: WorktreeListEntry[];
   // Per-worktree count of live daemon sessions, for card badges.
@@ -52,6 +62,7 @@ export interface WorktreeRegistrySlice {
   addRepo: (path: string) => Promise<RepoRecord>;
   createWorktree: (input: WorktreeCreateInput) => Promise<WorktreeRecord | null>;
   createWorktreeWithAgent: (input: WorktreeCreateAgentInput) => Promise<WorktreeAgentHandoff>;
+  spawnFleet: (input: FleetSpawnInput) => Promise<FleetSpawnResult>;
   setWorktreeStatus: (id: string, status: WorktreeStatus) => Promise<void>;
   renameWorktree: (id: string, displayName: string) => Promise<void>;
   removeWorktree: (id: string, force?: boolean, deleteBranch?: boolean) => Promise<void>;
@@ -111,6 +122,13 @@ export function createWorktreeRegistrySlice(
       if (!liveSessions.includes(handoff.session_id)) return handoff;
       await get().createTab(handoff.record.path, handoff.record.id, handoff.session_id);
       return handoff;
+    },
+
+    spawnFleet: async (input) => {
+      const result = await worktreeCreateFleet(input);
+      // One IPC call lands every slot; a single re-list keeps cards truthful.
+      await get().loadWorktrees();
+      return result;
     },
 
     setWorktreeStatus: async (id, status) => {

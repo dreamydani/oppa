@@ -8,6 +8,7 @@
 //   codeEditorSlice        editor tabs, autosave, AI-diff review
 //   settingsDataSlice      AppSettings document + persistence
 //   worktreeRegistrySlice  worktree/repo cards
+//   fleetSpawnSlice        fleet spawn sheet lifecycle
 //   sourceControlSlice     git panel, diff notes, hosted reviews
 //
 // Everything below the store is re-exported so existing import sites
@@ -53,10 +54,13 @@ import { createSettingsDataSlice } from "./slices/settingsDataSlice";
 import type { SettingsDataSlice } from "./slices/settingsDataSlice";
 import { createWorktreeRegistrySlice } from "./slices/worktreeRegistrySlice";
 import type {
+  FleetSpawnInput,
   WorktreeCreateAgentInput,
   WorktreeCreateInput,
   WorktreeRegistrySlice,
 } from "./slices/worktreeRegistrySlice";
+import { createFleetSpawnSlice } from "./slices/fleetSpawnSlice";
+import type { FleetSheetPrefill, FleetSpawnSlice } from "./slices/fleetSpawnSlice";
 import { createSourceControlSlice } from "./slices/sourceControlSlice";
 import type { SourceControlSlice } from "./slices/sourceControlSlice";
 
@@ -96,6 +100,8 @@ export type {
   WorkspaceConfig,
   WorktreeCreateInput,
   WorktreeCreateAgentInput,
+  FleetSpawnInput,
+  FleetSheetPrefill,
   AppMode,
   DevicePreset,
   DetectedPort,
@@ -114,6 +120,7 @@ export interface TerminalState
     CodeEditorSlice,
     SettingsDataSlice,
     WorktreeRegistrySlice,
+    FleetSpawnSlice,
     SourceControlSlice {}
 
 type SliceSet = (
@@ -131,6 +138,7 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   ...createCodeEditorSlice(set as SliceSet, get),
   ...createSettingsDataSlice(set as SliceSet, get),
   ...createWorktreeRegistrySlice(set as SliceSet, get),
+  ...createFleetSpawnSlice(set as SliceSet),
   ...createSourceControlSlice(set as SliceSet, get),
 }));
 
