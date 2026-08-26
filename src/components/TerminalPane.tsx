@@ -450,8 +450,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           lines = Math.min(5, Math.max(1, lines));
         }
 
-        for (let i = 0; i < lines; i++) {
-          ptyWrite(idRef.current, code);
+        // One IPC call for the whole burst instead of one per line.
+        if (lines > 0) {
+          ptyWrite(idRef.current, code.repeat(lines));
         }
         return false;
       }

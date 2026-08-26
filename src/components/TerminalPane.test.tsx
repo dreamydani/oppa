@@ -907,6 +907,28 @@ describe("TerminalPane", () => {
     expect(ptyWriteMock).toHaveBeenCalledWith("abc", "\x1bOA");
   });
 
+  it("batches a multi-line wheel burst into a single pty write", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const t = term();
+    t.buffer.active.type = "alternate";
+    t.modes.mouseTrackingMode = "none";
+    t.modes.applicationCursorKeysMode = false;
+
+    // Pixel-mode delta spanning 5 cell heights.
+    const burst = { deltaY: -80, deltaMode: 0 } as WheelEvent;
+    const handled = t.customWheelHandler?.(burst);
+    expect(handled).toBe(false);
+    expect(ptyWriteMock).toHaveBeenCalledTimes(1);
+    expect(ptyWriteMock).toHaveBeenCalledWith("abc", "\x1b[A".repeat(5));
+  });
+
   it("allows default xterm wheel handling when mouse tracking is active or in normal buffer", async () => {
     useTerminalStore.setState({
       sessions: {
