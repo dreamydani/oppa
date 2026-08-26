@@ -1,3 +1,4 @@
+pub mod agent_process;
 pub mod commit_message;
 pub mod comments_store;
 pub mod hosted_reviews;

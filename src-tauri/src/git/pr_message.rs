@@ -3,10 +3,8 @@ use crate::agents::catalog;
 use crate::git::worktrees::run_git;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use crate::git::agent_process::run_agent_with_timeout as run_with_timeout;
 
 const DIFF_CTX_CAP_BYTES: usize = 32 * 1024;
 pub(crate) const MAX_TITLE_CHARS: usize = 200;
@@ -188,58 +186,6 @@ fn is_windows_batch(program: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
-fn run_with_timeout(
-    program: &Path,
-    args: &[String],
-    cwd: &Path,
-    secs: u64,
-    stdin_prompt: Option<&str>,
-) -> Result<String, String> {
-    use std::io::Write;
-    let mut cmd = Command::new(program);
-    cmd.args(args)
-        .current_dir(cwd)
-        .stdin(if stdin_prompt.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to launch {}: {e}", program.display()))?;
-    if let Some(prompt) = stdin_prompt {
-        if let Some(mut pipe) = child.stdin.take() {
-            let _ = pipe.write_all(prompt.as_bytes());
-        }
-    }
-    let mut stdout_pipe = child.stdout.take();
-    let deadline = Instant::now() + Duration::from_secs(secs);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("agent timed out after {secs}s"));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => return Err(format!("agent wait failed: {e}")),
-        }
-    };
-    let mut text = String::new();
-    if let Some(pipe) = stdout_pipe.as_mut() {
-        let _ = pipe.read_to_string(&mut text);
-    }
-    if !status.success() {
-        return Err(format!("agent exited with {}", status));
-    }
-    Ok(text)
-}
-
 pub fn heuristic_pr_message(cwd: &Path) -> PrMessage {
     // Try branch diff file list via base...HEAD
     let base = resolve_base_for_pr(cwd).unwrap_or_else(|_| "main".to_string());
@@ -309,12 +255,12 @@ pub fn sc_generate_pr_message_path(cwd: &Path, path_env: Option<&OsStr>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
     use crate::agents::catalog::lookup;
     use crate::git::test_support::{commit_file, sandbox, sandbox_with_origin, write_file};
     use std::ffi::OsStr;
     use std::path::Path;
-    use std::time::{Duration, Instant};
-
+    
     fn sc_stage_for_test(repo: &Path, paths: &[&str]) {
         let mut args = vec!["add", "--"];
         args.extend(paths.iter().copied());
