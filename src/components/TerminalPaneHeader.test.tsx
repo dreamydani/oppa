@@ -91,10 +91,99 @@ describe("TerminalPaneHeader", () => {
     expect(screen.getByText("Terminal 1")).toBeTruthy();
     expect(screen.getByTitle("More Options")).toBeTruthy();
     expect(screen.getByTitle("Open in Browser")).toBeTruthy();
-    expect(screen.getByTitle("Maximize Pane")).toBeTruthy();
+    expect(screen.getByTitle("Solo / Maximize Pane")).toBeTruthy();
     expect(screen.getByTitle("Split Right")).toBeTruthy();
     expect(screen.getByTitle("Split Down")).toBeTruthy();
     expect(screen.getByTitle("Close Pane")).toBeTruthy();
+  });
+
+  it("renders branch badge when session is bound to a worktree", () => {
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Terminal 1",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          worktreeId: "wt-1",
+        },
+      },
+      worktrees: [
+        {
+          record: worktreeRecord({ id: "wt-1", branch: "feat-branch-tree" }),
+          missing_on_disk: false,
+        },
+      ],
+    });
+
+    const { container, rerender } = render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const badge = container.querySelector(".terminal-pane-header-branch-badge");
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toContain("feat-branch-tree");
+
+    // Fallback to worktreeId when worktree record not found
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Terminal 1",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          worktreeId: "unmatched-wt-id",
+        },
+      },
+      worktrees: [],
+    });
+    rerender(<TerminalPaneHeader id="s1" path={[]} />);
+    expect(container.querySelector(".terminal-pane-header-branch-badge")?.textContent).toContain("unmatched-wt-id");
+
+    // No badge when session has no worktreeId
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Terminal 1",
+          status: "running",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    rerender(<TerminalPaneHeader id="s1" path={[]} />);
+    expect(container.querySelector(".terminal-pane-header-branch-badge")).toBeNull();
+  });
+
+  it("renders Solo / Maximize button and clicking it calls toggleMaximizePane(sessionId)", () => {
+    useTerminalStore.setState({
+      maximizedSessionId: null,
+    });
+
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const soloBtn = screen.getByTitle("Solo / Maximize Pane");
+    expect(soloBtn).toBeTruthy();
+    expect(soloBtn.getAttribute("aria-label")).toBe("Solo / Maximize Pane");
+
+    fireEvent.click(soloBtn);
+    expect(useTerminalStore.getState().maximizedSessionId).toBe("s1");
+  });
+
+  it("renders Restore Grid button when maximizedSessionId matches sessionId", () => {
+    useTerminalStore.setState({
+      maximizedSessionId: "s1",
+    });
+
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    const restoreBtn = screen.getByTitle("Restore Grid");
+    expect(restoreBtn).toBeTruthy();
+    expect(restoreBtn.getAttribute("aria-label")).toBe("Restore Grid");
+
+    fireEvent.click(restoreBtn);
+    expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
   });
 
   it("allows inline renaming via click and Enter key", () => {
@@ -147,13 +236,13 @@ describe("TerminalPaneHeader", () => {
   it("toggles maximize and restore pane state", () => {
     const { rerender } = render(<TerminalPaneHeader id="s1" path={[]} />);
 
-    const maxBtn = screen.getByTitle("Maximize Pane");
+    const maxBtn = screen.getByTitle("Solo / Maximize Pane");
     fireEvent.click(maxBtn);
 
     expect(useTerminalStore.getState().maximizedSessionId).toBe("s1");
 
     rerender(<TerminalPaneHeader id="s1" path={[]} />);
-    const restoreBtn = screen.getByTitle("Restore Pane");
+    const restoreBtn = screen.getByTitle("Restore Grid");
     expect(restoreBtn).toBeTruthy();
 
     fireEvent.click(restoreBtn);

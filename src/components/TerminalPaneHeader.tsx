@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, X, GitBranch, Maximize2, Minimize2 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
@@ -34,25 +34,6 @@ function IconGlobe() {
       <circle cx="8" cy="8" r="6" />
       <line x1="2" y1="8" x2="14" y2="8" />
       <path d="M8 2a9.4 9.4 0 0 0 0 12 9.4 9.4 0 0 0 0-12z" />
-    </svg>
-  );
-}
-
-function IconMaximize() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
-      <rect x="3" y="3" width="10" height="10" rx="2" />
-    </svg>
-  );
-}
-
-/* Restore glyph: back frame + front panel masked by header color so it
-   reads correctly in both system themes. */
-function IconMinimize() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path d="M5.5 2.5h6a2 2 0 0 1 2 2v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="2.5" y="5.5" width="8" height="8" rx="1.8" className="icon-minimize-mask" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -129,6 +110,7 @@ export function resolveRepoForCwd(
 
 export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProps) {
   const session = useTerminalStore((s) => s.sessions[id]);
+  const worktrees = useTerminalStore((s) => s.worktrees);
   const renameSession = useTerminalStore((s) => s.renameSession);
   const dismissSessionRestoredBanner = useTerminalStore((s) => s.dismissSessionRestoredBanner);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
@@ -145,6 +127,10 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
 
   const isMaximized = maximizedSessionId === id;
   const displayTitle = sessionDisplayTitle(session);
+  const worktreeEntry = session?.worktreeId
+    ? worktrees.find((w) => w.record.id === session.worktreeId)
+    : undefined;
+  const branchName = worktreeEntry?.record.branch || session?.worktreeId;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(displayTitle);
@@ -413,6 +399,15 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         >
           <ChevronDown size={12} strokeWidth={2.4} />
         </button>
+        {branchName && (
+          <div
+            className="terminal-pane-header-branch-badge"
+            title={`Worktree branch: ${branchName}`}
+          >
+            <GitBranch size={11} className="terminal-pane-header-branch-icon" />
+            <span className="terminal-pane-header-branch-name">{branchName}</span>
+          </div>
+        )}
         {session?.isRestored && (
           <div
             className={`terminal-restored-badge${session?.resumeKind === "agent-resume" ? " terminal-restored-badge--resumed" : ""}`}
@@ -600,13 +595,13 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         </span>
 
         <button
-          className="terminal-pane-header-btn"
-          title={isMaximized ? "Restore Pane" : "Maximize Pane"}
-          aria-label={isMaximized ? "Restore Pane" : "Maximize Pane"}
+          className={`terminal-pane-header-btn${isMaximized ? " active" : ""}`}
+          title={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
+          aria-label={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
           onClick={() => toggleMaximizePane(id)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {isMaximized ? <IconMinimize /> : <IconMaximize />}
+          {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
 
         <button
