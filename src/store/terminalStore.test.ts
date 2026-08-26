@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useTerminalStore, markScrollbackDirty } from "./terminalStore";
+import { useTerminalStore, markScrollbackDirty, selectProjectTree } from "./terminalStore";
 import * as transport from "../lib/pty/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
@@ -4355,6 +4355,344 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
     });
   });
+
+  describe("selectProjectTree selector", () => {
+    it("returns empty array when there are no repos and no worktrees", () => {
+      useTerminalStore.setState({
+        repos: [],
+        worktrees: [],
+        sessions: {},
+        workingBySessionId: {},
+      });
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree).toEqual([]);
+    });
+
+    it("groups branches under repos and extracts repoName from repo path", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "repo-1", path: "C:/projects/my-app", default_base_ref: "main", worktree_base_path: null },
+          { repo_id: "repo-2", path: "/home/user/backend", default_base_ref: "main", worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-1",
+              repo_id: "repo-1",
+              name: "feat-auth",
+              display_name: null,
+              branch: "feat-auth",
+              path: "C:/projects/my-app/wt-1",
+              workspace_status: "in-progress",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-2",
+              repo_id: "repo-1",
+              name: "fix-bug",
+              display_name: "Fix Login Bug",
+              branch: "fix-bug",
+              path: "C:/projects/my-app/wt-2",
+              workspace_status: "completed",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-3",
+              repo_id: "repo-2",
+              name: "api-v2",
+              display_name: null,
+              branch: "api-v2",
+              path: "/home/user/backend/wt-3",
+              workspace_status: "todo",
+            }),
+            missing_on_disk: true,
+          },
+        ],
+        sessions: {},
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree).toHaveLength(2);
+
+      // Project 1
+      expect(tree[0].repoId).toBe("repo-1");
+      expect(tree[0].repoName).toBe("my-app");
+      expect(tree[0].repoPath).toBe("C:/projects/my-app");
+      expect(tree[0].branches).toHaveLength(2);
+
+      expect(tree[0].branches[0]).toEqual({
+        worktreeId: "wt-1",
+        name: "feat-auth",
+        branch: "feat-auth",
+        path: "C:/projects/my-app/wt-1",
+        status: "in-progress",
+        sessionIds: [],
+        prUrl: null,
+        missingOnDisk: false,
+        retired: false,
+      });
+
+      expect(tree[0].branches[1]).toEqual({
+        worktreeId: "wt-2",
+        name: "Fix Login Bug",
+        branch: "fix-bug",
+        path: "C:/projects/my-app/wt-2",
+        status: "completed",
+        sessionIds: [],
+        prUrl: null,
+        missingOnDisk: false,
+        retired: false,
+      });
+
+      // Project 2
+      expect(tree[1].repoId).toBe("repo-2");
+      expect(tree[1].repoName).toBe("backend");
+      expect(tree[1].repoPath).toBe("/home/user/backend");
+      expect(tree[1].branches).toHaveLength(1);
+      expect(tree[1].branches[0].missingOnDisk).toBe(true);
+      expect(tree[1].branches[0].status).toBe("sleeping");
+    });
+
+    it("handles trailing slashes and windows backslashes in repo paths", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "D:\\repos\\oppa\\", default_base_ref: null, worktree_base_path: null },
+          { repo_id: "r2", path: "", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [],
+        sessions: {},
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree).toHaveLength(2);
+      expect(tree[0].repoName).toBe("oppa");
+      expect(tree[1].repoName).toBe("r2");
+    });
+
+    it("maps linked session IDs and computes totalLiveSessions excluding exited ones", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-b",
+              repo_id: "r1",
+              name: "b",
+              branch: "b",
+              path: "C:/repos/app/b",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {
+          s1: { id: "s1", status: "running", worktreeId: "wt-a" } as any,
+          s2: { id: "s2", status: "exited", worktreeId: "wt-a" } as any,
+          s3: { id: "s3", status: "running", worktreeId: "wt-b" } as any,
+          s4: { id: "s4", status: "running", worktreeId: "wt-other" } as any,
+        },
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree).toHaveLength(1);
+      const proj = tree[0];
+      expect(proj.totalLiveSessions).toBe(2); // s1 and s3
+      expect(proj.branches[0].sessionIds).toEqual(["s1", "s2"]);
+      expect(proj.branches[1].sessionIds).toEqual(["s3"]);
+    });
+
+    it("computes status 'working' if any live session is actively working", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+              workspace_status: "in-progress",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {
+          s1: { id: "s1", status: "running", worktreeId: "wt-a" } as any,
+          s2: { id: "s2", status: "running", worktreeId: "wt-a" } as any,
+        },
+        workingBySessionId: {
+          s1: false,
+          s2: true,
+        },
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree[0].branches[0].status).toBe("working");
+    });
+
+    it("computes status 'idle' if live sessions exist and none are working", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+              workspace_status: "todo",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {
+          s1: { id: "s1", status: "running", worktreeId: "wt-a" } as any,
+        },
+        workingBySessionId: {
+          s1: false,
+        },
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree[0].branches[0].status).toBe("idle");
+    });
+
+    it("computes status 'sleeping' when branch is retired or has no live sessions (todo)", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+              workspace_status: "todo",
+              retired: false,
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-b",
+              repo_id: "r1",
+              name: "b",
+              branch: "b",
+              path: "C:/repos/app/b",
+              workspace_status: "in-progress",
+              retired: true,
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {},
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree[0].branches[0].status).toBe("sleeping");
+      expect(tree[0].branches[1].status).toBe("sleeping");
+    });
+
+    it("computes status 'in-review' and maps prUrl when linked_pr_url is set", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+              workspace_status: "in-review",
+              linked_pr_url: "https://github.com/org/repo/pull/42",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {},
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree[0].branches[0].status).toBe("in-review");
+      expect(tree[0].branches[0].prUrl).toBe("https://github.com/org/repo/pull/42");
+    });
+
+    it("creates fallback project groups for orphaned worktrees not matching state.repos", () => {
+      useTerminalStore.setState({
+        repos: [
+          { repo_id: "r1", path: "C:/repos/app", default_base_ref: null, worktree_base_path: null },
+        ],
+        worktrees: [
+          {
+            record: worktreeRecord({
+              id: "wt-a",
+              repo_id: "r1",
+              name: "a",
+              branch: "a",
+              path: "C:/repos/app/a",
+            }),
+            missing_on_disk: false,
+          },
+          {
+            record: worktreeRecord({
+              id: "wt-orphan-1",
+              repo_id: "external-repo",
+              name: "ext",
+              branch: "ext",
+              path: "D:/external/worktree",
+            }),
+            missing_on_disk: false,
+          },
+        ],
+        sessions: {
+          s1: { id: "s1", status: "running", worktreeId: "wt-orphan-1" } as any,
+        },
+        workingBySessionId: {},
+      });
+
+      const tree = selectProjectTree(useTerminalStore.getState());
+      expect(tree).toHaveLength(2);
+      expect(tree[0].repoId).toBe("r1");
+      expect(tree[1].repoId).toBe("external-repo");
+      expect(tree[1].repoName).toBe("external-repo");
+      expect(tree[1].branches).toHaveLength(1);
+      expect(tree[1].branches[0].worktreeId).toBe("wt-orphan-1");
+      expect(tree[1].totalLiveSessions).toBe(1);
+    });
+  });
 });
+
 
 

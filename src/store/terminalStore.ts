@@ -55,9 +55,15 @@ import type {
 } from "./slices/codeEditorSlice";
 import { createSettingsDataSlice } from "./slices/settingsDataSlice";
 import type { SettingsDataSlice } from "./slices/settingsDataSlice";
-import { createWorktreeRegistrySlice } from "./slices/worktreeRegistrySlice";
+import {
+  createWorktreeRegistrySlice,
+  extractRepoName,
+  selectProjectTree,
+} from "./slices/worktreeRegistrySlice";
 import type {
+  BranchNode,
   FleetSpawnInput,
+  ProjectNode,
   WorktreeCreateAgentInput,
   WorktreeCreateInput,
   WorktreeRegistrySlice,
@@ -94,11 +100,14 @@ export {
   getAllTerminalThemes,
 } from "../lib/theme/terminalThemes";
 export { generateNextTabId } from "./slices/layoutQueries";
+export { selectProjectTree, extractRepoName };
 
 export type { SessionInfo, SessionStatus, TerminalSession };
 export { DEFAULT_COLS, DEFAULT_ROWS };
 export { markScrollbackDirty, detectEditorLanguage };
 export type {
+  BranchNode,
+  ProjectNode,
   TabState,
   WorkspaceConfig,
   WorktreeCreateInput,

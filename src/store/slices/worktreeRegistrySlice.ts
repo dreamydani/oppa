@@ -28,6 +28,7 @@ import type {
   WorktreeRecord,
   WorktreeStatus,
 } from "../../lib/pty/transport";
+import type { TerminalSession } from "./terminalSessionsSlice";
 import type { TerminalState } from "../terminalStore";
 
 type Set = (
@@ -73,6 +74,204 @@ export function selectWorktreeFinished(
     if (state.workingBySessionId[session.id]) return false;
   }
   return linkedCount > 0;
+}
+
+export interface BranchNode {
+  worktreeId: string;
+  name: string;
+  branch: string;
+  path: string;
+  status: "idle" | "working" | "sleeping" | "finished" | "in-progress" | "in-review" | "completed";
+  sessionIds: string[];
+  prUrl: string | null;
+  missingOnDisk: boolean;
+  retired: boolean;
+}
+
+export interface ProjectNode {
+  repoId: string;
+  repoPath: string;
+  repoName: string;
+  branches: BranchNode[];
+  totalLiveSessions: number;
+}
+
+// Extracts displayable project name from repository path or identifier fallback.
+export function extractRepoName(repoPath: string, repoId?: string): string {
+  if (repoPath) {
+    const trimmedPath = repoPath.trim().replace(/[/\\]+$/, "");
+    const segments = trimmedPath.split(/[/\\]/);
+    const lastSegment = segments[segments.length - 1];
+    if (lastSegment && lastSegment.length > 0) {
+      return lastSegment;
+    }
+  }
+  if (repoId && repoId.trim().length > 0) {
+    return repoId.trim();
+  }
+  return "Untitled Project";
+}
+
+// Maps live agent activity or persisted worktree lifecycle to branch status badge.
+function computeBranchStatus(
+  entry: WorktreeListEntry,
+  linkedLiveSessions: TerminalSession[],
+  workingBySessionId: Record<string, boolean>,
+): BranchNode["status"] {
+  const hasActiveWorkingSession = linkedLiveSessions.some(
+    (session) => workingBySessionId[session.id] === true,
+  );
+  if (hasActiveWorkingSession) {
+    return "working";
+  }
+
+  if (entry.record.workspace_status === "in-review") {
+    return "in-review";
+  }
+  if (entry.record.workspace_status === "completed") {
+    return "completed";
+  }
+
+  if (linkedLiveSessions.length > 0) {
+    return "idle";
+  }
+
+  if (entry.record.retired) {
+    return "sleeping";
+  }
+
+  if (entry.record.workspace_status === "in-progress") {
+    return "in-progress";
+  }
+  if (entry.record.workspace_status === "todo") {
+    return "sleeping";
+  }
+  if ((entry.record.workspace_status as string) === "finished") {
+    return "finished";
+  }
+
+  return "idle";
+}
+
+// Aggregates repositories, registered worktrees, and live terminal sessions into a hierarchical tree.
+export function selectProjectTree(
+  state: Pick<TerminalState, "repos" | "worktrees" | "sessions" | "workingBySessionId">,
+): ProjectNode[] {
+  const repos = state.repos ?? [];
+  const worktrees = state.worktrees ?? [];
+  const sessions = state.sessions ?? {};
+  const workingBySessionId = state.workingBySessionId ?? {};
+
+  const allSessionsList = Object.values(sessions);
+  const matchedWorktreeIds = new Set<string>();
+  const projectNodes: ProjectNode[] = [];
+
+  for (const repo of repos) {
+    const matchingEntries = worktrees.filter(
+      (entry) => entry.record.repo_id === repo.repo_id,
+    );
+
+    const branches: BranchNode[] = matchingEntries.map((entry) => {
+      matchedWorktreeIds.add(entry.record.id);
+      const linkedSessions = allSessionsList.filter(
+        (session) => session.worktreeId === entry.record.id,
+      );
+      const linkedLiveSessions = linkedSessions.filter(
+        (session) => session.status !== "exited",
+      );
+
+      return {
+        worktreeId: entry.record.id,
+        name: entry.record.display_name || entry.record.name,
+        branch: entry.record.branch,
+        path: entry.record.path,
+        status: computeBranchStatus(entry, linkedLiveSessions, workingBySessionId),
+        sessionIds: linkedSessions.map((session) => session.id),
+        prUrl: entry.record.linked_pr_url ?? null,
+        missingOnDisk: Boolean(entry.missing_on_disk),
+        retired: Boolean(entry.record.retired),
+      };
+    });
+
+    const branchWorktreeIdSet = new Set(branches.map((b) => b.worktreeId));
+    const totalLiveSessions = allSessionsList.filter(
+      (session) =>
+        session.worktreeId &&
+        branchWorktreeIdSet.has(session.worktreeId) &&
+        session.status !== "exited",
+    ).length;
+
+    projectNodes.push({
+      repoId: repo.repo_id,
+      repoPath: repo.path,
+      repoName: extractRepoName(repo.path, repo.repo_id),
+      branches,
+      totalLiveSessions,
+    });
+  }
+
+  const orphanedEntries = worktrees.filter(
+    (entry) => !matchedWorktreeIds.has(entry.record.id),
+  );
+  if (orphanedEntries.length > 0) {
+    const orphanGroups = new Map<string, WorktreeListEntry[]>();
+    for (const entry of orphanedEntries) {
+      const groupKey = entry.record.repo_id || "orphaned";
+      const existing = orphanGroups.get(groupKey);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        orphanGroups.set(groupKey, [entry]);
+      }
+    }
+
+    for (const [repoId, groupEntries] of orphanGroups.entries()) {
+      const repoPath = groupEntries[0]?.record.path ?? "";
+      const repoName =
+        repoId === "orphaned"
+          ? "Other Worktrees"
+          : extractRepoName(repoId, repoId);
+
+      const branches: BranchNode[] = groupEntries.map((entry) => {
+        const linkedSessions = allSessionsList.filter(
+          (session) => session.worktreeId === entry.record.id,
+        );
+        const linkedLiveSessions = linkedSessions.filter(
+          (session) => session.status !== "exited",
+        );
+
+        return {
+          worktreeId: entry.record.id,
+          name: entry.record.display_name || entry.record.name,
+          branch: entry.record.branch,
+          path: entry.record.path,
+          status: computeBranchStatus(entry, linkedLiveSessions, workingBySessionId),
+          sessionIds: linkedSessions.map((session) => session.id),
+          prUrl: entry.record.linked_pr_url ?? null,
+          missingOnDisk: Boolean(entry.missing_on_disk),
+          retired: Boolean(entry.record.retired),
+        };
+      });
+
+      const branchWorktreeIdSet = new Set(branches.map((b) => b.worktreeId));
+      const totalLiveSessions = allSessionsList.filter(
+        (session) =>
+          session.worktreeId &&
+          branchWorktreeIdSet.has(session.worktreeId) &&
+          session.status !== "exited",
+      ).length;
+
+      projectNodes.push({
+        repoId,
+        repoPath,
+        repoName,
+        branches,
+        totalLiveSessions,
+      });
+    }
+  }
+
+  return projectNodes;
 }
 
 export interface WorktreeCreateInput {
