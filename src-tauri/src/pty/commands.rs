@@ -10,7 +10,7 @@ use crate::git::source_control::{
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::daemon_client::WorktreeAgentHandoff;
-use crate::pty::ipc_protocol::WorktreePsEntry;
+use crate::pty::ipc_protocol::{FleetSlot, FleetSlotResult, WorktreePsEntry};
 use crate::pty::manager::PtyManager;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -383,6 +383,20 @@ pub fn worktree_create_agent(
         prompt,
         command,
     )
+}
+
+// Fleet spawn: one invoke fans out every slot; per-slot errors ride the results.
+#[tauri::command(async)]
+pub fn worktree_create_fleet(
+    manager: State<'_, PtyManager>,
+    repo_path: String,
+    base_ref: Option<String>,
+    shared_prompt: Option<String>,
+    slots: Vec<FleetSlot>,
+) -> Result<Vec<FleetSlotResult>, String> {
+    manager
+        .get_client()?
+        .create_worktree_fleet(&repo_path, base_ref, shared_prompt, slots)
 }
 
 #[tauri::command(async)]

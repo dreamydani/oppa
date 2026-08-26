@@ -74,6 +74,39 @@ impl DaemonServer {
         prompt: Option<&str>,
         command: Option<&str>,
     ) -> DaemonResponse {
+        self.create_worktree_agent_session(
+            registry_path,
+            repo_path,
+            name,
+            branch,
+            base_ref,
+            parent_worktree_id,
+            workspace_dir,
+            nest_workspaces,
+            agent,
+            prompt,
+            command,
+            true,
+        )
+    }
+
+    // Fleet batches pass publish_changed=false and emit exactly one event after all slots land.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn create_worktree_agent_session(
+        &self,
+        registry_path: &Path,
+        repo_path: &str,
+        name: Option<String>,
+        branch: Option<String>,
+        base_ref: Option<String>,
+        parent_worktree_id: Option<String>,
+        workspace_dir: Option<String>,
+        nest_workspaces: bool,
+        agent: Option<&str>,
+        prompt: Option<&str>,
+        command: Option<&str>,
+        publish_changed: bool,
+    ) -> DaemonResponse {
         if let Err(msg) = Self::validate_handoff(agent, prompt, command) {
             return DaemonResponse::Error(msg);
         }
@@ -97,9 +130,11 @@ impl DaemonServer {
             Ok((record, _warnings)) => record,
             Err(e) => return DaemonResponse::Error(e),
         };
-        self.publish_global(DaemonEvent::WorktreeChanged {
-            id: Some(record.id.clone()),
-        });
+        if publish_changed {
+            self.publish_global(DaemonEvent::WorktreeChanged {
+                id: Some(record.id.clone()),
+            });
+        }
 
         let session_id = format!("agent-{}", uuid::Uuid::new_v4());
         let mut env_bindings = match self.resolve_worktree_bindings(&None, Some(&record.id), &session_id)

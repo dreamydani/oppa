@@ -14,6 +14,7 @@ use crate::git::hosted_reviews::{
 };
 use crate::git::teardown::session_cwd_inside;
 use crate::git::worktree_lineage::lineage_list;
+use crate::git::worktree_naming::{next_available_name, slug_from_prompt};
 use crate::git::worktree_registry::WorktreeRegistry;
 use crate::git::worktrees::{
     repo_add, worktree_create, worktree_current, worktree_list, worktree_purge, worktree_remove,
@@ -21,10 +22,12 @@ use crate::git::worktrees::{
 };
 use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
-    sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
+    FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use crate::pty::runtime_metadata;
 use crate::pty::snapshot::SnapshotStorage;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use crate::pty::daemon_server::{REGISTRY_UNAVAILABLE, DaemonServer};
@@ -320,6 +323,12 @@ impl DaemonServer {
                 }
                 None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
             },
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path,
+                base_ref,
+                shared_prompt,
+                slots,
+            } => self.create_worktree_fleet(&repo_path, base_ref, shared_prompt, slots),
             DaemonRequest::WorktreeList => match self.worktree_registry_path.as_deref() {
                 Some(registry_path) => DaemonResponse::WorktreeRecords(worktree_list(registry_path)),
                 None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
@@ -626,6 +635,91 @@ impl DaemonServer {
         }
     }
 
+    // Fleet fan-out: every slot rides the single-agent path; a failing slot is
+    // contained in its result and exactly one WorktreeChanged lands afterwards.
+    fn create_worktree_fleet(
+        &self,
+        repo_path: &Path,
+        base_ref: Option<String>,
+        shared_prompt: Option<String>,
+        slots: Vec<FleetSlot>,
+    ) -> DaemonResponse {
+        let Some(registry_path) = self.worktree_registry_path.clone() else {
+            return DaemonResponse::Error(REGISTRY_UNAVAILABLE.into());
+        };
+        if slots.is_empty() {
+            return DaemonResponse::Error("fleet requires at least one slot".into());
+        }
+        // Names are claimed up front and extended per slot so two identical
+        // prompts inside one fleet cannot collide mid-loop.
+        let mut taken: HashSet<String> = WorktreeRegistry::load(&registry_path)
+            .worktrees
+            .values()
+            .map(|record| record.name.clone())
+            .collect();
+        let repo = repo_path.to_string_lossy().into_owned();
+        let mut results = Vec::with_capacity(slots.len());
+        for (index, slot) in slots.into_iter().enumerate() {
+            let name = match slot.name {
+                Some(explicit) => {
+                    taken.insert(explicit.clone());
+                    Some(explicit)
+                }
+                None => {
+                    let seed = slot
+                        .prompt
+                        .as_deref()
+                        .or(shared_prompt.as_deref())
+                        .unwrap_or("");
+                    let derived = next_available_name(&slug_from_prompt(seed), &taken);
+                    taken.insert(derived.clone());
+                    Some(derived)
+                }
+            };
+            let prompt = slot.prompt.as_deref().or(shared_prompt.as_deref());
+            results.push(
+                match self.create_worktree_agent_session(
+                    &registry_path,
+                    &repo,
+                    name,
+                    None,
+                    base_ref.clone(),
+                    None,
+                    None,
+                    false,
+                    slot.agent.as_deref(),
+                    prompt,
+                    slot.command.as_deref(),
+                    false,
+                ) {
+                    DaemonResponse::AgentHandoff { record, session_id } => FleetSlotResult {
+                        index,
+                        ok: true,
+                        record: Some(record),
+                        session_id: Some(session_id),
+                        error: None,
+                    },
+                    DaemonResponse::Error(error) => FleetSlotResult {
+                        index,
+                        ok: false,
+                        record: None,
+                        session_id: None,
+                        error: Some(error),
+                    },
+                    other => FleetSlotResult {
+                        index,
+                        ok: false,
+                        record: None,
+                        session_id: None,
+                        error: Some(format!("unexpected slot response: {other:?}")),
+                    },
+                },
+            );
+        }
+        self.publish_global(DaemonEvent::WorktreeChanged { id: None });
+        DaemonResponse::FleetResults { results }
+    }
+
     // Shared gate + result envelope so every git.* handler stays a one-liner.
     pub(crate) fn sc_response<T>(
         &self,
@@ -664,5 +758,207 @@ impl DaemonServer {
 
     // Requested id is strict (unknown id errors); a checkpoint id restores
     // identity even if the registry no longer holds the record.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::test_support;
+    use std::time::{Duration, Instant};
+
+    fn fleet_request(
+        repo: &Path,
+        shared_prompt: Option<&str>,
+        slots: Vec<FleetSlot>,
+    ) -> DaemonRequest {
+        DaemonRequest::WorktreeCreateFleet {
+            repo_path: repo.to_path_buf(),
+            base_ref: None,
+            shared_prompt: shared_prompt.map(str::to_string),
+            slots,
+        }
+    }
+
+    // Fast-exiting shell command keeps spawned panes hermetic per platform.
+    fn trivial_command_slot() -> FleetSlot {
+        FleetSlot {
+            name: None,
+            agent: None,
+            command: Some(if cfg!(windows) {
+                "cmd.exe /c exit".into()
+            } else {
+                "/bin/sh -c true".into()
+            }),
+            prompt: None,
+        }
+    }
+
+    fn expect_fleet_results(resp: DaemonResponse) -> Vec<FleetSlotResult> {
+        match resp {
+            DaemonResponse::FleetResults { results } => results,
+            other => panic!("expected FleetResults, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fleet_spawns_slots_uniquifies_names_and_publishes_one_event() {
+        std::env::set_var("OPPA_SKIP_HOOK_INSTALL", "1");
+        let s = test_support::sandbox("fleet-happy");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        });
+        let mut rx = server.subscribe_global_events();
+
+        let resp = server.handle_request(fleet_request(
+            &s.repo,
+            Some("Fix Login Timeout"),
+            vec![trivial_command_slot(), trivial_command_slot()],
+        ));
+        let results = expect_fleet_results(resp);
+
+        assert_eq!(results.len(), 2);
+        assert!(results[0].ok, "slot 0 must succeed: {:?}", results[0].error);
+        assert!(results[1].ok, "slot 1 must succeed: {:?}", results[1].error);
+        assert_eq!(results[0].index, 0);
+        assert_eq!(results[1].index, 1);
+        assert_eq!(results[0].record.as_ref().unwrap().name, "fix-login-timeout");
+        assert_eq!(
+            results[1].record.as_ref().unwrap().name,
+            "fix-login-timeout-2",
+            "shared prompt must uniquify with a numeric suffix"
+        );
+        assert_ne!(results[0].record, results[1].record);
+
+        // Both agent sessions are live handles bound to their worktrees
+        match server.handle_request(DaemonRequest::ListSessions) {
+            DaemonResponse::SessionList(ids) => {
+                for r in &results {
+                    let sid = r.session_id.as_deref().expect("session id on ok slot");
+                    assert!(ids.contains(&sid.to_string()), "{ids:?}");
+                }
+            }
+            other => panic!("expected SessionList, got {other:?}"),
+        }
+
+        // Exactly one WorktreeChanged for the whole fleet: one arrival, then silence
+        async fn next_changed(
+            rx: &mut tokio::sync::broadcast::Receiver<DaemonEvent>,
+        ) -> Option<DaemonEvent> {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                    Ok(Ok(event @ DaemonEvent::WorktreeChanged { .. })) => return Some(event),
+                    Ok(_) | Err(_) => continue,
+                }
+            }
+            None
+        }
+        assert!(
+            next_changed(&mut rx).await.is_some(),
+            "fleet must publish a single WorktreeChanged"
+        );
+        assert!(
+            next_changed(&mut rx).await.is_none(),
+            "no second WorktreeChanged may leak from per-slot spawns"
+        );
+
+        for sid in results.iter().filter_map(|r| r.session_id.as_deref()) {
+            let _ = server.handle_request(DaemonRequest::Kill {
+                session_id: sid.to_string(),
+            });
+        }
+    }
+
+    #[test]
+    fn fleet_rejects_empty_slots_and_missing_registry() {
+        let server = DaemonServer::with_snapshot_storage(std::env::temp_dir());
+        match server.handle_request(fleet_request(Path::new("/tmp/nowhere"), None, vec![])) {
+            DaemonResponse::Error(e) => assert!(
+                e.contains("fleet requires at least one slot"),
+                "got: {e}"
+            ),
+            other => panic!("expected empty-fleet rejection, got {other:?}"),
+        }
+
+        let bare = DaemonServer::new();
+        match bare.handle_request(fleet_request(
+            Path::new("/tmp/nowhere"),
+            None,
+            vec![trivial_command_slot()],
+        )) {
+            DaemonResponse::Error(e) => assert!(e.contains("registry unavailable"), "got: {e}"),
+            other => panic!("expected registry-unavailable error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fleet_isolates_bad_agent_slot_without_blocking_peers() {
+        std::env::set_var("OPPA_SKIP_HOOK_INSTALL", "1");
+        let s = test_support::sandbox("fleet-isolated");
+        let server = DaemonServer::with_snapshot_storage(s.root.clone());
+        server.handle_request(DaemonRequest::RepoAdd {
+            path: s.repo.to_string_lossy().into_owned(),
+        });
+
+        let bad = FleetSlot {
+            name: Some("bad-slot".into()),
+            agent: Some("not-an-agent-xyz".into()),
+            command: None,
+            prompt: None,
+        };
+        let resp = server.handle_request(fleet_request(
+            &s.repo,
+            None,
+            vec![trivial_command_slot(), bad, trivial_command_slot()],
+        ));
+        let results = expect_fleet_results(resp);
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].ok, "first good slot failed: {:?}", results[0]);
+        assert!(!results[1].ok, "bad slot must be isolated");
+        assert!(
+            results[1]
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("unknown agent: not-an-agent-xyz"),
+            "error must name the agent: {:?}",
+            results[1].error
+        );
+        assert!(results[1].record.is_none() && results[1].session_id.is_none());
+        assert!(results[2].ok, "peer after failure must still succeed: {:?}", results[2]);
+
+        // Only the two healthy slots landed in registry and session table
+        match server.handle_request(DaemonRequest::WorktreeList) {
+            DaemonResponse::WorktreeRecords(entries) => assert_eq!(entries.len(), 2),
+            other => panic!("expected WorktreeRecords, got {other:?}"),
+        }
+        match server.handle_request(DaemonRequest::ListSessions) {
+            DaemonResponse::SessionList(ids) => {
+                assert_eq!(ids.len(), 2, "only ok slots spawn sessions: {ids:?}");
+                assert!(results[0]
+                    .session_id
+                    .as_deref()
+                    .map(|sid| ids.contains(&sid.to_string()))
+                    .unwrap_or(false));
+                assert!(results[2]
+                    .session_id
+                    .as_deref()
+                    .map(|sid| ids.contains(&sid.to_string()))
+                    .unwrap_or(false));
+            }
+            other => panic!("expected SessionList, got {other:?}"),
+        }
+
+        for sid in [results[0].session_id.as_deref(), results[2].session_id.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            let _ = server.handle_request(DaemonRequest::Kill {
+                session_id: sid.to_string(),
+            });
+        }
+    }
 }
 

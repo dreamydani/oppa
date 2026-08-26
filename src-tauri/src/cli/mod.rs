@@ -706,6 +706,7 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::WorktreeRecordsList(_) => "WorktreeRecordsList".into(),
         DaemonResponse::WorktreePsEntries(_) => "WorktreePsEntries".into(),
         DaemonResponse::AgentHandoff { .. } => "AgentHandoff".into(),
+        DaemonResponse::FleetResults { .. } => "FleetResults".into(),
         DaemonResponse::ScreenText { .. } => "ScreenText".into(),
         DaemonResponse::WaitResult { .. } => "WaitResult".into(),
         DaemonResponse::ScStatus(_) => "ScStatus".into(),

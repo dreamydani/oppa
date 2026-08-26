@@ -11,7 +11,7 @@ use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 5;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 6;
 
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +58,31 @@ pub enum WaitCondition {
 pub struct WorktreePsEntry {
     pub record: WorktreeRecord,
     pub live_sessions: u32,
+}
+
+// One fan-out lane of a fleet spawn; every field optional so `{}` is a valid slot
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetSlot {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetSlotResult {
+    pub index: usize,
+    pub ok: bool,
+    #[serde(default)]
+    pub record: Option<WorktreeRecord>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +193,16 @@ pub enum DaemonRequest {
     WorktreePurge { id: String },
     WorktreePs,
     WorktreeLineage { id: String },
+    // v6 fleet spawn: one request fans out N worktree+agent spawns; per-slot
+    // fields override shared ones and a failing slot never aborts its peers
+    WorktreeCreateFleet {
+        repo_path: PathBuf,
+        #[serde(default)]
+        base_ref: Option<String>,
+        #[serde(default)]
+        shared_prompt: Option<String>,
+        slots: Vec<FleetSlot>,
+    },
     // v4 source-control surface: cwd-relative ops delegated to git/source_control.rs
     GitStatus { cwd: String },
     GitStage { cwd: String, paths: Vec<String> },
@@ -245,6 +280,10 @@ pub enum DaemonResponse {
     AgentHandoff {
         record: WorktreeRecord,
         session_id: String,
+    },
+    // Per-slot fleet outcomes, request order preserved
+    FleetResults {
+        results: Vec<FleetSlotResult>,
     },
     // v4 source-control replies; payload types are the git module's serde structs verbatim
     ScStatus(SourceControlStatus),
@@ -759,6 +798,108 @@ mod tests {
             }
             other => panic!("expected WorktreeCreate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_serialize_v6_fleet_request_response_roundtrip() {
+        let requests = vec![
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path: PathBuf::from("/tmp/repo"),
+                base_ref: Some("main".into()),
+                shared_prompt: Some("fix it".into()),
+                slots: vec![
+                    FleetSlot {
+                        name: None,
+                        agent: Some("claude".into()),
+                        command: None,
+                        prompt: None,
+                    },
+                    FleetSlot {
+                        name: Some("custom".into()),
+                        agent: None,
+                        command: Some("mytool --fast".into()),
+                        prompt: Some("go".into()),
+                    },
+                    FleetSlot {
+                        name: None,
+                        agent: None,
+                        command: None,
+                        prompt: None,
+                    },
+                ],
+            },
+            // base_ref/shared_prompt stay optional for minimal fleets
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path: PathBuf::from("/tmp/repo"),
+                base_ref: None,
+                shared_prompt: None,
+                slots: vec![FleetSlot {
+                    name: None,
+                    agent: None,
+                    command: None,
+                    prompt: None,
+                }],
+            },
+        ];
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+
+        // All-optional slot must deserialize from an empty JSON object
+        let bare: DaemonRequest = serde_json::from_str(
+            r#"{"type":"WorktreeCreateFleet","payload":{"repo_path":"/tmp/repo","slots":[{}]}}"#,
+        )
+        .expect("bare fleet");
+        match bare {
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path,
+                base_ref,
+                shared_prompt,
+                slots,
+            } => {
+                assert_eq!(repo_path, PathBuf::from("/tmp/repo"));
+                assert_eq!(base_ref, None);
+                assert_eq!(shared_prompt, None);
+                assert_eq!(
+                    slots,
+                    vec![FleetSlot {
+                        name: None,
+                        agent: None,
+                        command: None,
+                        prompt: None
+                    }]
+                );
+            }
+            other => panic!("expected WorktreeCreateFleet, got {other:?}"),
+        }
+
+        let res = DaemonResponse::FleetResults {
+            results: vec![
+                FleetSlotResult {
+                    index: 0,
+                    ok: true,
+                    record: Some(sample_worktree_record("wt-f0")),
+                    session_id: Some("agent-x".into()),
+                    error: None,
+                },
+                FleetSlotResult {
+                    index: 1,
+                    ok: false,
+                    record: None,
+                    session_id: None,
+                    error: Some("unknown agent: zzz".into()),
+                },
+            ],
+        };
+        let json = serde_json::to_value(&res).unwrap();
+        assert_eq!(json["type"], "FleetResults");
+        assert_eq!(json["payload"]["results"][0]["session_id"], "agent-x");
+        assert_eq!(json["payload"]["results"][1]["error"], "unknown agent: zzz");
+        let decoded: DaemonResponse =
+            serde_json::from_value(json).expect("deserialize response");
+        assert_eq!(res, decoded);
     }
 
     #[test]

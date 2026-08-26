@@ -10,11 +10,12 @@ use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
-    WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -636,8 +637,30 @@ impl DaemonClient {
         }
     }
 
-    pub fn worktree_list(&self) -> Result<Vec<WorktreeListEntry>, String> {
-        match self.send_request(DaemonRequest::WorktreeList)? {
+    // One round trip fans out every slot; per-slot outcomes arrive in request order.
+    pub fn create_worktree_fleet(
+        &self,
+        repo_path: &str,
+        base_ref: Option<String>,
+        shared_prompt: Option<String>,
+        slots: Vec<FleetSlot>,
+    ) -> Result<Vec<FleetSlotResult>, String> {
+        let req = DaemonRequest::WorktreeCreateFleet {
+            repo_path: PathBuf::from(repo_path),
+            base_ref,
+            shared_prompt,
+            slots,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::FleetResults { results } => Ok(results),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for WorktreeCreateFleet: {other:?}"
+            )),
+        }
+    }
+
+    pub fn worktree_list(&self) -> Result<Vec<WorktreeListEntry>, String> {        match self.send_request(DaemonRequest::WorktreeList)? {
             DaemonResponse::WorktreeRecords(entries) => Ok(entries),
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response for WorktreeList: {other:?}")),
@@ -1342,6 +1365,64 @@ mod tests {
         assert!(
             orphan_prompt.err().unwrap().contains("unknown agent"),
             "unknown agent id must be rejected"
+        );
+
+        client.disconnect().expect("disconnect");
+        cancel_token.cancel();
+        let _ = server_thread.join();
+    }
+
+    // Fleet requests must survive the real pipe both directions: the daemon's
+    // empty-fleet rejection maps to Err with its message intact.
+    #[test]
+    fn worktree_create_fleet_surfaces_empty_slot_rejection_over_the_pipe() {
+        let temp_dir = std::env::temp_dir().join(format!("oppa_fleet_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let server = Arc::new(DaemonServer::with_snapshot_storage(temp_dir));
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-fleet-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-fleet-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        let server_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect client");
+
+        let empty = client.create_worktree_fleet("/tmp/repo", None, None, Vec::new());
+        assert!(
+            empty
+                .err()
+                .unwrap()
+                .contains("fleet requires at least one slot"),
+            "empty fleet must be rejected over the pipe"
         );
 
         client.disconnect().expect("disconnect");
