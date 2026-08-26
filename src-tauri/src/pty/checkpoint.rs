@@ -177,6 +177,7 @@ impl DaemonServer {
             foreground_command,
             agent_session,
             worktree_id: session.worktree_id.clone(),
+            agent_status: session.agent_status(),
         }
     }
 
@@ -186,6 +187,9 @@ impl DaemonServer {
         snapshot.scrollback.hash(&mut hasher);
         snapshot.cwd.hash(&mut hasher);
         snapshot.foreground_command.hash(&mut hasher);
+        // State flips are content changes even when scrollback stands still,
+        // or a finished pill would stay stale until the next text output.
+        snapshot.agent_status.hash(&mut hasher);
         hasher.finish()
     }
 

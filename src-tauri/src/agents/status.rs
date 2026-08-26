@@ -11,7 +11,7 @@ pub const AGENT_STATUS_MAX_FIELD_LENGTH: usize = 2000;
 const TOOL_NAME_MAX_LEN: usize = 256;
 const INTERACTIVE_PROMPT_MAX_LEN: usize = 1000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentStatusState {
     Working,
@@ -42,14 +42,14 @@ impl AgentStatusState {
 }
 
 // Where the evidence came from: managed hooks are authority; quietness is fallback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StatusOrigin {
     Hook,
     Quiet,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AgentStatusEntry {
     pub state: AgentStatusState,
     /// Most recent user prompt, cached across the turn because tool pings omit it.

@@ -32,6 +32,7 @@ pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
 pub type OnGitChanged = Arc<dyn Fn() + Send + Sync>;
 pub type OnPrChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 pub type OnSessionWorking = Arc<dyn Fn(&str, bool) + Send + Sync>;
+pub type OnAgentStatus = Arc<dyn Fn(&str, &crate::agents::status::AgentStatusEntry) + Send + Sync>;
 
 /// Agent handoff result: created worktree plus the live agent session a pane
 /// can bind to (session_id doubles as the agent terminal handle).
@@ -67,6 +68,7 @@ pub struct DaemonClient {
     git_changed_cb: Arc<Mutex<Option<OnGitChanged>>>,
     pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>>,
     session_working_cb: Arc<Mutex<Option<OnSessionWorking>>>,
+    agent_status_cb: Arc<Mutex<Option<OnAgentStatus>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -97,6 +99,7 @@ impl DaemonClient {
         let git_changed_cb: Arc<Mutex<Option<OnGitChanged>>> = Arc::new(Mutex::new(None));
         let pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>> = Arc::new(Mutex::new(None));
         let session_working_cb: Arc<Mutex<Option<OnSessionWorking>>> = Arc::new(Mutex::new(None));
+        let agent_status_cb: Arc<Mutex<Option<OnAgentStatus>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -171,6 +174,7 @@ impl DaemonClient {
         let git_changed_cb_clone = Arc::clone(&git_changed_cb);
         let pr_changed_cb_clone = Arc::clone(&pr_changed_cb);
         let session_working_cb_clone = Arc::clone(&session_working_cb);
+        let agent_status_cb_clone = Arc::clone(&agent_status_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -251,6 +255,11 @@ impl DaemonClient {
                                         cb(&session_id, working);
                                     }
                                 }
+                                DaemonEvent::AgentStatusChanged { pane_key, entry } => {
+                                    if let Some(cb) = agent_status_cb_clone.lock().as_ref() {
+                                        cb(&pane_key, &entry);
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -293,6 +302,7 @@ impl DaemonClient {
             git_changed_cb,
             pr_changed_cb,
             session_working_cb,
+            agent_status_cb,
             _runtime: rt,
         };
 
@@ -382,6 +392,11 @@ impl DaemonClient {
     /// Register a global hook fired whenever any session flips working/idle.
     pub fn set_working_state_callback(&self, cb: OnSessionWorking) {
         *self.session_working_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever an agent posts a classified status entry.
+    pub fn set_agent_status_callback(&self, cb: OnAgentStatus) {
+        *self.agent_status_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.

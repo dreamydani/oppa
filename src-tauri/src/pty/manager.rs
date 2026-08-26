@@ -1,6 +1,7 @@
 use crate::pty::daemon_client::{
     DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnGitChanged, OnPrChanged,
     OnSessionWorking, OnTitleChanged, OnWorktreeChanged,
+    OnAgentStatus,
 };
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
@@ -18,6 +19,7 @@ pub struct PtyManager {
     git_changed_cb: Mutex<Option<OnGitChanged>>,
     pr_changed_cb: Mutex<Option<OnPrChanged>>,
     session_working_cb: Mutex<Option<OnSessionWorking>>,
+    agent_status_cb: Mutex<Option<OnAgentStatus>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -38,6 +40,7 @@ impl PtyManager {
             git_changed_cb: Mutex::new(None),
             pr_changed_cb: Mutex::new(None),
             session_working_cb: Mutex::new(None),
+            agent_status_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -53,6 +56,7 @@ impl PtyManager {
             git_changed_cb: Mutex::new(None),
             pr_changed_cb: Mutex::new(None),
             session_working_cb: Mutex::new(None),
+            agent_status_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -115,6 +119,14 @@ impl PtyManager {
         }
     }
 
+    /// Install the agent-status forwarder; re-applied on every reconnect.
+    pub fn set_agent_status_callback(&self, cb: OnAgentStatus) {
+        *self.agent_status_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_agent_status_callback(cb);
+        }
+    }
+
     /// Obtain or lazily initialize the daemon client connection.
     pub fn get_client(&self) -> Result<Arc<DaemonClient>, String> {
         let mut client_guard = self.client.lock();
@@ -162,6 +174,9 @@ impl PtyManager {
         }
         if let Some(cb) = self.session_working_cb.lock().as_ref() {
             client.set_working_state_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.agent_status_cb.lock().as_ref() {
+            client.set_agent_status_callback(Arc::clone(cb));
         }
         Ok(client)
     }

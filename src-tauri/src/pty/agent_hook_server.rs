@@ -226,8 +226,13 @@ fn apply_hook_payload(
         if let Some(entry) =
             classify_hook_event(agent, &event_name, &payload, prev.as_ref(), unix_now_ms())
         {
-            // Edge-only store; IPC emission wires up in the protocol task.
-            let _ = session.apply_agent_status(entry);
+            // Edge-only store+emit; the UI gets whole entries, never inference.
+            if session.apply_agent_status(entry.clone()) {
+                session.publish_event(crate::pty::ipc_protocol::DaemonEvent::AgentStatusChanged {
+                    pane_key: pane_key.to_string(),
+                    entry,
+                });
+            }
         }
     }
 

@@ -762,7 +762,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn gemini_qwen_cursor_grok_opencode_roundtrip() {
         let home = tempfile::tempdir().expect("home tmp");
         let app = tempfile::tempdir().expect("app tmp");

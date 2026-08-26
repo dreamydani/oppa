@@ -1032,6 +1032,7 @@ mod tests {
                 foreground_command: Some("claude --resume abc123".into()),
                 agent_session: None,
                 worktree_id: None,
+                agent_status: None,
             })
             .expect("seed checkpoint");
 
@@ -1118,6 +1119,7 @@ mod tests {
                 foreground_command: Some("claude --resume abc123".into()),
                 agent_session: None,
                 worktree_id: None,
+                agent_status: None,
             })
             .expect("seed checkpoint");
 
@@ -1170,6 +1172,7 @@ mod tests {
                         transcript_path: None,
                     }),
                     worktree_id: None,
+                    agent_status: None,
                 })
                 .expect("seed checkpoint");
         }
@@ -2251,6 +2254,7 @@ mod tests {
                 foreground_command: None,
                 agent_session: None,
                 worktree_id: Some(created.id.clone()),
+                agent_status: None,
             })
             .expect("seed checkpoint");
 

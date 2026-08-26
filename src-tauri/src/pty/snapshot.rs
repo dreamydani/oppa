@@ -25,6 +25,9 @@ pub struct SessionSnapshot {
     // Worktree identity survives restarts so cold restore rebinds the pane
     #[serde(default)]
     pub worktree_id: Option<String>,
+    // Last hook-classified agent state; lets a rebooted machine show truthful pills instantly
+    #[serde(default)]
+    pub agent_status: Option<crate::agents::status::AgentStatusEntry>,
 }
 
 /// Identity of an agent CLI session (e.g. Claude Code transcript id) captured
@@ -152,6 +155,7 @@ impl SnapshotStorage {
                 foreground_command: None,
                 agent_session: None,
                 worktree_id: None,
+                agent_status: None,
             }));
         }
 
@@ -312,6 +316,7 @@ mod tests {
             foreground_command: None,
             agent_session: None,
             worktree_id: None,
+            agent_status: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -355,6 +360,7 @@ mod tests {
                 ),
             }),
             worktree_id: Some("repo::C:/ws/feat-a".to_string()),
+            agent_status: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -442,6 +448,7 @@ mod tests {
             foreground_command: None,
             agent_session: None,
             worktree_id: None,
+            agent_status: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");

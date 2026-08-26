@@ -145,6 +145,29 @@ pub fn session_working_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str, bool) + Se
     })
 }
 
+/// Payload emitted on `agent-status`; the classified entry rides verbatim
+/// snake_case so the renderer mirrors the IPC shape 1:1 with zero mapping.
+#[derive(Clone, Serialize)]
+pub struct AgentStatusPayload {
+    pub pane_key: String,
+    pub entry: crate::agents::status::AgentStatusEntry,
+}
+
+pub fn agent_status_forwarder(
+    app: &AppHandle,
+) -> Arc<dyn Fn(&str, &crate::agents::status::AgentStatusEntry) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |pane_key, entry| {
+        let _ = emitter.emit(
+            "agent-status",
+            AgentStatusPayload {
+                pane_key: pane_key.to_string(),
+                entry: entry.clone(),
+            },
+        );
+    })
+}
+
 /// Resume plan surfaced to the frontend when a cold-restored session relaunches work.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
