@@ -344,7 +344,7 @@ describe("LeftSidebar", () => {
 
     expect(useTerminalStore.getState().leftSidebarView).toBe("worktrees");
     expect(screen.getAllByText("feat-a").length).toBeGreaterThan(0);
-    expect(screen.getByText("Todo")).toBeDefined();
+    expect(screen.getByText("sleeping")).toBeDefined();
   });
 
   it("keeps a closed sidebar mounted, hidden via the drawer instead of unmounting", () => {

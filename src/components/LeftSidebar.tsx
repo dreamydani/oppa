@@ -9,7 +9,7 @@ import {
   SlideDrawer,
 } from "../lib/layout/sideDrawer";
 import { createRafCoalescer } from "../lib/layout/rafThrottle";
-import { WorktreePane } from "./worktree/WorktreePane";
+import { ProjectTreeView } from "./worktree/ProjectTreeView";
 import {
   SearchIcon,
   PlusIcon,
@@ -256,7 +256,7 @@ export function LeftSidebar(): React.ReactElement {
 
       <div className="left-sidebar-body">
         {leftSidebarView === "worktrees" ? (
-          <WorktreePane filter={searchQuery} />
+          <ProjectTreeView filter={searchQuery} />
         ) : (
           <div className="tab-list" role="list">
           {tabs.length === 0 ? (
