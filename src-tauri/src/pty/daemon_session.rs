@@ -5,6 +5,7 @@ use crate::pty::pause_gate::PauseGate;
 use crate::pty::snapshot::AgentSessionRef;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
+use crate::pty::working_state_watcher;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::Write;
@@ -447,6 +448,9 @@ impl DaemonSession {
                 }
             });
         }
+
+        // Working/idle dots: edge-triggered SessionWorking events for subscribers
+        working_state_watcher::spawn(session);
     }
 
     /// Write input bytes to the PTY's input stream.
@@ -582,9 +586,15 @@ impl DaemonSession {
     }
 
     /// Subscribe to real-time events for this session. Events arrive
-    /// Arc-shared; dereference (or `&*event`) to match on them.
+    /// Arc-shared; dereference (or `&*event`) to match on them. The channel is
+    /// seeded with the current working/idle state so subscribers attached after
+    /// a spawn race never miss the baseline snapshot.
     pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<DaemonEvent>> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let _ = tx.send(Arc::new(DaemonEvent::SessionWorking {
+            session_id: self.id.clone(),
+            working: self.working_state(),
+        }));
         self.subscribers.lock().push(tx);
         rx
     }
@@ -626,6 +636,29 @@ impl DaemonSession {
     /// Command currently running in the foreground, per OSC 133 C/D markers.
     pub fn foreground_command(&self) -> Option<String> {
         self.foreground_command.lock().clone()
+    }
+
+    /// True while the shell/agent is actively working: a foreground command
+    /// runs (OSC133 C) or output has not yet been quiet long enough to call
+    /// the pane idle (standard TuiIdle thresholds).
+    pub fn working_state(&self) -> bool {
+        if self.foreground_command.lock().is_some() {
+            return true;
+        }
+        let (prompt_ms, fallback_ms) = idle_thresholds();
+        !Self::is_tui_idle(
+            Instant::now(),
+            *self.last_output_at.lock(),
+            *self.last_prompt_end_at.lock(),
+            Duration::from_millis(prompt_ms),
+            Duration::from_millis(fallback_ms),
+        )
+    }
+
+    /// Fan an event out to this session's live subscribers; dead receivers
+    /// are pruned by the shared emit path. Used by the working-state watcher.
+    pub(crate) fn publish_event(&self, event: DaemonEvent) {
+        emit_event(&self.subscribers, event);
     }
 
     pub fn is_alive(&self) -> bool {

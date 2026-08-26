@@ -308,6 +308,9 @@ pub fn run() {
                     manager.set_pr_changed_callback(pty::commands::pr_changed_forwarder(
                         &app_handle,
                     ));
+                    manager.set_working_state_callback(
+                        pty::commands::session_working_forwarder(&app_handle),
+                    );
                     let _ = manager.get_client();
                 }
             });

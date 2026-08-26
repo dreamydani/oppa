@@ -765,6 +765,7 @@ fn sample_attached() -> CreateOrAttachResult {
         resume: None,
         resume_declined_reason: None,
         worktree_id: Some("repo::C:/ws/feat-a".into()),
+        working: true,
     }
 }
 

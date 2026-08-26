@@ -122,6 +122,29 @@ pub fn pr_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) + Send 
     })
 }
 
+/// Payload emitted on `session-working` when a session flips working/idle.
+/// Event name matches the sibling `session-*` events; camelCase keys mirror
+/// the TS payload the frontend listener forwards verbatim.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkingPayload {
+    pub session_id: String,
+    pub working: bool,
+}
+
+pub fn session_working_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str, bool) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id, working| {
+        let _ = emitter.emit(
+            "session-working",
+            SessionWorkingPayload {
+                session_id: id.to_string(),
+                working,
+            },
+        );
+    })
+}
+
 /// Resume plan surfaced to the frontend when a cold-restored session relaunches work.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +167,8 @@ pub struct PtySpawnResultPayload {
     pub cwd: Option<String>,
     pub resume: Option<ResumePlanPayload>,
     pub resume_declined_reason: Option<String>,
+    // Mirrors CreateOrAttachResult.working so warm reattach hydrates dots
+    pub working: bool,
 }
 
 /// Spawn or reattach to a PTY session running in the background daemon.
@@ -251,6 +276,7 @@ pub fn pty_spawn(
             },
         }),
         resume_declined_reason: attach_res.resume_declined_reason,
+        working: attach_res.working,
     })
 }
 
@@ -786,6 +812,7 @@ mod tests {
             cwd: Some("/test/cwd".into()),
             resume: None,
             resume_declined_reason: None,
+            working: true,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"id\":\"s1\""));
@@ -797,6 +824,17 @@ mod tests {
         assert!(json.contains("\"cols\":80"));
         assert!(json.contains("\"rows\":24"));
         assert!(json.contains("\"cwd\":\"/test/cwd\""));
+        assert!(json.contains("\"working\":true"));
+    }
+
+    #[test]
+    fn session_working_payload_serializes_camel_case() {
+        let json = serde_json::to_string(&SessionWorkingPayload {
+            session_id: "s1".into(),
+            working: false,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"sessionId":"s1","working":false}"#);
     }
 
     #[test]

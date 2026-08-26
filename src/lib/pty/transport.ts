@@ -35,6 +35,8 @@ export interface PtySpawnResult {
   cwd?: string | null;
   resume?: ResumePlan | null;
   resume_declined_reason?: string | null;
+  // Mirrors CreateOrAttachResult.working: hydrates working/idle dots on attach
+  working?: boolean;
 }
 
 
@@ -271,6 +273,16 @@ export async function onTitleChanged(cb: (p: SessionTitleChangedPayload) => void
 }
 export async function onFocusRequested(cb: (p: SessionFocusRequestedPayload) => void) {
   return listen<SessionFocusRequestedPayload>("session-focus-requested", (e) => cb(e.payload));
+}
+
+// Edge-triggered working/idle flips; the Rust forwarder remaps the daemon's
+// snake_case session_id to camelCase exactly like the sibling session-* events.
+export interface SessionWorkingPayload {
+  sessionId: string;
+  working: boolean;
+}
+export async function onSessionWorking(cb: (p: SessionWorkingPayload) => void) {
+  return listen<SessionWorkingPayload>("session-working", (e) => cb(e.payload));
 }
 
 // ---- IPC v4 source-control surface; every shape mirrors its serde struct verbatim ----

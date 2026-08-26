@@ -82,6 +82,7 @@ impl DaemonServer {
                         resume: None,
                         resume_declined_reason: None,
                         worktree_id: session.worktree_id().map(str::to_string),
+                        working: session.working_state(),
                     })
                 } else {
                     // Cold restore: consult the disk checkpoint for agent resume state
@@ -128,6 +129,7 @@ impl DaemonServer {
                             let session_rows = session.rows();
                             let session_cwd = session.cwd();
                             let worktree_id = session.worktree_id().map(str::to_string);
+                            let working = session.working_state();
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
                             }
@@ -142,6 +144,7 @@ impl DaemonServer {
                                 resume,
                                 resume_declined_reason: declined,
                                 worktree_id,
+                                working,
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),

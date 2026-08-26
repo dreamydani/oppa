@@ -507,6 +507,26 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    // Raw-stream twin of RuntimeConnection::request: skip streamed event /
+    // keepalive frames so strict next-line response assertions stay valid
+    // now that attach seeds a SessionWorking frame onto every subscriber.
+    async fn read_response<R>(reader: &mut BufReader<R>, line: &mut String) -> DaemonResponse
+    where
+        R: tokio::io::AsyncRead + Unpin,
+    {
+        loop {
+            line.clear();
+            reader.read_line(line).await.unwrap();
+            let value: serde_json::Value = serde_json::from_str(line.trim())
+                .unwrap_or(serde_json::Value::Null);
+            if value.get("event").is_some() || value.get("_keepalive").is_some() {
+                continue;
+            }
+            return serde_json::from_value(value)
+                .unwrap_or_else(|e| panic!("undecodable response frame {line:?}: {e}"));
+        }
+    }
+
     #[tokio::test]
     async fn test_daemon_server_handle_request_lifecycle() {
         let server = DaemonServer::new();
@@ -715,10 +735,7 @@ mod tests {
         create_str.push('\n');
         write_half.write_all(create_str.as_bytes()).await.unwrap();
 
-        line.clear();
-        reader.read_line(&mut line).await.unwrap();
-        let create_resp: DaemonResponse = serde_json::from_str(line.trim()).unwrap();
-        match create_resp {
+        match read_response(&mut reader, &mut line).await {
             DaemonResponse::SessionAttached(res) => {
                 assert!(res.is_new);
             }
@@ -810,10 +827,7 @@ mod tests {
         reattach_str.push('\n');
         write_half2.write_all(reattach_str.as_bytes()).await.unwrap();
 
-        line.clear();
-        reader2.read_line(&mut line).await.unwrap();
-        let reattach_resp: DaemonResponse = serde_json::from_str(line.trim()).unwrap();
-        match reattach_resp {
+        match read_response(&mut reader2, &mut line).await {
             DaemonResponse::SessionAttached(res) => {
                 assert!(!res.is_new, "expected reattached session to have is_new: false");
                 let snapshot = res.snapshot.expect("expected reattached session snapshot");
@@ -924,8 +938,7 @@ mod tests {
         .unwrap()
             + "\n";
         write_half.write_all(create.as_bytes()).await.unwrap();
-        line.clear();
-        reader.read_line(&mut line).await.unwrap();
+        let _create_resp = read_response(&mut reader, &mut line).await;
 
         // Send ACK over stream
         let ack_msg = serde_json::to_string(&DaemonRequest::Ack {
@@ -941,10 +954,7 @@ mod tests {
         let list_req = serde_json::to_string(&DaemonRequest::ListSessions).unwrap() + "\n";
         write_half.write_all(list_req.as_bytes()).await.unwrap();
 
-        line.clear();
-        reader.read_line(&mut line).await.unwrap();
-        let resp: DaemonResponse = serde_json::from_str(line.trim()).unwrap();
-        match resp {
+        match read_response(&mut reader, &mut line).await {
             DaemonResponse::SessionList(sessions) => {
                 assert!(sessions.contains(&"ack-srv-test".to_string()));
             }
@@ -1952,10 +1962,8 @@ mod tests {
             .as_bytes())
             .await
             .unwrap();
-        line.clear();
-        reader_a.read_line(&mut line).await.unwrap();
         assert!(matches!(
-            serde_json::from_str::<DaemonResponse>(line.trim()).unwrap(),
+            read_response(&mut reader_a, &mut line).await,
             DaemonResponse::SessionAttached(_)
         ));
 

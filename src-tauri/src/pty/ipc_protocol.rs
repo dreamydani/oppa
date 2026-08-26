@@ -44,6 +44,10 @@ pub struct CreateOrAttachResult {
     // Additive v3 field so `terminal split` can inherit the pane's binding
     #[serde(default)]
     pub worktree_id: Option<String>,
+    // Additive v6 field so warm reattach hydrates working/idle dots instantly;
+    // defaulted both ways so old daemons/clients keep interoperating
+    #[serde(default)]
+    pub working: bool,
 }
 
 // Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
@@ -336,6 +340,12 @@ pub enum DaemonEvent {
     SessionFocusRequested {
         session_id: String,
     },
+    // Edge-triggered working/idle flip (OSC133-derived); emitted by the
+    // per-session watcher only when the state changes, never on a timer
+    SessionWorking {
+        session_id: String,
+        working: bool,
+    },
     // Any successful source-control mutation anywhere; payload-less nudge to refresh panels
     GitChanged,
 }
@@ -494,6 +504,7 @@ mod tests {
             resume: None,
             resume_declined_reason: None,
             worktree_id: None,
+            working: false,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -502,6 +513,16 @@ mod tests {
 
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(res, decoded);
+
+        // Pre-v6 daemons omit `working`: the additive field defaults instead of failing
+        let legacy: DaemonResponse = serde_json::from_str(
+            r#"{"type":"SessionAttached","payload":{"is_new":false,"pid":1,"cols":80,"rows":24,"cwd":null,"snapshot":null}}"#,
+        )
+        .expect("legacy attach payload");
+        match legacy {
+            DaemonResponse::SessionAttached(attach) => assert!(!attach.working),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
     }
 
     #[test]
@@ -520,6 +541,7 @@ mod tests {
                 resume: None,
                 resume_declined_reason: None,
                 worktree_id: None,
+                working: true,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -575,6 +597,14 @@ mod tests {
             DaemonEvent::SessionFocusRequested {
                 session_id: "s1".into(),
             },
+            DaemonEvent::SessionWorking {
+                session_id: "s1".into(),
+                working: true,
+            },
+            DaemonEvent::SessionWorking {
+                session_id: "s2".into(),
+                working: false,
+            },
         ];
 
         for event in events {
@@ -599,6 +629,21 @@ mod tests {
             serde_json::from_str(r#"{"event":"PrChanged","payload":{"worktree_id":null}}"#)
                 .unwrap();
         assert_eq!(bare, DaemonEvent::PrChanged { worktree_id: None });
+    }
+
+    #[test]
+    fn test_session_working_event_wire_shape() {
+        let event = DaemonEvent::SessionWorking {
+            session_id: "s1".into(),
+            working: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "event": "SessionWorking",
+                "payload": {"session_id": "s1", "working": false}
+            })
+        );
     }
 
     #[test]
@@ -974,6 +1019,7 @@ mod tests {
             }),
             resume_declined_reason: None,
             worktree_id: None,
+            working: false,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");

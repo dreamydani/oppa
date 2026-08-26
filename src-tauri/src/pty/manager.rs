@@ -1,6 +1,6 @@
 use crate::pty::daemon_client::{
     DaemonClient, OnCwd, OnData, OnExit, OnFocusRequested, OnGitChanged, OnPrChanged,
-    OnTitleChanged, OnWorktreeChanged,
+    OnSessionWorking, OnTitleChanged, OnWorktreeChanged,
 };
 use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
 use parking_lot::Mutex;
@@ -17,6 +17,7 @@ pub struct PtyManager {
     focus_requested_cb: Mutex<Option<OnFocusRequested>>,
     git_changed_cb: Mutex<Option<OnGitChanged>>,
     pr_changed_cb: Mutex<Option<OnPrChanged>>,
+    session_working_cb: Mutex<Option<OnSessionWorking>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
 }
@@ -36,6 +37,7 @@ impl PtyManager {
             focus_requested_cb: Mutex::new(None),
             git_changed_cb: Mutex::new(None),
             pr_changed_cb: Mutex::new(None),
+            session_working_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
         }
@@ -50,6 +52,7 @@ impl PtyManager {
             focus_requested_cb: Mutex::new(None),
             git_changed_cb: Mutex::new(None),
             pr_changed_cb: Mutex::new(None),
+            session_working_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
         }
@@ -104,6 +107,14 @@ impl PtyManager {
         }
     }
 
+    /// Install the session working/idle forwarder; re-applied on every reconnect.
+    pub fn set_working_state_callback(&self, cb: OnSessionWorking) {
+        *self.session_working_cb.lock() = Some(Arc::clone(&cb));
+        if let Some(client) = self.client.lock().as_ref() {
+            client.set_working_state_callback(cb);
+        }
+    }
+
     /// Obtain or lazily initialize the daemon client connection.
     pub fn get_client(&self) -> Result<Arc<DaemonClient>, String> {
         let mut client_guard = self.client.lock();
@@ -148,6 +159,9 @@ impl PtyManager {
         }
         if let Some(cb) = self.pr_changed_cb.lock().as_ref() {
             client.set_pr_changed_callback(Arc::clone(cb));
+        }
+        if let Some(cb) = self.session_working_cb.lock().as_ref() {
+            client.set_working_state_callback(Arc::clone(cb));
         }
         Ok(client)
     }
