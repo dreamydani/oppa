@@ -1,14 +1,27 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { ExternalLink, GitBranch, MoreHorizontal } from "lucide-react";
+import { ExternalLink, GitBranch, GitPullRequest, MoreHorizontal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import "./worktree.css";
 
 const NO_LINKED_TERMINALS: SessionInfo[] = [];
+
+// Finish-chain card state: running spinner, PR confirmation, or failure reason.
+type FinishCardState =
+  | { phase: "running" }
+  | { phase: "created"; prUrl: string }
+  | { phase: "failed"; reason: string };
+
+function finishFailureReason(reason: string): string {
+  // Eligibility failures carry the machine blocked_reason; reuse the review
+  // composer's actionable copy so both surfaces read the same.
+  return (BLOCKED_COPY as Record<string, string>)[reason] ?? reason;
+}
 
 function prNumberFromUrl(url: string): string | null {
   const m = url.match(/\/pull\/(\d+)/);
@@ -47,6 +60,8 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const reviewByCwd = useTerminalStore((s) => s.reviewByCwd);
   const prStatusByWorktreeId = useTerminalStore((s) => s.prStatusByWorktreeId);
   const setWorktreeStatus = useTerminalStore((s) => s.setWorktreeStatus);
+  const finishWorktree = useTerminalStore((s) => s.finishWorktree);
+  const loadWorktrees = useTerminalStore((s) => s.loadWorktrees);
   const renameWorktree = useTerminalStore((s) => s.renameWorktree);
   const removeWorktree = useTerminalStore((s) => s.removeWorktree);
   const purgeWorktree = useTerminalStore((s) => s.purgeWorktree);
@@ -63,6 +78,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const [confirmTarget, setConfirmTarget] = useState<WorktreeRecord | null>(null);
   const [confirmMode, setConfirmMode] = useState<"remove" | "purge">("remove");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [finishByCardId, setFinishByCardId] = useState<Record<string, FinishCardState>>({});
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -135,6 +151,35 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     }
   };
 
+  const runFinish = async (record: WorktreeRecord) => {
+    setOpenMenuId(null);
+    setFinishByCardId((prev) => ({ ...prev, [record.id]: { phase: "running" } }));
+    try {
+      const outcome = await finishWorktree({ worktreeId: record.id });
+      if (outcome.ok) {
+        // Re-list so the freshly linked PR badge renders on the card.
+        await loadWorktrees();
+        setFinishByCardId((prev) => ({
+          ...prev,
+          [record.id]: { phase: "created", prUrl: outcome.prUrl ?? "" },
+        }));
+      } else {
+        setFinishByCardId((prev) => ({
+          ...prev,
+          [record.id]: { phase: "failed", reason: outcome.reason },
+        }));
+      }
+    } catch (e) {
+      setFinishByCardId((prev) => ({
+        ...prev,
+        [record.id]: {
+          phase: "failed",
+          reason: e instanceof Error ? e.message : String(e),
+        },
+      }));
+    }
+  };
+
   const openConfirm = (record: WorktreeRecord, mode: "remove" | "purge") => {
     setOpenMenuId(null);
     setActionError(null);
@@ -203,6 +248,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
             const live = liveSessions[record.id] ?? 0;
             const isEditing = renamingId === record.id;
             const linked = linkedByWorktreeId.get(record.id) ?? NO_LINKED_TERMINALS;
+            const finish = finishByCardId[record.id];
 
             return (
               <div
@@ -294,6 +340,31 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                       <span className="worktree-live-chip">{live} live</span>
                     )}
                   </div>
+                  {finish && (
+                    <div
+                      className={`worktree-finish-row ${finish.phase}`}
+                      data-testid="finish-row"
+                    >
+                      {finish.phase === "running" && (
+                        <>
+                          <span className="worktree-finish-spinner" aria-hidden="true" />
+                          <span className="worktree-finish-text">Finishing…</span>
+                        </>
+                      )}
+                      {finish.phase === "created" && (
+                        <span className="worktree-finish-text">
+                          {prNumberFromUrl(finish.prUrl)
+                            ? `PR #${prNumberFromUrl(finish.prUrl)} created`
+                            : "Pull request created"}
+                        </span>
+                      )}
+                      {finish.phase === "failed" && (
+                        <span className="worktree-finish-text" role="alert">
+                          {finishFailureReason(finish.reason)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {linked.length > 0 && (
                     <div className="worktree-terminals">
                       <div className="worktree-terminals-label">
@@ -346,6 +417,16 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                   <div className="worktree-card-menu" role="menu">
                     {!record.retired ? (
                       <>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={finish?.phase === "running"}
+                          onClick={() => void runFinish(record)}
+                        >
+                          <GitPullRequest size={12} />
+                          Finish…
+                        </button>
+                        <div className="worktree-menu-divider" />
                         <div className="worktree-menu-section-label">Set status</div>
                         {STATUS_ORDER.map((status) => (
                           <button

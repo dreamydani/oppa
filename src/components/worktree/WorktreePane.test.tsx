@@ -3,7 +3,7 @@ import { render, fireEvent, screen, act } from "@testing-library/react";
 import { WorktreePane } from "./WorktreePane";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as transport from "../../lib/pty/transport";
-import type { WorktreeRecord } from "../../lib/pty/transport";
+import type { PushOutcome, SourceControlStatus, WorktreeRecord } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -44,11 +44,22 @@ vi.mock("../../lib/pty/transport", () => ({
   repoList: vi.fn().mockResolvedValue([]),
   ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
-  worktreeCreateAgent: vi.fn(),
+   worktreeCreateAgent: vi.fn(),
+  scStatus: vi.fn(),
+  scStage: vi.fn().mockResolvedValue(undefined),
+  scCommit: vi.fn().mockResolvedValue("head123"),
+  scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/feat-a", was_publish: false }),
 }));
 
 const worktreeSetMock = vi.mocked(transport.worktreeSet);
 const worktreeRemoveMock = vi.mocked(transport.worktreeRemove);
+const worktreeListMock = vi.mocked(transport.worktreeList);
+const scStatusMock = vi.mocked(transport.scStatus);
+const scStageMock = vi.mocked(transport.scStage);
+const scCommitMock = vi.mocked(transport.scCommit);
+const scPushMock = vi.mocked(transport.scPush);
+const eligibilityMock = vi.mocked(transport.requestReviewEligibility);
+const createReviewMock = vi.mocked(transport.requestCreateReview);
 
 function record(overrides: Partial<WorktreeRecord> = {}): WorktreeRecord {
   return {
@@ -384,5 +395,367 @@ describe("WorktreePane linked terminals", () => {
     const card = screen.getByText("Feat A").closest(".worktree-card")!;
     expect(card.querySelector(".worktree-terminals")).toBeNull();
     expect(card.querySelectorAll(".worktree-terminal-row").length).toBe(0);
+  });
+});
+
+describe("WorktreePane finish chain", () => {
+  const WID = "demo::C:/ws/feat-a";
+
+  function gitStatus(
+    overrides: Partial<SourceControlStatus> = {},
+  ): SourceControlStatus {
+    return {
+      entries: [
+        { path: "src/a.ts", index_status: "M", worktree_status: "M", area: "staged", old_path: null },
+        { path: "src/b.ts", index_status: " ", worktree_status: "M", area: "unstaged", old_path: null },
+        { path: "notes.md", index_status: "?", worktree_status: "?", area: "untracked", old_path: null },
+      ],
+      conflict_state: "none",
+      branch: "feat-a",
+      upstream: { has_upstream: true, ahead: 1, behind: 0, remote_branch: "origin/feat-a" },
+      did_hit_limit: false,
+      status_length: 0,
+      ...overrides,
+    };
+  }
+
+  function seedFinishCard(retired = false) {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({
+            id: WID,
+            name: "feat-a",
+            display_name: "Feat A",
+            branch: "feat-a",
+            workspace_status: retired ? "completed" : "in-progress",
+            retired,
+          }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: {},
+      reviewByCwd: {},
+      prStatusByWorktreeId: {},
+      sessions: {},
+      workingBySessionId: {},
+      tabs: [],
+      activeTabId: "",
+      gitStatus: null,
+    } as unknown as Record<string, unknown>);
+  }
+
+  // Wires every transport so the whole chain lands; `order` receives one tag
+  // per completed call for exact sequencing assertions.
+  function primeHappyPath(order?: string[]) {
+    scStatusMock.mockResolvedValue(gitStatus());
+    scStageMock.mockImplementation(async () => {
+      order?.push("stage");
+    });
+    scCommitMock.mockImplementation(async () => {
+      order?.push("commit");
+      return "head123";
+    });
+    scPushMock.mockImplementation(async () => {
+      order?.push("push");
+      return { pushed_to: "origin/feat-a", was_publish: false };
+    });
+    eligibilityMock.mockResolvedValue({
+      eligible: true,
+      blocked_reason: null,
+      base_ref: "main",
+      owner_repo: "owner/repo",
+      existing_pr_url: null,
+    });
+    createReviewMock.mockImplementation(async () => {
+      order?.push("review");
+      return { pr_url: "https://github.com/owner/repo/pull/9", pr_number: 9, base_ref: "main", owner_repo: "owner/repo" };
+    });
+    worktreeSetMock.mockImplementation(async () => {
+      order?.push("status");
+      return null;
+    });
+    // The post-success reload must keep the card mounted for inline feedback.
+    worktreeListMock.mockResolvedValue([
+      {
+        record: record({ id: WID, name: "feat-a", display_name: "Feat A", branch: "feat-a", workspace_status: "in-review" }),
+        missing_on_disk: false,
+      },
+    ]);
+  }
+
+  function openFinishMenu() {
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /finish/i }));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seedFinishCard();
+  });
+
+  it("chains stage→commit→push→create→in-review and confirms with the PR number", async () => {
+    const order: string[] = [];
+    primeHappyPath(order);
+
+    render(<WorktreePane />);
+    openFinishMenu();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText(/PR #9 created/i)).toBeInTheDocument();
+    });
+    expect(order).toEqual(["stage", "commit", "push", "review", "status"]);
+    expect(scStageMock).toHaveBeenCalledWith("C:/ws/feat-a", ["src/a.ts", "src/b.ts", "notes.md"]);
+    expect(scCommitMock).toHaveBeenCalledWith("C:/ws/feat-a", "finish: merge work from Feat A");
+    expect(scPushMock).toHaveBeenCalledWith("C:/ws/feat-a", false, false);
+    expect(createReviewMock).toHaveBeenCalledWith("C:/ws/feat-a", {
+      title: "Feat A",
+      body: "Automated finish for branch feat-a",
+      draft: false,
+    });
+    expect(worktreeSetMock).toHaveBeenCalledWith(WID, { workspaceStatus: "in-review" });
+  });
+
+  it("shows an inline spinner while the chain is running", async () => {
+    primeHappyPath();
+    let resolvePush!: (value: PushOutcome) => void;
+    scPushMock.mockReturnValueOnce(new Promise<PushOutcome>((res) => { resolvePush = res; }));
+
+    render(<WorktreePane />);
+    openFinishMenu();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText(/finishing…/i)).toBeInTheDocument();
+    });
+    resolvePush({ pushed_to: "origin/feat-a", was_publish: false });
+    await vi.waitFor(() => {
+      expect(screen.getByText(/PR #9 created/i)).toBeInTheDocument();
+    });
+  });
+
+  it("conflicted working copy fails early with a reason and mutates nothing", async () => {
+    scStatusMock.mockResolvedValue(
+      gitStatus({
+        entries: [
+          { path: "src/a.ts", index_status: "U", worktree_status: "U", area: "conflict", old_path: null },
+          { path: "src/b.ts", index_status: "U", worktree_status: "U", area: "conflict", old_path: null },
+        ],
+        conflict_state: "merge",
+      }),
+    );
+
+    render(<WorktreePane />);
+    openFinishMenu();
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/2 conflicted files — resolve first/);
+    });
+    expect(scStageMock).not.toHaveBeenCalled();
+    expect(scCommitMock).not.toHaveBeenCalled();
+    expect(scPushMock).not.toHaveBeenCalled();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+  });
+
+  it("blocked eligibility surfaces the actionable reason and never creates a review", async () => {
+    primeHappyPath();
+    eligibilityMock.mockResolvedValue({
+      eligible: false,
+      blocked_reason: "gh-missing",
+      base_ref: null,
+      owner_repo: null,
+      existing_pr_url: null,
+    });
+
+    render(<WorktreePane />);
+    openFinishMenu();
+
+    // Human copy from the shared blocked-reason table, not the machine key.
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/install gh cli/i);
+    });
+    expect(scPushMock).toHaveBeenCalled();
+    expect(createReviewMock).not.toHaveBeenCalled();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+  });
+
+  it("retired cards offer no Finish action", () => {
+    seedFinishCard(true);
+    render(<WorktreePane />);
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    expect(screen.queryByRole("menuitem", { name: /finish/i })).toBeNull();
+  });
+});
+
+describe("finishWorktree store orchestration", () => {
+  const WID = "demo::C:/ws/feat-a";
+  const PATH = "C:/ws/feat-a";
+
+  function seedRegistry() {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: WID, name: "feat-a", display_name: "Feat A", branch: "feat-a" }),
+          missing_on_disk: false,
+        },
+      ],
+      gitStatus: null,
+    } as unknown as Record<string, unknown>);
+  }
+
+  function primeTransports() {
+    scStatusMock.mockResolvedValue({
+      entries: [
+        { path: "src/a.ts", index_status: " ", worktree_status: "M", area: "unstaged", old_path: null },
+      ],
+      conflict_state: "none",
+      branch: "feat-a",
+      upstream: { has_upstream: true, ahead: 1, behind: 0, remote_branch: "origin/feat-a" },
+      did_hit_limit: false,
+      status_length: 0,
+    });
+    scStageMock.mockResolvedValue(undefined);
+    scCommitMock.mockResolvedValue("head123");
+    scPushMock.mockResolvedValue({ pushed_to: "origin/feat-a", was_publish: false });
+    eligibilityMock.mockResolvedValue({
+      eligible: true,
+      blocked_reason: null,
+      base_ref: "main",
+      owner_repo: "owner/repo",
+      existing_pr_url: null,
+    });
+    createReviewMock.mockResolvedValue({
+      pr_url: "https://github.com/owner/repo/pull/9",
+      pr_number: 9,
+      base_ref: "main",
+      owner_repo: "owner/repo",
+    });
+    worktreeSetMock.mockResolvedValue(null);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seedRegistry();
+  });
+
+  it("returns ok with pr url + push target following the exact chain order", async () => {
+    primeTransports();
+    const order: string[] = [];
+    scStageMock.mockImplementation(async () => { order.push("stage"); });
+    scCommitMock.mockImplementation(async () => { order.push("commit"); return "head123"; });
+    scPushMock.mockImplementation(async () => { order.push("push"); return { pushed_to: "origin/feat-a", was_publish: false }; });
+    createReviewMock.mockImplementation(async () => { order.push("review"); return { pr_url: "https://github.com/owner/repo/pull/9", pr_number: 9, base_ref: "main", owner_repo: "owner/repo" }; });
+    worktreeSetMock.mockImplementation(async () => { order.push("status"); return null; });
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: true, prUrl: "https://github.com/owner/repo/pull/9", pushedTo: "origin/feat-a" });
+    expect(order).toEqual(["stage", "commit", "push", "review", "status"]);
+  });
+
+  it("publishes (sets upstream) when the branch has no upstream", async () => {
+    primeTransports();
+    scStatusMock.mockResolvedValue({
+      entries: [],
+      conflict_state: "none",
+      branch: "feat-a",
+      upstream: { has_upstream: false, ahead: 0, behind: 0, remote_branch: null },
+      did_hit_limit: false,
+      status_length: 0,
+    });
+
+    await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(scPushMock).toHaveBeenCalledWith(PATH, true, false);
+  });
+
+  it("fails at stage status on conflicts before any mutation", async () => {
+    primeTransports();
+    scStatusMock.mockResolvedValue({
+      entries: [
+        { path: "a", index_status: "U", worktree_status: "U", area: "conflict", old_path: null },
+        { path: "b", index_status: "U", worktree_status: "U", area: "conflict", old_path: null },
+        { path: "c", index_status: "U", worktree_status: "U", area: "conflict", old_path: null },
+      ],
+      conflict_state: "none",
+      branch: "feat-a",
+      upstream: { has_upstream: true, ahead: 0, behind: 0, remote_branch: null },
+      did_hit_limit: false,
+      status_length: 0,
+    });
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: false, stage: "status", reason: "3 conflicted files — resolve first" });
+    expect(scStageMock).not.toHaveBeenCalled();
+    expect(scCommitMock).not.toHaveBeenCalled();
+    expect(scPushMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces blocked eligibility without creating a review or touching status", async () => {
+    primeTransports();
+    eligibilityMock.mockResolvedValue({
+      eligible: false,
+      blocked_reason: "needs-push",
+      base_ref: null,
+      owner_repo: null,
+      existing_pr_url: null,
+    });
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: false, stage: "eligibility", reason: "needs-push" });
+    expect(scPushMock).toHaveBeenCalled();
+    expect(createReviewMock).not.toHaveBeenCalled();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+  });
+
+  it("existing PR url short-circuits creation but still marks in-review", async () => {
+    primeTransports();
+    eligibilityMock.mockResolvedValue({
+      eligible: false,
+      blocked_reason: "existing-review",
+      base_ref: "main",
+      owner_repo: "owner/repo",
+      existing_pr_url: "https://github.com/owner/repo/pull/7",
+    });
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: true, prUrl: "https://github.com/owner/repo/pull/7", pushedTo: "origin/feat-a" });
+    expect(createReviewMock).not.toHaveBeenCalled();
+    expect(worktreeSetMock).toHaveBeenCalledWith(WID, { workspaceStatus: "in-review" });
+  });
+
+  it("maps push failure to stage push without review or status calls", async () => {
+    primeTransports();
+    scPushMock.mockRejectedValue(new Error("remote rejected"));
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: false, stage: "push", reason: "remote rejected" });
+    expect(createReviewMock).not.toHaveBeenCalled();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+  });
+
+  it("does not regress status when review creation fails after landing the push", async () => {
+    primeTransports();
+    createReviewMock.mockRejectedValue(new Error("gh: review body too large"));
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: WID });
+
+    expect(outcome).toEqual({ ok: false, stage: "review", reason: "gh: review body too large" });
+    expect(scCommitMock).toHaveBeenCalled();
+    expect(scPushMock).toHaveBeenCalled();
+    expect(worktreeSetMock).not.toHaveBeenCalled();
+  });
+
+  it("fails cleanly for unknown worktree ids", async () => {
+    primeTransports();
+
+    const outcome = await useTerminalStore.getState().finishWorktree({ worktreeId: "nope" });
+
+    expect(outcome).toEqual({ ok: false, stage: "status", reason: expect.stringMatching(/unknown worktree nope/) });
+    expect(scStatusMock).not.toHaveBeenCalled();
   });
 });

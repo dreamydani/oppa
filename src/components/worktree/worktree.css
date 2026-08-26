@@ -358,6 +358,53 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+.worktree-card-menu button[role="menuitem"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Inline finish-chain feedback row (spinner / PR created / failure reason) */
+.worktree-finish-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-finish-text {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worktree-finish-row.created .worktree-finish-text {
+  color: #58a6ff;
+}
+
+.worktree-finish-row.failed .worktree-finish-text {
+  color: var(--destructive, #f85149);
+  white-space: normal;
+}
+
+.worktree-finish-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(138, 143, 152, 0.35);
+  border-top-color: var(--text-primary, #f0f0f0);
+  animation: wtFinishSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes wtFinishSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .worktree-menu-section-label {
   font-size: 10px;
   font-weight: 600;
