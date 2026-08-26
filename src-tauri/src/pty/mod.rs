@@ -22,3 +22,4 @@ pub mod screen_mirror;
 pub mod shell_args;
 pub mod snapshot;
 pub mod utf8_decoder;
+pub mod working_state_watcher;

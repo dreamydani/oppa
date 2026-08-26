@@ -163,6 +163,9 @@ export function createSessionsSlice(
         const cols = (typeof res !== "string" && res.cols) || geometry?.cols || DEFAULT_COLS;
         const rows = (typeof res !== "string" && res.rows) || geometry?.rows || DEFAULT_ROWS;
         const resolvedCwd = (typeof res !== "string" && res.cwd) || targetCwd;
+        // Attach result carries the daemon's current working/idle so dots are
+        // correct immediately on warm reattach.
+        const working = typeof res !== "string" ? (res.working ?? false) : false;
 
         const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
@@ -201,6 +204,7 @@ export function createSessionsSlice(
                   : {}),
               },
             },
+            workingBySessionId: { ...state.workingBySessionId, [id]: working },
           };
         });
         return id;

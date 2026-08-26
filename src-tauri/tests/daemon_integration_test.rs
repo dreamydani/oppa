@@ -111,6 +111,136 @@ fn test_e2e_daemon_spawn_and_data_flow() {
     let _ = server_thread.join();
 }
 
+// Process-global idle override; Drop restores it even on assertion failure.
+struct IdleMsGuard;
+impl IdleMsGuard {
+    fn set(ms: &str) -> Self {
+        std::env::set_var("OPPA_IDLE_MS", ms);
+        Self
+    }
+}
+impl Drop for IdleMsGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("OPPA_IDLE_MS");
+    }
+}
+
+fn sh_path_for_working_test() -> String {
+    if let Some(found) = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join("sh.exe"))
+            .find(|candidate| candidate.exists())
+    }) {
+        return found.to_string_lossy().into_owned();
+    }
+    let program_files =
+        std::env::var_os("ProgramFiles").unwrap_or_else(|| "C:\\Program Files".into());
+    for candidate in [
+        std::path::Path::new(&program_files).join("Git\\bin\\sh.exe"),
+        std::path::Path::new(&program_files).join("Git\\usr\\bin\\sh.exe"),
+    ] {
+        if candidate.exists() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    "sh".to_string()
+}
+
+#[test]
+fn test_e2e_daemon_session_working_state_events_over_pipe() {
+    let _idle_guard = IdleMsGuard::set("250");
+    let socket_path = generate_test_socket_path("working");
+    let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
+
+    let client = DaemonClient::connect(&socket_path).expect("connect client failed");
+    let session_id = "e2e-working-session";
+
+    // Callback must be installed before attach so no flip is missed
+    let (work_tx, work_rx) = channel::<bool>();
+    client.set_working_state_callback(Arc::new(move |_id, working| {
+        let _ = work_tx.send(working);
+    }));
+
+    let sh = sh_path_for_working_test();
+    let attach_res = client
+        .create_or_attach(session_id, 80, 24, None, Some(sh), false, None)
+        .expect("create_or_attach failed");
+    assert!(attach_res.is_new);
+
+    // Attach snapshot carries the current dot for warm reattach hydration
+    assert!(attach_res.working, "fresh session must report working");
+
+    // Baseline event rides the seeded subscriber stream
+    let baseline = work_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("initial SessionWorking event within 2s");
+
+    // C marker: foreground command → working flip
+    client
+        .write(session_id, "printf '\\033]133;C;e2e-work\\007'\n")
+        .expect("write C marker");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut saw_working_after_start = baseline;
+    while std::time::Instant::now() < deadline {
+        match work_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(true) => {
+                saw_working_after_start = true;
+                break;
+            }
+            Ok(false) => saw_working_after_start = false,
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        saw_working_after_start,
+        "expected SessionWorking(true) after OSC133 C marker"
+    );
+
+    // D marker + quiet past OPPA_IDLE_MS → idle flip
+    client
+        .write(session_id, "printf '\\033]133;D\\007'\n")
+        .expect("write D marker");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut saw_idle = false;
+    while std::time::Instant::now() < deadline {
+        match work_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(false) => {
+                saw_idle = true;
+                break;
+            }
+            Ok(true) | Err(_) => continue,
+        }
+    }
+    assert!(saw_idle, "expected SessionWorking(false) after D marker + quiet");
+
+    // Edge-triggered over the pipe: within the settle window the stream must
+    // never repeat the same state back-to-back (per-tick flooding would).
+    let mut last_seen = false;
+    let mut repeated_state = false;
+    let window = std::time::Instant::now() + Duration::from_millis(900);
+    while std::time::Instant::now() < window {
+        match work_rx.recv_timeout(Duration::from_millis(150)) {
+            Ok(working) => {
+                if working == last_seen {
+                    repeated_state = true;
+                }
+                last_seen = working;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    assert!(
+        !repeated_state,
+        "steady state must not re-emit unchanged SessionWorking events"
+    );
+
+    client.kill(session_id).expect("kill session failed");
+    client.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
 #[test]
 fn test_e2e_daemon_warm_reattach_and_snapshot() {
     let socket_path = generate_test_socket_path("reattach");
@@ -673,6 +803,102 @@ fn test_e2e_daemon_v4_git_status_stage_commit_and_comment_crud_over_pipe() {
 
     listener.disconnect().expect("disconnect listener");
     mutator.disconnect().expect("disconnect mutator");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
+#[test]
+fn test_e2e_daemon_sc_merge_to_base_over_pipe_fires_git_changed() {
+    let repo_dir = tempfile::tempdir().expect("temp repo dir");
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    run_git_in(repo_dir.path(), &["init", "-b", "main"]);
+    run_git_in(repo_dir.path(), &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(repo_dir.path(), &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_dir.path().join("README.md"), "# seed").expect("write seed file");
+    run_git_in(repo_dir.path(), &["add", "."]);
+    run_git_in(repo_dir.path(), &["commit", "-m", "init"]);
+
+    let socket_path = generate_test_socket_path("mergebase");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    let listener = DaemonClient::connect(&socket_path).expect("connect listener client");
+    let (git_tx, git_rx) = channel::<()>();
+    listener.set_git_changed_callback(Arc::new(move || {
+        let _ = git_tx.send(());
+    }));
+    let client = DaemonClient::connect(&socket_path).expect("connect merge client");
+
+    let repo_path = repo_dir.path().to_string_lossy().into_owned();
+    client.repo_add(&repo_path).expect("repo_add");
+    let record = client
+        .worktree_create(
+            &repo_path,
+            Some("agent-one".to_string()),
+            None,
+            Some("main".to_string()),
+            None,
+            None,
+            None,
+        )
+        .expect("worktree_create");
+
+    // Agent commits land in the worktree; the main checkout stays clean on main.
+    std::fs::write(record.path.join("feat.txt"), "feature work\n").expect("write feature file");
+    run_git_in(&record.path, &["add", "."]);
+    run_git_in(&record.path, &["commit", "-m", "feat adds"]);
+
+    let worktree_cwd = record.path.to_string_lossy().into_owned();
+    let outcome = client
+        .sc_merge_to_base(&worktree_cwd, "squash")
+        .expect("sc_merge_to_base");
+    assert_eq!(outcome.mode, "squash");
+    assert_eq!(outcome.files_changed, 1);
+    assert!(!outcome.merged_commit.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(repo_dir.path().join("feat.txt")).unwrap().replace('\r', ""),
+        "feature work\n"
+    );
+    assert!(
+        git_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "successful merge must fire the peer's GitChanged callback"
+    );
+
+    // Guard refusals ride the same pipe as plain-language errors.
+    std::fs::write(repo_dir.path().join("dirty.txt"), "uncommitted").expect("write dirty file");
+    let err = client
+        .sc_merge_to_base(&worktree_cwd, "merge")
+        .expect_err("dirty main checkout must block the merge");
+    assert!(
+        err.contains("main checkout has uncommitted changes"),
+        "got: {err}"
+    );
+    assert!(
+        client
+            .sc_merge_to_base(&repo_path, "squash")
+            .err()
+            .map(|e| e.contains("not inside a registered agent worktree"))
+            .unwrap_or(false),
+        "cwd outside any worktree must be rejected"
+    );
+
+    listener.disconnect().expect("disconnect listener");
+    client.disconnect().expect("disconnect merge client");
     cancel_token.cancel();
     let _ = server_thread.join();
 }

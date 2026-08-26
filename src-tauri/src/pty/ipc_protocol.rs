@@ -2,8 +2,8 @@ use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::pr_message::PrMessage;
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
@@ -11,7 +11,7 @@ use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 5;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 6;
 
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +44,10 @@ pub struct CreateOrAttachResult {
     // Additive v3 field so `terminal split` can inherit the pane's binding
     #[serde(default)]
     pub worktree_id: Option<String>,
+    // Additive v6 field so warm reattach hydrates working/idle dots instantly;
+    // defaulted both ways so old daemons/clients keep interoperating
+    #[serde(default)]
+    pub working: bool,
 }
 
 // Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
@@ -58,6 +62,31 @@ pub enum WaitCondition {
 pub struct WorktreePsEntry {
     pub record: WorktreeRecord,
     pub live_sessions: u32,
+}
+
+// One fan-out lane of a fleet spawn; every field optional so `{}` is a valid slot
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetSlot {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetSlotResult {
+    pub index: usize,
+    pub ok: bool,
+    #[serde(default)]
+    pub record: Option<WorktreeRecord>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +197,16 @@ pub enum DaemonRequest {
     WorktreePurge { id: String },
     WorktreePs,
     WorktreeLineage { id: String },
+    // v6 fleet spawn: one request fans out N worktree+agent spawns; per-slot
+    // fields override shared ones and a failing slot never aborts its peers
+    WorktreeCreateFleet {
+        repo_path: PathBuf,
+        #[serde(default)]
+        base_ref: Option<String>,
+        #[serde(default)]
+        shared_prompt: Option<String>,
+        slots: Vec<FleetSlot>,
+    },
     // v4 source-control surface: cwd-relative ops delegated to git/source_control.rs
     GitStatus { cwd: String },
     GitStage { cwd: String, paths: Vec<String> },
@@ -214,6 +253,9 @@ pub enum DaemonRequest {
     },
     ReviewStatus { cwd: String },
     GitGeneratePrMessage { cwd: String },
+    // v6 fleets: guarded merge of an agent worktree branch into its base ref;
+    // mode is "squash" | "merge" (parsed daemon-side)
+    ScMergeToBase { cwd: String, mode: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +288,10 @@ pub enum DaemonResponse {
         record: WorktreeRecord,
         session_id: String,
     },
+    // Per-slot fleet outcomes, request order preserved
+    FleetResults {
+        results: Vec<FleetSlotResult>,
+    },
     // v4 source-control replies; payload types are the git module's serde structs verbatim
     ScStatus(SourceControlStatus),
     ScCommit(String),
@@ -264,6 +310,7 @@ pub enum DaemonResponse {
     CreateReview(CreatedReview),
     ReviewStatus(PrStatus),
     ScPrMessage(PrMessage),
+    ScMerged(MergeToBaseOutcome),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,6 +343,12 @@ pub enum DaemonEvent {
     },
     SessionFocusRequested {
         session_id: String,
+    },
+    // Edge-triggered working/idle flip (OSC133-derived); emitted by the
+    // per-session watcher only when the state changes, never on a timer
+    SessionWorking {
+        session_id: String,
+        working: bool,
     },
     // Any successful source-control mutation anywhere; payload-less nudge to refresh panels
     GitChanged,
@@ -455,6 +508,7 @@ mod tests {
             resume: None,
             resume_declined_reason: None,
             worktree_id: None,
+            working: false,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -463,6 +517,16 @@ mod tests {
 
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(res, decoded);
+
+        // Pre-v6 daemons omit `working`: the additive field defaults instead of failing
+        let legacy: DaemonResponse = serde_json::from_str(
+            r#"{"type":"SessionAttached","payload":{"is_new":false,"pid":1,"cols":80,"rows":24,"cwd":null,"snapshot":null}}"#,
+        )
+        .expect("legacy attach payload");
+        match legacy {
+            DaemonResponse::SessionAttached(attach) => assert!(!attach.working),
+            other => panic!("expected SessionAttached, got {other:?}"),
+        }
     }
 
     #[test]
@@ -481,6 +545,7 @@ mod tests {
                 resume: None,
                 resume_declined_reason: None,
                 worktree_id: None,
+                working: true,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -536,6 +601,14 @@ mod tests {
             DaemonEvent::SessionFocusRequested {
                 session_id: "s1".into(),
             },
+            DaemonEvent::SessionWorking {
+                session_id: "s1".into(),
+                working: true,
+            },
+            DaemonEvent::SessionWorking {
+                session_id: "s2".into(),
+                working: false,
+            },
         ];
 
         for event in events {
@@ -560,6 +633,21 @@ mod tests {
             serde_json::from_str(r#"{"event":"PrChanged","payload":{"worktree_id":null}}"#)
                 .unwrap();
         assert_eq!(bare, DaemonEvent::PrChanged { worktree_id: None });
+    }
+
+    #[test]
+    fn test_session_working_event_wire_shape() {
+        let event = DaemonEvent::SessionWorking {
+            session_id: "s1".into(),
+            working: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "event": "SessionWorking",
+                "payload": {"session_id": "s1", "working": false}
+            })
+        );
     }
 
     #[test]
@@ -762,6 +850,108 @@ mod tests {
     }
 
     #[test]
+    fn test_serialize_v6_fleet_request_response_roundtrip() {
+        let requests = vec![
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path: PathBuf::from("/tmp/repo"),
+                base_ref: Some("main".into()),
+                shared_prompt: Some("fix it".into()),
+                slots: vec![
+                    FleetSlot {
+                        name: None,
+                        agent: Some("claude".into()),
+                        command: None,
+                        prompt: None,
+                    },
+                    FleetSlot {
+                        name: Some("custom".into()),
+                        agent: None,
+                        command: Some("mytool --fast".into()),
+                        prompt: Some("go".into()),
+                    },
+                    FleetSlot {
+                        name: None,
+                        agent: None,
+                        command: None,
+                        prompt: None,
+                    },
+                ],
+            },
+            // base_ref/shared_prompt stay optional for minimal fleets
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path: PathBuf::from("/tmp/repo"),
+                base_ref: None,
+                shared_prompt: None,
+                slots: vec![FleetSlot {
+                    name: None,
+                    agent: None,
+                    command: None,
+                    prompt: None,
+                }],
+            },
+        ];
+        for req in requests {
+            let json = serde_json::to_string(&req).expect("serialize request");
+            let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
+            assert_eq!(req, decoded);
+        }
+
+        // All-optional slot must deserialize from an empty JSON object
+        let bare: DaemonRequest = serde_json::from_str(
+            r#"{"type":"WorktreeCreateFleet","payload":{"repo_path":"/tmp/repo","slots":[{}]}}"#,
+        )
+        .expect("bare fleet");
+        match bare {
+            DaemonRequest::WorktreeCreateFleet {
+                repo_path,
+                base_ref,
+                shared_prompt,
+                slots,
+            } => {
+                assert_eq!(repo_path, PathBuf::from("/tmp/repo"));
+                assert_eq!(base_ref, None);
+                assert_eq!(shared_prompt, None);
+                assert_eq!(
+                    slots,
+                    vec![FleetSlot {
+                        name: None,
+                        agent: None,
+                        command: None,
+                        prompt: None
+                    }]
+                );
+            }
+            other => panic!("expected WorktreeCreateFleet, got {other:?}"),
+        }
+
+        let res = DaemonResponse::FleetResults {
+            results: vec![
+                FleetSlotResult {
+                    index: 0,
+                    ok: true,
+                    record: Some(sample_worktree_record("wt-f0")),
+                    session_id: Some("agent-x".into()),
+                    error: None,
+                },
+                FleetSlotResult {
+                    index: 1,
+                    ok: false,
+                    record: None,
+                    session_id: None,
+                    error: Some("unknown agent: zzz".into()),
+                },
+            ],
+        };
+        let json = serde_json::to_value(&res).unwrap();
+        assert_eq!(json["type"], "FleetResults");
+        assert_eq!(json["payload"]["results"][0]["session_id"], "agent-x");
+        assert_eq!(json["payload"]["results"][1]["error"], "unknown agent: zzz");
+        let decoded: DaemonResponse =
+            serde_json::from_value(json).expect("deserialize response");
+        assert_eq!(res, decoded);
+    }
+
+    #[test]
     fn test_hello_without_auth_token_still_deserializes_old_client() {
         let old_client_hello =
             r#"{"type":"Hello","payload":{"client_version":"0.9.0","protocol_version":2}}"#;
@@ -833,6 +1023,7 @@ mod tests {
             }),
             resume_declined_reason: None,
             worktree_id: None,
+            working: false,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");
@@ -951,6 +1142,7 @@ mod tests {
             },
             DaemonRequest::GitUpstreamRefresh { cwd: "/r".into() },
             DaemonRequest::GitGenerateCommitMessage { cwd: "/r".into() },
+            DaemonRequest::ScMergeToBase { cwd: "/r".into(), mode: "squash".into() },
         ];
         for req in requests {
             let json = serde_json::to_string(&req).expect("serialize request");
@@ -1034,6 +1226,11 @@ mod tests {
             }),
             DaemonResponse::CommentRecords(vec![sample_comment()]),
             DaemonResponse::CommentRecordOne(sample_comment()),
+            DaemonResponse::ScMerged(MergeToBaseOutcome {
+                merged_commit: "abc1234".into(),
+                mode: "squash".into(),
+                files_changed: 3,
+            }),
         ];
         for res in responses {
             let json = serde_json::to_string(&res).expect("serialize response");

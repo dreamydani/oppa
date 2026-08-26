@@ -117,6 +117,7 @@ pub fn run() {
             pty::commands::repo_list,
             pty::commands::worktree_create,
             pty::commands::worktree_create_agent,
+            pty::commands::worktree_create_fleet,
             pty::commands::agent_profiles,
             pty::commands::worktree_list,
             pty::commands::worktree_show,
@@ -141,6 +142,7 @@ pub fn run() {
             pty::commands::sc_fast_forward,
             pty::commands::sc_push,
             pty::commands::sc_upstream_refresh,
+            pty::commands::sc_merge_to_base,
             pty::commands::sc_generate_commit_message,
             pty::commands::sc_generate_pr_message,
             pty::commands::diff_comments_list,
@@ -307,6 +309,9 @@ pub fn run() {
                     manager.set_pr_changed_callback(pty::commands::pr_changed_forwarder(
                         &app_handle,
                     ));
+                    manager.set_working_state_callback(
+                        pty::commands::session_working_forwarder(&app_handle),
+                    );
                     let _ = manager.get_client();
                 }
             });

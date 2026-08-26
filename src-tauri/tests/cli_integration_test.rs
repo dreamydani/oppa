@@ -698,8 +698,14 @@ fn keepalive_frames_flow_on_long_wait() {
             reader.read_line(&mut line).await.unwrap();
 
             send_req(&mut write_half, &attach_request("ka-session")).await;
-            line.clear();
-            reader.read_line(&mut line).await.unwrap();
+            // Attach seeds a per-session event frame first; skip to the response
+            loop {
+                line.clear();
+                reader.read_line(&mut line).await.unwrap();
+                if !(line.contains("\"event\"") || line.contains("_keepalive")) {
+                    break;
+                }
+            }
             assert!(line.contains("SessionAttached"), "attach first: {line}");
 
             // Healthy shell never exits on its own: the wait runs to timeout

@@ -35,6 +35,8 @@ export interface PtySpawnResult {
   cwd?: string | null;
   resume?: ResumePlan | null;
   resume_declined_reason?: string | null;
+  // Mirrors CreateOrAttachResult.working: hydrates working/idle dots on attach
+  working?: boolean;
 }
 
 
@@ -200,6 +202,41 @@ export function worktreeCreateAgent(
 ): Promise<WorktreeAgentHandoff> {
   return invoke("worktree_create_agent", opts as unknown as Record<string, unknown>);
 }
+
+// ---- v6 fleet spawn surface; shapes mirror serde structs verbatim (snake_case) ----
+
+export interface FleetSlotInput {
+  name?: string | null;
+  agent?: string | null;
+  command?: string | null;
+  prompt?: string | null;
+}
+
+export interface FleetSlotResult {
+  index: number;
+  ok: boolean;
+  record: WorktreeRecord | null;
+  session_id: string | null;
+  error: string | null;
+}
+
+export interface FleetSpawnResult {
+  results: FleetSlotResult[];
+}
+
+export type FleetSpawnOptions = {
+  repoPath: string;
+  baseRef?: string;
+  sharedPrompt?: string;
+  slots: FleetSlotInput[];
+};
+
+export function worktreeCreateFleet(opts: FleetSpawnOptions): Promise<FleetSpawnResult> {
+  return invoke<FleetSpawnResult>(
+    "worktree_create_fleet",
+    opts as unknown as Record<string, unknown>,
+  );
+}
 export function worktreeList(): Promise<WorktreeListEntry[]> {
   return invoke("worktree_list");
 }
@@ -236,6 +273,16 @@ export async function onTitleChanged(cb: (p: SessionTitleChangedPayload) => void
 }
 export async function onFocusRequested(cb: (p: SessionFocusRequestedPayload) => void) {
   return listen<SessionFocusRequestedPayload>("session-focus-requested", (e) => cb(e.payload));
+}
+
+// Edge-triggered working/idle flips; the Rust forwarder remaps the daemon's
+// snake_case session_id to camelCase exactly like the sibling session-* events.
+export interface SessionWorkingPayload {
+  sessionId: string;
+  working: boolean;
+}
+export async function onSessionWorking(cb: (p: SessionWorkingPayload) => void) {
+  return listen<SessionWorkingPayload>("session-working", (e) => cb(e.payload));
 }
 
 // ---- IPC v4 source-control surface; every shape mirrors its serde struct verbatim ----
@@ -524,4 +571,19 @@ export interface PrMessage {
 
 export function generatePrMessage(cwd: string): Promise<PrMessage> {
   return invoke("sc_generate_pr_message", { cwd });
+}
+
+// ---- v6 fleets: guarded merge of an agent branch into its base ref ----
+
+// Request vocabulary; the outcome echoes "squash" | "merge-commit" (kebab-case).
+export type MergeModeInput = "squash" | "merge";
+
+export interface MergeToBaseOutcome {
+  merged_commit: string;
+  mode: string;
+  files_changed: number;
+}
+
+export function scMergeToBase(cwd: string, mode: MergeModeInput): Promise<MergeToBaseOutcome> {
+  return invoke("sc_merge_to_base", { cwd, mode });
 }

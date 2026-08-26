@@ -1,8 +1,51 @@
 // Pure naming helpers consumed by worktree commands in a later task.
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
+
+// Fleet branch slugs stay short so multi-segment branch prefixes still fit.
+const SLUG_MAX_CHARS: usize = 40;
+
+// Prompt-derived kebab slug; unicode alnum survives so non-Latin prompts keep meaning.
+pub fn slug_from_prompt(text: &str) -> String {
+    let mut slug = String::new();
+    // Starting true trims leading separators for free.
+    let mut prev_separator = true;
+    for c in text.chars() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            slug.extend(c.to_lowercase());
+            prev_separator = false;
+        } else if !prev_separator {
+            slug.push('-');
+            prev_separator = true;
+        }
+    }
+    // Cap before trimming so truncation can never leave a dangling separator.
+    let capped: String = slug.chars().take(SLUG_MAX_CHARS).collect();
+    let trimmed = capped.trim_matches('-');
+    if trimmed.is_empty() {
+        return "workspace".to_string();
+    }
+    trimmed.to_string()
+}
+
+// Numeric-suffix uniquifying; callers extend `taken` as names are claimed so
+// batch spawns within one fleet cannot collide.
+pub fn next_available_name(base: &str, taken: &HashSet<String>) -> String {
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    let mut suffix = 2;
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
 
 const INVALID_NAME: &str = "Invalid worktree name";
 const INVALID_PATH: &str = "Invalid worktree path";
@@ -256,6 +299,79 @@ pub(crate) fn should_set_display_name(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- fleet prompt slugs ----
+
+    #[test]
+    fn slug_lowercases_and_kebabs_prompt_words() {
+        assert_eq!(slug_from_prompt("Fix Login Timeout"), "fix-login-timeout");
+        assert_eq!(
+            slug_from_prompt("  Fix   LOGIN timeout! "),
+            "fix-login-timeout"
+        );
+    }
+
+    #[test]
+    fn slug_keeps_dashes_and_underscores_verbatim() {
+        assert_eq!(slug_from_prompt("fix_login-timeout"), "fix_login-timeout");
+    }
+
+    #[test]
+    fn slug_collapses_punctuation_runs_to_single_dash() {
+        assert_eq!(slug_from_prompt("add /// export"), "add-export");
+        assert_eq!(slug_from_prompt("a??b...c"), "a-b-c");
+    }
+
+    #[test]
+    fn slug_trims_leading_and_trailing_separators() {
+        assert_eq!(
+            slug_from_prompt("-- leading and trailing --"),
+            "leading-and-trailing"
+        );
+    }
+
+    #[test]
+    fn slug_empty_or_symbol_only_falls_back_to_workspace() {
+        assert_eq!(slug_from_prompt(""), "workspace");
+        assert_eq!(slug_from_prompt("!!! --- ???"), "workspace");
+    }
+
+    #[test]
+    fn slug_caps_at_forty_chars_without_trailing_dash() {
+        let long = "abcdefghij".repeat(6);
+        let slug = slug_from_prompt(&long);
+        assert_eq!(slug.chars().count(), 40);
+        assert!(!slug.ends_with('-'));
+    }
+
+    #[test]
+    fn slug_cap_strips_separator_cut_by_truncation() {
+        // The 40-char cut lands right after a collapsed separator
+        let text = format!("{} tail", "a".repeat(39));
+        let slug = slug_from_prompt(&text);
+        assert_eq!(slug, "a".repeat(39));
+    }
+
+    #[test]
+    fn next_available_name_returns_base_when_free() {
+        let taken: HashSet<String> = HashSet::new();
+        assert_eq!(next_available_name("feat", &taken), "feat");
+    }
+
+    #[test]
+    fn next_available_name_starts_at_two() {
+        let taken: HashSet<String> = ["feat".to_string()].into_iter().collect();
+        assert_eq!(next_available_name("feat", &taken), "feat-2");
+    }
+
+    #[test]
+    fn next_available_name_walks_suffixes_skipping_occupied_numbers() {
+        let taken: HashSet<String> = ["feat", "feat-2", "feat-3"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(next_available_name("feat", &taken), "feat-4");
+    }
 
     #[test]
     fn sanitize_rejects_dotdot_traversal() {

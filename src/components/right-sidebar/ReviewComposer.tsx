@@ -5,7 +5,9 @@ import { useTerminalStore } from "../../store/terminalStore";
 import { generatePrMessage, onGitChanged } from "../../lib/pty/transport";
 import type { BlockedReason } from "../../lib/pty/transport";
 
-const BLOCKED_COPY: Record<BlockedReason, string> = {
+// Shared with the worktree Finish action so blocked reasons speak identically
+// on every surface that can trigger a review.
+export const BLOCKED_COPY: Record<BlockedReason, string> = {
   "detached-head": "Checkout a branch first.",
   "unsupported-provider": "This repository is not on GitHub.",
   "gh-missing": "Install gh CLI.",

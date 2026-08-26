@@ -4,13 +4,13 @@ use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::daemon_client::WorktreeAgentHandoff;
-use crate::pty::ipc_protocol::WorktreePsEntry;
+use crate::pty::ipc_protocol::{FleetSlot, FleetSlotResult, WorktreePsEntry};
 use crate::pty::manager::PtyManager;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -122,6 +122,29 @@ pub fn pr_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) + Send 
     })
 }
 
+/// Payload emitted on `session-working` when a session flips working/idle.
+/// Event name matches the sibling `session-*` events; camelCase keys mirror
+/// the TS payload the frontend listener forwards verbatim.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkingPayload {
+    pub session_id: String,
+    pub working: bool,
+}
+
+pub fn session_working_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str, bool) + Send + Sync> {
+    let emitter = app.clone();
+    Arc::new(move |id, working| {
+        let _ = emitter.emit(
+            "session-working",
+            SessionWorkingPayload {
+                session_id: id.to_string(),
+                working,
+            },
+        );
+    })
+}
+
 /// Resume plan surfaced to the frontend when a cold-restored session relaunches work.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +167,8 @@ pub struct PtySpawnResultPayload {
     pub cwd: Option<String>,
     pub resume: Option<ResumePlanPayload>,
     pub resume_declined_reason: Option<String>,
+    // Mirrors CreateOrAttachResult.working so warm reattach hydrates dots
+    pub working: bool,
 }
 
 /// Spawn or reattach to a PTY session running in the background daemon.
@@ -251,6 +276,7 @@ pub fn pty_spawn(
             },
         }),
         resume_declined_reason: attach_res.resume_declined_reason,
+        working: attach_res.working,
     })
 }
 
@@ -383,6 +409,20 @@ pub fn worktree_create_agent(
         prompt,
         command,
     )
+}
+
+// Fleet spawn: one invoke fans out every slot; per-slot errors ride the results.
+#[tauri::command(async)]
+pub fn worktree_create_fleet(
+    manager: State<'_, PtyManager>,
+    repo_path: String,
+    base_ref: Option<String>,
+    shared_prompt: Option<String>,
+    slots: Vec<FleetSlot>,
+) -> Result<Vec<FleetSlotResult>, String> {
+    manager
+        .get_client()?
+        .create_worktree_fleet(&repo_path, base_ref, shared_prompt, slots)
 }
 
 #[tauri::command(async)]
@@ -593,6 +633,15 @@ pub fn sc_upstream_refresh(
 }
 
 #[tauri::command(async)]
+pub fn sc_merge_to_base(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+    mode: String,
+) -> Result<MergeToBaseOutcome, String> {
+    manager.get_client()?.sc_merge_to_base(&cwd, &mode)
+}
+
+#[tauri::command(async)]
 pub fn sc_generate_commit_message(
     manager: State<'_, PtyManager>,
     cwd: String,
@@ -772,6 +821,7 @@ mod tests {
             cwd: Some("/test/cwd".into()),
             resume: None,
             resume_declined_reason: None,
+            working: true,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"id\":\"s1\""));
@@ -783,6 +833,17 @@ mod tests {
         assert!(json.contains("\"cols\":80"));
         assert!(json.contains("\"rows\":24"));
         assert!(json.contains("\"cwd\":\"/test/cwd\""));
+        assert!(json.contains("\"working\":true"));
+    }
+
+    #[test]
+    fn session_working_payload_serializes_camel_case() {
+        let json = serde_json::to_string(&SessionWorkingPayload {
+            session_id: "s1".into(),
+            working: false,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"sessionId":"s1","working":false}"#);
     }
 
     #[test]

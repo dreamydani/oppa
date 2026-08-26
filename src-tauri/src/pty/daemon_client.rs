@@ -3,18 +3,19 @@ use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
-    WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
 pub type OnGitChanged = Arc<dyn Fn() + Send + Sync>;
 pub type OnPrChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
+pub type OnSessionWorking = Arc<dyn Fn(&str, bool) + Send + Sync>;
 
 /// Agent handoff result: created worktree plus the live agent session a pane
 /// can bind to (session_id doubles as the agent terminal handle).
@@ -64,6 +66,7 @@ pub struct DaemonClient {
     focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>>,
     git_changed_cb: Arc<Mutex<Option<OnGitChanged>>>,
     pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>>,
+    session_working_cb: Arc<Mutex<Option<OnSessionWorking>>>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -93,6 +96,7 @@ impl DaemonClient {
         let focus_requested_cb: Arc<Mutex<Option<OnFocusRequested>>> = Arc::new(Mutex::new(None));
         let git_changed_cb: Arc<Mutex<Option<OnGitChanged>>> = Arc::new(Mutex::new(None));
         let pr_changed_cb: Arc<Mutex<Option<OnPrChanged>>> = Arc::new(Mutex::new(None));
+        let session_working_cb: Arc<Mutex<Option<OnSessionWorking>>> = Arc::new(Mutex::new(None));
         let request_lock = Arc::new(Mutex::new(()));
 
         let socket_path_str = socket_path.to_string();
@@ -166,6 +170,7 @@ impl DaemonClient {
         let focus_requested_cb_clone = Arc::clone(&focus_requested_cb);
         let git_changed_cb_clone = Arc::clone(&git_changed_cb);
         let pr_changed_cb_clone = Arc::clone(&pr_changed_cb);
+        let session_working_cb_clone = Arc::clone(&session_working_cb);
 
         handle.spawn(async move {
             let mut reader = BufReader::new(read_half);
@@ -241,6 +246,11 @@ impl DaemonClient {
                                         cb(worktree_id.as_deref());
                                     }
                                 }
+                                DaemonEvent::SessionWorking { session_id, working } => {
+                                    if let Some(cb) = session_working_cb_clone.lock().as_ref() {
+                                        cb(&session_id, working);
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -282,6 +292,7 @@ impl DaemonClient {
             focus_requested_cb,
             git_changed_cb,
             pr_changed_cb,
+            session_working_cb,
             _runtime: rt,
         };
 
@@ -366,6 +377,11 @@ impl DaemonClient {
     /// Register a global hook fired whenever a linked worktree's PR status refreshes.
     pub fn set_pr_changed_callback(&self, cb: OnPrChanged) {
         *self.pr_changed_cb.lock() = Some(cb);
+    }
+
+    /// Register a global hook fired whenever any session flips working/idle.
+    pub fn set_working_state_callback(&self, cb: OnSessionWorking) {
+        *self.session_working_cb.lock() = Some(cb);
     }
 
     /// Register callbacks for a specific session ID.
@@ -636,8 +652,30 @@ impl DaemonClient {
         }
     }
 
-    pub fn worktree_list(&self) -> Result<Vec<WorktreeListEntry>, String> {
-        match self.send_request(DaemonRequest::WorktreeList)? {
+    // One round trip fans out every slot; per-slot outcomes arrive in request order.
+    pub fn create_worktree_fleet(
+        &self,
+        repo_path: &str,
+        base_ref: Option<String>,
+        shared_prompt: Option<String>,
+        slots: Vec<FleetSlot>,
+    ) -> Result<Vec<FleetSlotResult>, String> {
+        let req = DaemonRequest::WorktreeCreateFleet {
+            repo_path: PathBuf::from(repo_path),
+            base_ref,
+            shared_prompt,
+            slots,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::FleetResults { results } => Ok(results),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!(
+                "unexpected response for WorktreeCreateFleet: {other:?}"
+            )),
+        }
+    }
+
+    pub fn worktree_list(&self) -> Result<Vec<WorktreeListEntry>, String> {        match self.send_request(DaemonRequest::WorktreeList)? {
             DaemonResponse::WorktreeRecords(entries) => Ok(entries),
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response for WorktreeList: {other:?}")),
@@ -926,6 +964,20 @@ impl DaemonClient {
             other => Err(format!(
                 "unexpected response for GitGenerateCommitMessage: {other:?}"
             )),
+        }
+    }
+
+    // Guarded merge of the worktree's branch into its base ref; guard
+    // refusals come back as plain-language Err strings.
+    pub fn sc_merge_to_base(&self, cwd: &str, mode: &str) -> Result<MergeToBaseOutcome, String> {
+        let req = DaemonRequest::ScMergeToBase {
+            cwd: cwd.into(),
+            mode: mode.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScMerged(outcome) => Ok(outcome),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for ScMergeToBase: {other:?}")),
         }
     }
 
@@ -1342,6 +1394,64 @@ mod tests {
         assert!(
             orphan_prompt.err().unwrap().contains("unknown agent"),
             "unknown agent id must be rejected"
+        );
+
+        client.disconnect().expect("disconnect");
+        cancel_token.cancel();
+        let _ = server_thread.join();
+    }
+
+    // Fleet requests must survive the real pipe both directions: the daemon's
+    // empty-fleet rejection maps to Err with its message intact.
+    #[test]
+    fn worktree_create_fleet_surfaces_empty_slot_rejection_over_the_pipe() {
+        let temp_dir = std::env::temp_dir().join(format!("oppa_fleet_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let server = Arc::new(DaemonServer::with_snapshot_storage(temp_dir));
+        let cancel_token = CancellationToken::new();
+
+        #[cfg(target_os = "windows")]
+        let socket_path = format!(
+            r"\\.\pipe\oppa-test-fleet-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        let socket_path = format!(
+            "/tmp/oppa-test-fleet-{}.sock",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        let server_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect client");
+
+        let empty = client.create_worktree_fleet("/tmp/repo", None, None, Vec::new());
+        assert!(
+            empty
+                .err()
+                .unwrap()
+                .contains("fleet requires at least one slot"),
+            "empty fleet must be rejected over the pipe"
         );
 
         client.disconnect().expect("disconnect");

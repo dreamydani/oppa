@@ -142,6 +142,41 @@ pub struct PushOutcome {
     pub was_publish: bool,
 }
 
+// F10 guarded merge: how the agent branch lands in its base ref.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeMode {
+    Squash,
+    MergeCommit,
+}
+
+impl MergeMode {
+    // Wire label mirrors the enum's kebab-case serde form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MergeMode::Squash => "squash",
+            MergeMode::MergeCommit => "merge-commit",
+        }
+    }
+
+    // Requests carry a plain string; accept both spellings of the merge commit.
+    pub fn parse(raw: &str) -> Result<MergeMode, String> {
+        match raw {
+            "squash" => Ok(MergeMode::Squash),
+            "merge" | "merge-commit" => Ok(MergeMode::MergeCommit),
+            other => Err(format!("unknown merge mode '{other}' — use 'squash' or 'merge'")),
+        }
+    }
+}
+
+// mode is "squash" | "merge-commit" (owned: the payload deserializes over IPC).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeToBaseOutcome {
+    pub merged_commit: String,
+    pub mode: String,
+    pub files_changed: usize,
+}
+
 pub fn sc_status(cwd: &Path) -> Result<SourceControlStatus, String> {
     let output = git_ok(cwd, &["status", "--porcelain=v1", "-z", "-b", "-uall"])?;
     let mut fields = output.split('\0');
@@ -315,6 +350,138 @@ pub fn sc_push(cwd: &Path, publish: bool, force_with_lease: bool) -> Result<Push
     }
     git_ok(cwd, &args)?;
     Ok(PushOutcome { pushed_to: format!("{remote}/{branch}"), was_publish: false })
+}
+
+const MERGE_CONFLICT_LIST_CAP: usize = 20;
+
+// F10 guarded merge of an agent branch into its base ref, executed in the MAIN
+// checkout (registry resolves worktree branch/base_ref and the repo path).
+// Every guard hard-blocks with a plain-language reason; the agent worktree's
+// own HEAD is never touched and no branches are switched programmatically.
+pub fn sc_merge_to_base(
+    registry_path: &Path,
+    cwd_of_worktree: &Path,
+    mode: MergeMode,
+) -> Result<MergeToBaseOutcome, String> {
+    let record = crate::git::worktrees::worktree_current(registry_path, cwd_of_worktree)
+        .ok_or_else(|| "not inside a registered agent worktree".to_string())?;
+    let main = crate::git::worktree_registry::WorktreeRegistry::load(registry_path)
+        .repos
+        .get(&record.repo_id)
+        .map(|repo| repo.path.clone())
+        .ok_or_else(|| format!("registry has no repo {} for worktree", record.repo_id))?;
+    validate_ref_name(&record.branch)?;
+    validate_ref_name(&record.base_ref)?;
+
+    // Guard 1: main checkout must be clean; we never stash or discard there.
+    if !run_git(&main, &["status", "--porcelain"])?.stdout.is_empty() {
+        return Err("main checkout has uncommitted changes — commit or stash there first".into());
+    }
+    // Guard 2: main must already sit on the base ref.
+    let on_branch = git_ok(&main, &["symbolic-ref", "--short", "HEAD"])?
+        .trim()
+        .to_string();
+    if on_branch != record.base_ref {
+        return Err(format!(
+            "main checkout is on '{on_branch}' — switch it to '{}' yourself first",
+            record.base_ref
+        ));
+    }
+
+    // Guard 3: probe a real merge without touching anything. Exit 1 = conflicts;
+    // stdout then lists "<mode> <oid> <stage>\t<path>" records per conflicted file.
+    let probe = run_git(&main, &["merge-tree", "--write-tree", "HEAD", &record.branch])?;
+    match probe.status.code() {
+        Some(0) => {}
+        Some(1) => {
+            let conflicted = conflicted_paths_from_merge_tree(&String::from_utf8_lossy(
+                &probe.stdout,
+            ));
+            let mut listed: Vec<String> =
+                conflicted.iter().take(MERGE_CONFLICT_LIST_CAP).cloned().collect();
+            if conflicted.len() > MERGE_CONFLICT_LIST_CAP {
+                listed.push(format!("… and {} more", conflicted.len() - MERGE_CONFLICT_LIST_CAP));
+            }
+            return Err(format!("merge conflicts: {}", listed.join(", ")));
+        }
+        code => {
+            return Err(format!(
+                "merge probe failed (exit {code:?}): {}",
+                String::from_utf8_lossy(&probe.stderr).trim()
+            ));
+        }
+    }
+
+    // An empty diff would leave squash's follow-up commit with nothing to commit.
+    let ahead = git_ok(&main, &["rev-list", "--count", &format!("HEAD..{}", record.branch)])?;
+    if ahead.trim() == "0" {
+        return Err(format!(
+            "nothing to merge — {} has no commits beyond {}",
+            record.branch, record.base_ref
+        ));
+    }
+
+    let pre_head = head_short(&main)?;
+    if let Err(err) = perform_merge_to_base(&main, &record.branch, &record.base_ref, mode) {
+        // Raced-in conflict or failed squash commit: restore exactly, since
+        // Guard 1 proved the checkout clean moments ago.
+        let _ = run_git(&main, &["merge", "--abort"]);
+        let _ = run_git(&main, &["reset", "-q", "--hard"]);
+        return Err(format!("merge rolled back: {err}"));
+    }
+    let merged_commit = head_short(&main)?;
+    let numstat = git_ok(&main, &["diff", "--numstat", &format!("{pre_head}..HEAD")])?;
+    Ok(MergeToBaseOutcome {
+        merged_commit,
+        mode: mode.as_str().to_string(),
+        files_changed: numstat.lines().filter(|l| !l.trim().is_empty()).count(),
+    })
+}
+
+fn perform_merge_to_base(
+    main: &Path,
+    feature: &str,
+    base: &str,
+    mode: MergeMode,
+) -> Result<(), String> {
+    match mode {
+        MergeMode::Squash => {
+            git_ok(main, &["merge", "--squash", feature])?;
+            git_ok(
+                main,
+                &["commit", "-q", "-m", &format!("squash: merge {feature} into {base}")],
+            )
+            .map(|_| ())
+        }
+        MergeMode::MergeCommit => git_ok(
+            main,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                &format!("merge: {feature} into {base}"),
+                feature,
+            ],
+        )
+        .map(|_| ()),
+    }
+}
+
+// merge-tree --write-tree stdout on conflicts carries one stage line per
+// stage per file ("<mode> <oid> <stage>\t<path>"); dedupe down to paths.
+fn conflicted_paths_from_merge_tree(stdout: &str) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        let Some((meta, path)) = line.split_once('\t') else { continue };
+        let fields: Vec<&str> = meta.split_whitespace().collect();
+        let is_stage_record = fields.len() == 3
+            && fields[0].len() == 6
+            && fields[2].chars().all(|c| c.is_ascii_digit());
+        if is_stage_record && !path.is_empty() && !paths.iter().any(|p| p == path) {
+            paths.push(path.to_string());
+        }
+    }
+    paths
 }
 
 // Cheap ahead/behind refresh: three ref queries instead of sc_status's full porcelain walk.
@@ -760,8 +927,10 @@ mod tests {
     use super::*;
     use crate::git::test_support::{
         clone_repo, commit_file, git, sandbox, sandbox_with_origin, sandbox_without_commits,
-        write_file,
+        write_file, Sandbox,
     };
+    use crate::git::worktree_registry::WorktreeRecord;
+    use crate::git::worktrees::{repo_add, worktree_create, WorktreeCreateRequest};
 
     fn one_path(name: &str) -> Vec<String> {
         vec![name.to_string()]
@@ -1581,5 +1750,161 @@ mod tests {
 
         sc_fetch(&s.repo).unwrap();
         assert_eq!(sc_upstream_refresh(&s.repo), sc_status(&s.repo).unwrap().upstream);
+    }
+
+    // ---------- guarded merge-to-base (fleets F10 / T8) ----------
+
+    // Sandbox main checkout + one registered agent worktree branched off main.
+    fn agent_worktree(tag: &str) -> (Sandbox, WorktreeRecord) {
+        let s = sandbox(tag);
+        repo_add(&s.registry_path, &s.repo).unwrap();
+        let req = WorktreeCreateRequest {
+            repo_path: s.repo.clone(),
+            name: Some("agent-one".into()),
+            branch: None,
+            base_ref: Some("main".into()),
+            parent_worktree_id: None,
+            workspace_dir_override: None,
+            nest_workspaces: false,
+        };
+        let (record, _) = worktree_create(&s.registry_path, req).unwrap();
+        (s, record)
+    }
+
+    fn head_parents(repo: &Path) -> usize {
+        git(repo, &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .split_whitespace()
+            .count()
+            - 1
+    }
+
+    #[test]
+    fn merge_to_base_rejects_cwd_outside_any_registered_worktree() {
+        let s = sandbox("mtb-unknown-cwd");
+        repo_add(&s.registry_path, &s.repo).unwrap();
+        let err =
+            sc_merge_to_base(&s.registry_path, &s.root.join("elsewhere"), MergeMode::Squash)
+                .unwrap_err();
+        assert!(err.contains("not inside a registered agent worktree"), "got: {err}");
+    }
+
+    #[test]
+    fn merge_to_base_guard_blocks_when_main_checkout_is_dirty() {
+        let (s, wt) = agent_worktree("mtb-dirty-main");
+        commit_file(&wt.path, "feat.txt", "feature work\n", "feat adds");
+        write_file(&s.repo, "dirty.txt", "uncommitted");
+
+        let err = sc_merge_to_base(&s.registry_path, &wt.path, MergeMode::Squash).unwrap_err();
+        assert!(
+            err.contains("main checkout has uncommitted changes — commit or stash there first"),
+            "got: {err}"
+        );
+        assert!(!s.repo.join("feat.txt").exists(), "blocked merge must mutate nothing");
+    }
+
+    #[test]
+    fn merge_to_base_guard_never_switches_branches_for_base_mismatch() {
+        let (s, wt) = agent_worktree("mtb-wrong-branch");
+        commit_file(&wt.path, "feat.txt", "feature work\n", "feat adds");
+        git(&s.repo, &["checkout", "-b", "elsewhere"]);
+
+        let err = sc_merge_to_base(&s.registry_path, &wt.path, MergeMode::Squash).unwrap_err();
+        assert!(
+            err.contains("main checkout is on 'elsewhere' — switch it to 'main' yourself first"),
+            "got: {err}"
+        );
+        assert_eq!(current_branch_name_public(&s.repo), "elsewhere");
+    }
+
+    fn current_branch_name_public(repo: &Path) -> String {
+        git(repo, &["symbolic-ref", "--short", "HEAD"]).trim().to_string()
+    }
+
+    #[test]
+    fn merge_to_base_probe_reports_conflicts_without_touching_either_side() {
+        let (s, wt) = agent_worktree("mtb-conflict");
+        commit_file(&wt.path, "shared.txt", "feature line\n", "feature edit");
+        commit_file(&s.repo, "shared.txt", "main line\n", "main edit");
+
+        let err = sc_merge_to_base(&s.registry_path, &wt.path, MergeMode::Squash).unwrap_err();
+        assert!(err.starts_with("merge conflicts:"), "got: {err}");
+        assert!(err.contains("shared.txt"), "conflicted file list must name files: {err}");
+
+        // The probe is read-only: no merge state, no content change on either side.
+        let st = sc_status(&s.repo).unwrap();
+        assert!(st.entries.is_empty(), "probe must leave main clean: {:?}", st.entries);
+        assert_eq!(st.conflict_state, ConflictState::None);
+        assert_eq!(
+            std::fs::read_to_string(s.repo.join("shared.txt")).unwrap(),
+            "main line\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(wt.path.join("shared.txt")).unwrap(),
+            "feature line\n"
+        );
+    }
+
+    #[test]
+    fn merge_to_base_squash_lands_one_parent_commit_with_feature_content() {
+        let (s, wt) = agent_worktree("mtb-squash");
+        commit_file(&wt.path, "feat.txt", "feature work\n", "feat adds");
+        let wt_head_before = git(&wt.path, &["rev-parse", "HEAD"]);
+
+        let out = sc_merge_to_base(&s.registry_path, &wt.path, MergeMode::Squash).unwrap();
+
+        assert_eq!(out.mode, "squash");
+        assert_eq!(out.files_changed, 1);
+        assert_eq!(
+            out.merged_commit,
+            git(&s.repo, &["rev-parse", "--short", "HEAD"]).trim()
+        );
+        assert_eq!(
+            std::fs::read_to_string(s.repo.join("feat.txt")).unwrap().replace("\r\n", "\n"),
+            "feature work\n"
+        );
+        assert!(
+            git(&s.repo, &["log", "-1", "--pretty=%s"])
+                .contains("squash: merge agent-one into main"),
+            "squash subject expected: {}",
+            git(&s.repo, &["log", "-1", "--pretty=%s"])
+        );
+        assert_eq!(head_parents(&s.repo), 1, "squash must not create a merge commit");
+        assert_eq!(
+            git(&wt.path, &["rev-parse", "HEAD"]),
+            wt_head_before,
+            "agent worktree HEAD must stay untouched"
+        );
+    }
+
+    #[test]
+    fn merge_to_base_merge_commit_mode_creates_second_parent() {
+        let (s, wt) = agent_worktree("mtb-noff");
+        commit_file(&wt.path, "feat.txt", "feature work\n", "feat adds");
+
+        let out = sc_merge_to_base(&s.registry_path, &wt.path, MergeMode::MergeCommit).unwrap();
+
+        assert_eq!(out.mode, "merge-commit");
+        assert_eq!(out.files_changed, 1);
+        assert_eq!(head_parents(&s.repo), 2, "--no-ff merge must have two parents");
+        assert!(
+            git(&s.repo, &["log", "-1", "--pretty=%s"]).contains("merge: agent-one into main"),
+            "merge-commit subject expected: {}",
+            git(&s.repo, &["log", "-1", "--pretty=%s"])
+        );
+        assert_eq!(
+            std::fs::read_to_string(s.repo.join("feat.txt")).unwrap().replace("\r\n", "\n"),
+            "feature work\n"
+        );
+    }
+
+    #[test]
+    fn merge_to_base_rejects_merge_mode_serializes_kebab_case() {
+        assert_eq!(serde_json::to_string(&MergeMode::Squash).unwrap(), "\"squash\"");
+        assert_eq!(
+            serde_json::to_string(&MergeMode::MergeCommit).unwrap(),
+            "\"merge-commit\""
+        );
+        assert!(MergeMode::parse("nope").is_err());
+        assert_eq!(MergeMode::parse("merge").unwrap(), MergeMode::MergeCommit);
     }
 }
