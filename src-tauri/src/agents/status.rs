@@ -184,6 +184,18 @@ pub fn clamp_assistant_message(text: &str) -> Option<String> {
     clamp_multiline(text)
 }
 
+impl AgentStatusEntry {
+    /// Edge-emission comparator: timestamps deliberately excluded so repeated
+    /// tool pings repaint nothing while any visible detail change re-emits.
+    pub fn same_visible_as(&self, other: &Self) -> bool {
+        self.state == other.state
+            && self.prompt == other.prompt
+            && self.tool_name == other.tool_name
+            && self.tool_input == other.tool_input
+            && self.interactive_prompt == other.interactive_prompt
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

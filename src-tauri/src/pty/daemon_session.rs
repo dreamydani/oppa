@@ -73,6 +73,8 @@ pub struct DaemonSession {
     pub last_output_at: Arc<Mutex<Instant>>,
     // Some(t) while the last OSC133 D marker is still the freshest output
     pub last_prompt_end_at: Arc<Mutex<Option<Instant>>>,
+    // Latest hook-classified agent state; pane-keyed truth feeding UI pills.
+    pub last_agent_status: Arc<Mutex<Option<crate::agents::status::AgentStatusEntry>>>,
 }
 
 // Fanout shares one Arc instead of cloning the payload per subscriber:
@@ -241,6 +243,7 @@ impl DaemonSession {
             output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
             last_prompt_end_at: Arc::new(Mutex::new(None)),
+            last_agent_status: Arc::new(Mutex::new(None)),
         });
 
         Self::start_threads(
@@ -659,6 +662,21 @@ impl DaemonSession {
     /// are pruned by the shared emit path. Used by the working-state watcher.
     pub(crate) fn publish_event(&self, event: DaemonEvent) {
         emit_event(&self.subscribers, event);
+    }
+
+    pub fn agent_status(&self) -> Option<crate::agents::status::AgentStatusEntry> {
+        self.last_agent_status.lock().clone()
+    }
+
+    /// Stores a classified entry unless visually identical to the previous one
+    /// (edge semantics); returns true when the slot changed.
+    pub fn apply_agent_status(&self, entry: crate::agents::status::AgentStatusEntry) -> bool {
+        let mut slot = self.last_agent_status.lock();
+        if slot.as_ref().is_some_and(|prev| prev.same_visible_as(&entry)) {
+            return false;
+        }
+        *slot = Some(entry);
+        true
     }
 
     pub fn is_alive(&self) -> bool {
