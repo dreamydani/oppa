@@ -807,6 +807,102 @@ fn test_e2e_daemon_v4_git_status_stage_commit_and_comment_crud_over_pipe() {
     let _ = server_thread.join();
 }
 
+#[test]
+fn test_e2e_daemon_sc_merge_to_base_over_pipe_fires_git_changed() {
+    let repo_dir = tempfile::tempdir().expect("temp repo dir");
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    run_git_in(repo_dir.path(), &["init", "-b", "main"]);
+    run_git_in(repo_dir.path(), &["config", "user.email", "test@oppa.dev"]);
+    run_git_in(repo_dir.path(), &["config", "user.name", "Oppa Test"]);
+    std::fs::write(repo_dir.path().join("README.md"), "# seed").expect("write seed file");
+    run_git_in(repo_dir.path(), &["add", "."]);
+    run_git_in(repo_dir.path(), &["commit", "-m", "init"]);
+
+    let socket_path = generate_test_socket_path("mergebase");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    let listener = DaemonClient::connect(&socket_path).expect("connect listener client");
+    let (git_tx, git_rx) = channel::<()>();
+    listener.set_git_changed_callback(Arc::new(move || {
+        let _ = git_tx.send(());
+    }));
+    let client = DaemonClient::connect(&socket_path).expect("connect merge client");
+
+    let repo_path = repo_dir.path().to_string_lossy().into_owned();
+    client.repo_add(&repo_path).expect("repo_add");
+    let record = client
+        .worktree_create(
+            &repo_path,
+            Some("agent-one".to_string()),
+            None,
+            Some("main".to_string()),
+            None,
+            None,
+            None,
+        )
+        .expect("worktree_create");
+
+    // Agent commits land in the worktree; the main checkout stays clean on main.
+    std::fs::write(record.path.join("feat.txt"), "feature work\n").expect("write feature file");
+    run_git_in(&record.path, &["add", "."]);
+    run_git_in(&record.path, &["commit", "-m", "feat adds"]);
+
+    let worktree_cwd = record.path.to_string_lossy().into_owned();
+    let outcome = client
+        .sc_merge_to_base(&worktree_cwd, "squash")
+        .expect("sc_merge_to_base");
+    assert_eq!(outcome.mode, "squash");
+    assert_eq!(outcome.files_changed, 1);
+    assert!(!outcome.merged_commit.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(repo_dir.path().join("feat.txt")).unwrap().replace('\r', ""),
+        "feature work\n"
+    );
+    assert!(
+        git_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "successful merge must fire the peer's GitChanged callback"
+    );
+
+    // Guard refusals ride the same pipe as plain-language errors.
+    std::fs::write(repo_dir.path().join("dirty.txt"), "uncommitted").expect("write dirty file");
+    let err = client
+        .sc_merge_to_base(&worktree_cwd, "merge")
+        .expect_err("dirty main checkout must block the merge");
+    assert!(
+        err.contains("main checkout has uncommitted changes"),
+        "got: {err}"
+    );
+    assert!(
+        client
+            .sc_merge_to_base(&repo_path, "squash")
+            .err()
+            .map(|e| e.contains("not inside a registered agent worktree"))
+            .unwrap_or(false),
+        "cwd outside any worktree must be rejected"
+    );
+
+    listener.disconnect().expect("disconnect listener");
+    client.disconnect().expect("disconnect merge client");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
 // Restores the process PATH on every exit path; the daemon resolves agents from it.
 struct PathRestoreGuard(Option<std::ffi::OsString>);
 

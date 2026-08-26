@@ -725,6 +725,7 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::CreateReview(_) => "CreateReview".into(),
         DaemonResponse::ReviewStatus(_) => "ReviewStatus".into(),
         DaemonResponse::ScPrMessage(_) => "ScPrMessage".into(),
+        DaemonResponse::ScMerged(_) => "ScMerged".into(),
     }
 }
 

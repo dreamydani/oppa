@@ -142,6 +142,7 @@ pub fn run() {
             pty::commands::sc_fast_forward,
             pty::commands::sc_push,
             pty::commands::sc_upstream_refresh,
+            pty::commands::sc_merge_to_base,
             pty::commands::sc_generate_commit_message,
             pty::commands::sc_generate_pr_message,
             pty::commands::diff_comments_list,

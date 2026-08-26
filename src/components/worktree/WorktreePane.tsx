@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { ExternalLink, GitBranch, GitPullRequest, MoreHorizontal } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, GitPullRequest, MoreHorizontal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
+import type { MergeModeInput } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
@@ -65,6 +66,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const renameWorktree = useTerminalStore((s) => s.renameWorktree);
   const removeWorktree = useTerminalStore((s) => s.removeWorktree);
   const purgeWorktree = useTerminalStore((s) => s.purgeWorktree);
+  const mergeWorktreeToBase = useTerminalStore((s) => s.mergeWorktreeToBase);
   const createTab = useTerminalStore((s) => s.createTab);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const sessions = useTerminalStore((s) => s.sessions);
@@ -76,7 +78,9 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<WorktreeRecord | null>(null);
-  const [confirmMode, setConfirmMode] = useState<"remove" | "purge">("remove");
+  const [confirmMode, setConfirmMode] = useState<"remove" | "purge" | "merge">("remove");
+  // Merge confirm keeps its own radio state; squash is the default landing mode.
+  const [mergeKind, setMergeKind] = useState<MergeModeInput>("squash");
   const [actionError, setActionError] = useState<string | null>(null);
   const [finishByCardId, setFinishByCardId] = useState<Record<string, FinishCardState>>({});
 
@@ -180,9 +184,10 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     }
   };
 
-  const openConfirm = (record: WorktreeRecord, mode: "remove" | "purge") => {
+  const openConfirm = (record: WorktreeRecord, mode: "remove" | "purge" | "merge") => {
     setOpenMenuId(null);
     setActionError(null);
+    setMergeKind("squash");
     setConfirmMode(mode);
     setConfirmTarget(record);
   };
@@ -192,12 +197,14 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
     try {
       if (confirmMode === "remove") {
         await removeWorktree(confirmTarget.id);
-      } else {
+      } else if (confirmMode === "purge") {
         await purgeWorktree(confirmTarget.id);
+      } else {
+        await mergeWorktreeToBase({ worktreeId: confirmTarget.id, mode: mergeKind });
       }
       setConfirmTarget(null);
     } catch (e) {
-      // Teardown refusal stays visible inside the dialog.
+      // Teardown/merge refusal stays visible inside the dialog.
       setActionError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -457,6 +464,20 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                         >
                           Open terminal here
                         </button>
+                        {record.base_ref && (
+                          <>
+                            <div className="worktree-menu-divider" />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={finish?.phase === "running"}
+                              onClick={() => openConfirm(record, "merge")}
+                            >
+                              <GitMerge size={12} />
+                              Merge into {record.base_ref}…
+                            </button>
+                          </>
+                        )}
                         <div className="worktree-menu-divider" />
                         <button
                           type="button"
@@ -497,18 +518,55 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
           <div
             className="wt-confirm-card"
             role="alertdialog"
-            aria-label={confirmMode === "purge" ? "Purge worktree" : "Remove worktree"}
+            aria-label={
+              confirmMode === "purge"
+                ? "Purge worktree"
+                : confirmMode === "merge"
+                  ? "Merge into base"
+                  : "Remove worktree"
+            }
           >
             <h3 className="wt-confirm-title">
               {confirmMode === "purge"
                 ? `Purge “${confirmTarget.display_name || confirmTarget.name}”?`
-                : `Remove “${confirmTarget.display_name || confirmTarget.name}”?`}
+                : confirmMode === "merge"
+                  ? `Merge “${confirmTarget.display_name || confirmTarget.name}” into ${confirmTarget.base_ref}?`
+                  : `Remove “${confirmTarget.display_name || confirmTarget.name}”?`}
             </h3>
-            <p className="wt-confirm-desc">
-              {confirmMode === "purge"
-                ? "Drops the tombstone record. The directory is never touched."
-                : `Removes the git worktree at ${confirmTarget.path}. The branch is preserved unless it is fully merged.`}
-            </p>
+            {confirmMode === "merge" ? (
+              <>
+                <p className="wt-confirm-desc">
+                  Runs in the main checkout. It is blocked with a reason if the checkout is dirty,
+                  not on {confirmTarget.base_ref}, or if merging would conflict.
+                </p>
+                <div className="wt-radio-row" role="radiogroup" aria-label="Merge mode">
+                  <label>
+                    <input
+                      type="radio"
+                      name="merge-mode"
+                      checked={mergeKind === "squash"}
+                      onChange={() => setMergeKind("squash")}
+                    />
+                    Squash into one commit
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="merge-mode"
+                      checked={mergeKind === "merge"}
+                      onChange={() => setMergeKind("merge")}
+                    />
+                    Keep a merge commit
+                  </label>
+                </div>
+              </>
+            ) : (
+              <p className="wt-confirm-desc">
+                {confirmMode === "purge"
+                  ? "Drops the tombstone record. The directory is never touched."
+                  : `Removes the git worktree at ${confirmTarget.path}. The branch is preserved unless it is fully merged.`}
+              </p>
+            )}
             {actionError && <p className="wt-error" role="alert">{actionError}</p>}
             <div className="wt-confirm-actions">
               <button
@@ -520,10 +578,10 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
               </button>
               <button
                 type="button"
-                className="wt-btn danger"
+                className={`wt-btn${confirmMode === "remove" || confirmMode === "purge" ? " danger" : ""}`}
                 onClick={() => void handleConfirm()}
               >
-                {confirmMode === "purge" ? "Purge" : "Remove"}
+                {confirmMode === "purge" ? "Purge" : confirmMode === "merge" ? "Merge" : "Remove"}
               </button>
             </div>
           </div>

@@ -49,6 +49,7 @@ vi.mock("../../lib/pty/transport", () => ({
   scStage: vi.fn().mockResolvedValue(undefined),
   scCommit: vi.fn().mockResolvedValue("head123"),
   scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/feat-a", was_publish: false }),
+  scMergeToBase: vi.fn(),
 }));
 
 const worktreeSetMock = vi.mocked(transport.worktreeSet);
@@ -60,6 +61,8 @@ const scCommitMock = vi.mocked(transport.scCommit);
 const scPushMock = vi.mocked(transport.scPush);
 const eligibilityMock = vi.mocked(transport.requestReviewEligibility);
 const createReviewMock = vi.mocked(transport.requestCreateReview);
+const scMergeToBaseMock = vi.mocked(transport.scMergeToBase);
+const worktreePsMock = vi.mocked(transport.worktreePs);
 
 function record(overrides: Partial<WorktreeRecord> = {}): WorktreeRecord {
   return {
@@ -757,5 +760,123 @@ describe("finishWorktree store orchestration", () => {
 
     expect(outcome).toEqual({ ok: false, stage: "status", reason: expect.stringMatching(/unknown worktree nope/) });
     expect(scStatusMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorktreePane merge to base", () => {
+  const WID = "demo::C:/ws/feat-a";
+
+  function seedMergeCard(overrides: Partial<WorktreeRecord> = {}) {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({
+            id: WID,
+            name: "feat-a",
+            display_name: "Feat A",
+            branch: "feat-a",
+            base_ref: "main",
+            ...overrides,
+          }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: {},
+      reviewByCwd: {},
+      prStatusByWorktreeId: {},
+      sessions: {},
+      workingBySessionId: {},
+      tabs: [],
+      activeTabId: "",
+    } as unknown as Record<string, unknown>);
+    worktreeListMock.mockResolvedValue([
+      { record: record({ id: WID, name: "feat-a", display_name: "Feat A", branch: "feat-a", base_ref: "main" }), missing_on_disk: false },
+    ]);
+    worktreePsMock.mockResolvedValue([]);
+  }
+
+  function openMergeMenu() {
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /merge into main/i }));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    scMergeToBaseMock.mockResolvedValue({ merged_commit: "abc1234", mode: "squash", files_changed: 2 });
+    seedMergeCard();
+  });
+
+  it("offers Merge into <base_ref> only on live cards that have a base_ref", () => {
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    expect(screen.getByRole("menuitem", { name: /merge into main/i })).toBeDefined();
+
+    // A card without a base_ref has nothing to merge into.
+    fireEvent.click(document.body);
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: WID, name: "feat-a", display_name: "Feat A", branch: "feat-a", base_ref: "" }),
+          missing_on_disk: false,
+        },
+      ],
+    } as unknown as Record<string, unknown>);
+    fireEvent.click(screen.getByRole("button", { name: /actions for feat a/i }));
+    expect(screen.queryByRole("menuitem", { name: /merge into/i })).toBeNull();
+  });
+
+  it("confirm defaults to squash and calls transport with cwd=record.path then refreshes", async () => {
+    render(<WorktreePane />);
+    openMergeMenu();
+
+    // Squash is preselected; the dialog explains where the merge runs.
+    const squashRadio = screen.getByRole("radio", { name: /squash/i }) as HTMLInputElement;
+    expect(squashRadio.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /^merge$/i }));
+
+    await vi.waitFor(() => {
+      expect(scMergeToBaseMock).toHaveBeenCalledWith("C:/ws/feat-a", "squash");
+    });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+    expect(worktreeListMock).toHaveBeenCalled();
+    expect(scStatusMock).toHaveBeenCalledWith("C:/ws/feat-a");
+  });
+
+  it("passes the merge-commit mode through when selected", async () => {
+    render(<WorktreePane />);
+    openMergeMenu();
+
+    fireEvent.click(screen.getByRole("radio", { name: /merge commit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^merge$/i }));
+
+    await vi.waitFor(() => {
+      expect(scMergeToBaseMock).toHaveBeenCalledWith("C:/ws/feat-a", "merge");
+    });
+  });
+
+  it("surfaces guard refusals inline instead of closing the dialog", async () => {
+    scMergeToBaseMock.mockRejectedValue(
+      "main checkout has uncommitted changes — commit or stash there first",
+    );
+
+    render(<WorktreePane />);
+    openMergeMenu();
+    fireEvent.click(screen.getByRole("button", { name: /^merge$/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/uncommitted changes/);
+    });
+    expect(screen.getByRole("alertdialog")).toBeDefined();
+    expect(worktreeListMock).not.toHaveBeenCalled();
+  });
+
+  it("store action rejects with the backend reason for unknown ids", async () => {
+    await expect(
+      useTerminalStore.getState().mergeWorktreeToBase({ worktreeId: "nope", mode: "squash" }),
+    ).rejects.toThrow(/unknown worktree nope/);
+    expect(scMergeToBaseMock).not.toHaveBeenCalled();
   });
 });

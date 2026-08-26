@@ -3,8 +3,8 @@ use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
@@ -964,6 +964,20 @@ impl DaemonClient {
             other => Err(format!(
                 "unexpected response for GitGenerateCommitMessage: {other:?}"
             )),
+        }
+    }
+
+    // Guarded merge of the worktree's branch into its base ref; guard
+    // refusals come back as plain-language Err strings.
+    pub fn sc_merge_to_base(&self, cwd: &str, mode: &str) -> Result<MergeToBaseOutcome, String> {
+        let req = DaemonRequest::ScMergeToBase {
+            cwd: cwd.into(),
+            mode: mode.into(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::ScMerged(outcome) => Ok(outcome),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for ScMergeToBase: {other:?}")),
         }
     }
 

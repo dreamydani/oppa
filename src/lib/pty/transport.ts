@@ -572,3 +572,18 @@ export interface PrMessage {
 export function generatePrMessage(cwd: string): Promise<PrMessage> {
   return invoke("sc_generate_pr_message", { cwd });
 }
+
+// ---- v6 fleets: guarded merge of an agent branch into its base ref ----
+
+// Request vocabulary; the outcome echoes "squash" | "merge-commit" (kebab-case).
+export type MergeModeInput = "squash" | "merge";
+
+export interface MergeToBaseOutcome {
+  merged_commit: string;
+  mode: string;
+  files_changed: number;
+}
+
+export function scMergeToBase(cwd: string, mode: MergeModeInput): Promise<MergeToBaseOutcome> {
+  return invoke("sc_merge_to_base", { cwd, mode });
+}

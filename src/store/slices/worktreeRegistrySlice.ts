@@ -6,6 +6,7 @@ import {
   repoAdd,
   repoList,
   requestReviewEligibility,
+  scMergeToBase,
   worktreeCreate,
   worktreeCreateAgent,
   worktreeCreateFleet,
@@ -19,6 +20,8 @@ import type {
   Eligibility,
   FleetSlotInput,
   FleetSpawnResult,
+  MergeModeInput,
+  MergeToBaseOutcome,
   RepoRecord,
   WorktreeAgentHandoff,
   WorktreeListEntry,
@@ -64,6 +67,11 @@ export interface WorktreeFinishInput {
   worktreeId: string;
 }
 
+export interface WorktreeMergeToBaseInput {
+  worktreeId: string;
+  mode: MergeModeInput;
+}
+
 export interface WorktreeRegistrySlice {
   worktrees: WorktreeListEntry[];
   // Per-worktree count of live daemon sessions, for card badges.
@@ -76,6 +84,7 @@ export interface WorktreeRegistrySlice {
   createWorktreeWithAgent: (input: WorktreeCreateAgentInput) => Promise<WorktreeAgentHandoff>;
   spawnFleet: (input: FleetSpawnInput) => Promise<FleetSpawnResult>;
   finishWorktree: (input: WorktreeFinishInput) => Promise<FinishOutcome>;
+  mergeWorktreeToBase: (input: WorktreeMergeToBaseInput) => Promise<MergeToBaseOutcome>;
   setWorktreeStatus: (id: string, status: WorktreeStatus) => Promise<void>;
   renameWorktree: (id: string, displayName: string) => Promise<void>;
   removeWorktree: (id: string, force?: boolean, deleteBranch?: boolean) => Promise<void>;
@@ -238,6 +247,17 @@ export function createWorktreeRegistrySlice(
     setWorktreeStatus: async (id, status) => {
       await worktreeSet(id, { workspaceStatus: status });
       await get().loadWorktrees();
+    },
+
+    // Guarded local merge (F10): the backend owns every guard and returns
+    // plain-language reasons; we just resolve cwd and refresh both surfaces.
+    mergeWorktreeToBase: async ({ worktreeId, mode }) => {
+      const entry = get().worktrees.find((w) => w.record.id === worktreeId);
+      if (!entry) throw new Error(`unknown worktree ${worktreeId}`);
+      const cwd = entry.record.path;
+      const outcome = await scMergeToBase(cwd, mode);
+      await Promise.all([get().loadWorktrees(), get().refreshGitStatus(cwd)]);
+      return outcome;
     },
 
     renameWorktree: async (id, displayName) => {

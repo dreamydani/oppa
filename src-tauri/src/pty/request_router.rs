@@ -5,8 +5,8 @@ use crate::git::comments_store::{
 };
 use crate::git::source_control::{
     sc_branch_compare, sc_checkout, sc_commit, sc_discard, sc_fast_forward, sc_fetch,
-    sc_file_diff, sc_history, sc_local_branches, sc_pull, sc_push, sc_stage, sc_status,
-    sc_unstage, sc_upstream_refresh,
+    sc_file_diff, sc_history, sc_local_branches, sc_merge_to_base, sc_pull, sc_push, sc_stage,
+    sc_status, sc_unstage, sc_upstream_refresh, MergeMode,
 };
 use crate::git::hosted_reviews::{
     create_pull_request_live, create_pull_request_live_with_search_path,
@@ -548,6 +548,22 @@ impl DaemonServer {
                 || sc_generate_pr_message(Path::new(&cwd)),
                 DaemonResponse::ScPrMessage,
             ),
+            DaemonRequest::ScMergeToBase { cwd, mode } => {
+                let resp = match self.worktree_registry_path.as_deref() {
+                    Some(registry_path) => self.sc_response(
+                        || {
+                            MergeMode::parse(&mode).and_then(|parsed| {
+                                sc_merge_to_base(registry_path, Path::new(&cwd), parsed)
+                                    .map(DaemonResponse::ScMerged)
+                            })
+                        },
+                        |resp| resp,
+                    ),
+                    None => DaemonResponse::Error(REGISTRY_UNAVAILABLE.into()),
+                };
+                self.publish_git_changed_if_success(&resp);
+                resp
+            }
             DaemonRequest::DiffCommentsList { worktree_id } => self.comment_response(
                 |store| comments_list(&store, &worktree_id),
                 DaemonResponse::CommentRecords,

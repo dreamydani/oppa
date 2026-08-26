@@ -4,8 +4,8 @@ use crate::git::pr_message::PrMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
 use crate::git::worktrees::WorktreeListEntry;
@@ -630,6 +630,15 @@ pub fn sc_upstream_refresh(
     cwd: String,
 ) -> Result<UpstreamStatus, String> {
     manager.get_client()?.sc_upstream_refresh(&cwd)
+}
+
+#[tauri::command(async)]
+pub fn sc_merge_to_base(
+    manager: State<'_, PtyManager>,
+    cwd: String,
+    mode: String,
+) -> Result<MergeToBaseOutcome, String> {
+    manager.get_client()?.sc_merge_to_base(&cwd, &mode)
 }
 
 #[tauri::command(async)]

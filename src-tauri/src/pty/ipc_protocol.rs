@@ -2,8 +2,8 @@ use crate::git::commit_message::CommitMessage;
 use crate::git::comments_store::{DiffComment, NewDiffComment};
 use crate::git::pr_message::PrMessage;
 use crate::git::source_control::{
-    BranchCompare, DiffContent, HistoryResult, LocalBranches, PullOutcome, PushOutcome,
-    SourceControlStatus, UpstreamStatus,
+    BranchCompare, DiffContent, HistoryResult, LocalBranches, MergeToBaseOutcome, PullOutcome,
+    PushOutcome, SourceControlStatus, UpstreamStatus,
 };
 use crate::git::hosted_reviews::{CreatedReview, Eligibility, PrStatus};
 use crate::git::worktree_registry::{RepoRecord, WorktreeRecord, WorktreeStatus};
@@ -253,6 +253,9 @@ pub enum DaemonRequest {
     },
     ReviewStatus { cwd: String },
     GitGeneratePrMessage { cwd: String },
+    // v6 fleets: guarded merge of an agent worktree branch into its base ref;
+    // mode is "squash" | "merge" (parsed daemon-side)
+    ScMergeToBase { cwd: String, mode: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,6 +310,7 @@ pub enum DaemonResponse {
     CreateReview(CreatedReview),
     ReviewStatus(PrStatus),
     ScPrMessage(PrMessage),
+    ScMerged(MergeToBaseOutcome),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1138,6 +1142,7 @@ mod tests {
             },
             DaemonRequest::GitUpstreamRefresh { cwd: "/r".into() },
             DaemonRequest::GitGenerateCommitMessage { cwd: "/r".into() },
+            DaemonRequest::ScMergeToBase { cwd: "/r".into(), mode: "squash".into() },
         ];
         for req in requests {
             let json = serde_json::to_string(&req).expect("serialize request");
@@ -1221,6 +1226,11 @@ mod tests {
             }),
             DaemonResponse::CommentRecords(vec![sample_comment()]),
             DaemonResponse::CommentRecordOne(sample_comment()),
+            DaemonResponse::ScMerged(MergeToBaseOutcome {
+                merged_commit: "abc1234".into(),
+                mode: "squash".into(),
+                files_changed: 3,
+            }),
         ];
         for res in responses {
             let json = serde_json::to_string(&res).expect("serialize response");
