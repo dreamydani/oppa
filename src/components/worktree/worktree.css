@@ -225,6 +225,56 @@
   text-overflow: ellipsis;
 }
 
+/* Send-target entry: row + prompt trigger as siblings (no nested buttons). */
+.worktree-terminal-entry {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.worktree-terminal-entry .worktree-terminal-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-terminal-target-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted, #8a8f98);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.worktree-terminal-entry:hover .worktree-terminal-target-btn,
+.worktree-terminal-entry.targeting .worktree-terminal-target-btn {
+  opacity: 1;
+}
+
+.worktree-terminal-target-btn:hover:not(:disabled) {
+  color: var(--status-running, #3fb950);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="light"] .worktree-terminal-target-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.worktree-terminal-entry.targeting .worktree-terminal-target-btn {
+  color: var(--status-running, #3fb950);
+}
+
+.worktree-terminal-target-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+
 .worktree-pr-badge {
   display: inline-flex;
   align-items: center;

@@ -272,6 +272,115 @@ describe("WorktreePane", () => {
     expect(plainRow.querySelector(".worktree-terminal-dot")).not.toBeNull();
   });
 
+  it("send-target flow: target a live row, submit, and ptyWrite receives prompt+submit", async () => {
+    const ptyWriteMock = vi.mocked(transport.ptyWrite);
+    ptyWriteMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 1 },
+      sessions: {
+        "live-1": {
+          id: "live-1",
+          title: "live one",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt live one" }));
+    const bar = screen.getByRole("group", { name: /prompt live one/i });
+    expect(bar).toBeDefined();
+
+    const input = bar.querySelector("textarea")!;
+    fireEvent.change(input, { target: { value: "fix the failing login test" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    await vi.waitFor(() => {
+      expect(ptyWriteMock).toHaveBeenNthCalledWith(1, "live-1", "fix the failing login test");
+      expect(ptyWriteMock).toHaveBeenNthCalledWith(2, "live-1", "\r");
+    });
+    // Prompt delivered: the bar closes after a successful send.
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("group", { name: /prompt live one/i })).toBeNull();
+    });
+  });
+
+  it("store-level targeting guard refuses exited/error sessions before any write", async () => {
+    const ptyWriteMock = vi.mocked(transport.ptyWrite);
+    ptyWriteMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        "dead-1": {
+          id: "dead-1",
+          title: "dead one",
+          status: "exited",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+        },
+        "broken-1": {
+          id: "broken-1",
+          title: "broken one",
+          status: "error",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("dead-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("broken-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("missing-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+  });
+
+  it("Escape cancels send-target mode without writing to the session", () => {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 1 },
+      sessions: {
+        "live-1": {
+          id: "live-1",
+          title: "live one",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt live one" }));
+    expect(screen.getByRole("group", { name: /prompt live one/i })).toBeDefined();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: /prompt live one/i })).toBeNull();
+  });
+
   it("shows PR badge with number when linked_pr_url exists and hides when missing", () => {
     useTerminalStore.setState({
       worktrees: [

@@ -6,6 +6,7 @@ import {
   ptyKill,
   ptyResize,
   ptyAck,
+  ptyWrite,
 } from "../../lib/pty/transport";
 import type { PtySpawnOptions } from "../../lib/pty/transport";
 import { substituteLeafId } from "../../lib/pane-manager/layout";
@@ -97,6 +98,7 @@ export interface SessionSlice {
   updateSessionCwd: (id: string, cwd: string) => void;
   renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
+  sendPromptToSession: (sessionId: string, prompt: string) => Promise<void>;
 }
 
 export function createSessionsSlice(
@@ -360,6 +362,17 @@ export function createSessionsSlice(
           layout: activeTab ? activeTab.layout : topLayout,
         };
       });
+    },
+
+    // Send-target prompting (Orca parity): paste-style delivery reuses the
+    // initial-command write path — text first, then a submit keystroke.
+    sendPromptToSession: async (sessionId, prompt) => {
+      const session = get().sessions[sessionId];
+      if (!session || session.status === "exited" || session.status === "error") {
+        throw new Error(`session ${sessionId} is not live; targeting refused`);
+      }
+      await ptyWrite(sessionId, prompt);
+      await ptyWrite(sessionId, "\r");
     },
   };
 }

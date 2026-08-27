@@ -1,0 +1,68 @@
+/* Send-target prompt bar: attaches under worktree cards / tree branches. */
+
+.agent-prompt-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--bg-elevated);
+}
+
+.agent-prompt-target {
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding-top: 5px;
+}
+
+.agent-prompt-input {
+  flex: 1;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1.5;
+  min-height: 24px;
+  max-height: 96px;
+}
+
+.agent-prompt-send,
+.agent-prompt-cancel {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.agent-prompt-send:not(:disabled):hover {
+  color: var(--status-running, #34d399);
+  background-color: var(--tint-hover);
+}
+
+.agent-prompt-cancel:hover {
+  color: var(--text);
+  background-color: var(--tint-hover);
+}
+
+.agent-prompt-send:disabled,
+.agent-prompt-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
