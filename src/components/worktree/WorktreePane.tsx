@@ -6,6 +6,7 @@ import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../li
 import type { MergeModeInput } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { AgentStatusPill } from "../agent/AgentStatusPill";
 import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
 import {
   consumeAutoStatusOnFinish,
@@ -76,6 +77,9 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const sessions = useTerminalStore((s) => s.sessions);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
   const tabs = useTerminalStore((s) => s.tabs);
   const selectTab = useTerminalStore((s) => s.selectTab);
 
@@ -159,6 +163,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   }, [finishedByWorktreeId, worktrees, setWorktreeStatus]);
 
   const openLinkedTerminal = (sessionId: string) => {
+    markAgentStatusSeen(sessionId);
     const tab = tabs.find((t) => findLeafPath(t.layout, sessionId) !== null);
     if (tab) selectTab(tab.id);
   };
@@ -418,6 +423,8 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                       <div className="worktree-terminals-list">
                         {linked.map((session) => {
                           const isWorking = workingBySessionId[session.id] ?? false;
+                          const agentEntry = statusBySessionId[session.id];
+                          const unread = unreadBySessionId[session.id] ?? false;
                           return (
                             <button
                               key={session.id}
@@ -429,10 +436,14 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                                 openLinkedTerminal(session.id);
                               }}
                             >
-                              <span
-                                className={`worktree-terminal-dot${isWorking ? " working" : ""}`}
-                                aria-hidden="true"
-                              />
+                              {agentEntry ? (
+                                <AgentStatusPill entry={agentEntry} unread={unread} />
+                              ) : (
+                                <span
+                                  className={`worktree-terminal-dot${isWorking ? " working" : ""}`}
+                                  aria-hidden="true"
+                                />
+                              )}
                               <span className="worktree-terminal-title">
                                 {sessionDisplayTitle(session)}
                               </span>

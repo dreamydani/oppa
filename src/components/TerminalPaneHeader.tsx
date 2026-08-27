@@ -5,6 +5,7 @@ import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
 import type { RepoRecord } from "../lib/pty/transport";
 import { focus as focusLeaf } from "../lib/pane-manager/layout";
+import { AgentStatusPill } from "./agent/AgentStatusPill";
 import {
   usePaneDragStore,
   findDropTargetUnderPointer,
@@ -672,6 +673,9 @@ function TerminalSwitcherMenu({
   const worktrees = useTerminalStore((s) => s.worktrees);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
   const selectTab = useTerminalStore((s) => s.selectTab);
 
   return (
@@ -683,19 +687,25 @@ function TerminalSwitcherMenu({
       <div className="terminal-pane-header-switcher-list">
         {tabs
           .filter((tab) => !tab.isWizard)
-          .map((tab) => (
-            <SwitcherRow
-              key={tab.id}
-              isActive={tab.id === activeTabId}
-              session={sessions[focusLeaf(tab.layout, tab.focusedPath)]}
-              worktrees={worktrees}
-              workingBySessionId={workingBySessionId}
-              onSelect={() => {
-                selectTab(tab.id);
-                onClose();
-              }}
-            />
-          ))}
+          .map((tab) => {
+            const sessionId = focusLeaf(tab.layout, tab.focusedPath);
+            return (
+              <SwitcherRow
+                key={tab.id}
+                isActive={tab.id === activeTabId}
+                session={sessions[sessionId]}
+                worktrees={worktrees}
+                workingBySessionId={workingBySessionId}
+                agentEntry={statusBySessionId[sessionId]}
+                unread={unreadBySessionId[sessionId] ?? false}
+                onSelect={() => {
+                  selectTab(tab.id);
+                  markAgentStatusSeen(sessionId);
+                  onClose();
+                }}
+              />
+            );
+          })}
       </div>
     </div>
   );
@@ -706,6 +716,8 @@ interface SwitcherRowProps {
   session: SessionInfo | undefined;
   worktrees: { record: { id: string; branch: string } }[];
   workingBySessionId: Record<string, boolean>;
+  agentEntry?: import("../lib/pty/transport").AgentStatusEntry;
+  unread?: boolean;
   onSelect: () => void;
 }
 
@@ -714,6 +726,8 @@ function SwitcherRow({
   session,
   worktrees,
   workingBySessionId,
+  agentEntry,
+  unread,
   onSelect,
 }: SwitcherRowProps) {
   // Pure frontend join: focused session's worktreeId → registry branch chip.
@@ -721,6 +735,10 @@ function SwitcherRow({
     ? worktrees.find((w) => w.record.id === session.worktreeId)?.record.branch
     : undefined;
   const isWorking = session ? (workingBySessionId[session.id] ?? false) : false;
+  // Hook truth replaces the binary dot; hookless shells keep the legacy dot.
+  const pill = agentEntry ? (
+    <AgentStatusPill entry={agentEntry} unread={unread} />
+  ) : null;
 
   return (
     <button
@@ -729,10 +747,12 @@ function SwitcherRow({
       onClick={onSelect}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <span
-        className={`terminal-pane-header-working-dot${isWorking ? " working" : ""}`}
-        aria-hidden="true"
-      />
+      {pill ?? (
+        <span
+          className={`terminal-pane-header-working-dot${isWorking ? " working" : ""}`}
+          aria-hidden="true"
+        />
+      )}
       <span className="terminal-pane-header-switcher-title">
         {sessionDisplayTitle(session)}
       </span>

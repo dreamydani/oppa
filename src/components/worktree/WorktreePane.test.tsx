@@ -217,6 +217,61 @@ describe("WorktreePane", () => {
     expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
   });
 
+  it("hook-classified rows render the rich pill instead of the legacy dot", () => {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 2 },
+      sessions: {
+        "hooked-1": {
+          id: "hooked-1",
+          title: "hooked",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+        "plain-1": {
+          id: "plain-1",
+          title: "plain",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+      statusBySessionId: {
+        "hooked-1": {
+          state: "blocked",
+          interactive_prompt: "Allow write access?",
+          state_started_at_ms: 1,
+          updated_at_ms: 2,
+          origin: "hook",
+        },
+      },
+      unreadBySessionId: { "hooked-1": true },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    const hookedRow = screen.getByTitle("Switch to hooked").closest("button")!;
+    // Hook truth wins: pill with the amber blocked state + unread attention dot
+    const pill = hookedRow.querySelector<HTMLElement>(".agent-status-pill")!;
+    expect(pill.dataset.state).toBe("blocked");
+    expect(hookedRow.querySelector(".agent-status-unread-dot")).not.toBeNull();
+    expect(hookedRow.querySelector(".worktree-terminal-dot")).toBeNull();
+
+    // Hookless shell keeps the legacy dot and renders no pill
+    const plainRow = screen.getByTitle("Switch to plain").closest("button")!;
+    expect(plainRow.querySelector(".agent-status-pill")).toBeNull();
+    expect(plainRow.querySelector(".worktree-terminal-dot")).not.toBeNull();
+  });
+
   it("shows PR badge with number when linked_pr_url exists and hides when missing", () => {
     useTerminalStore.setState({
       worktrees: [

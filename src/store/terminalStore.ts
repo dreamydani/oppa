@@ -29,7 +29,7 @@ import type {
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./slices/terminalSessionsSlice";
 import { createSessionActivitySlice } from "./slices/sessionActivitySlice";
 import type { SessionActivitySlice } from "./slices/sessionActivitySlice";
-import { createAgentStatusSlice } from "./slices/agentStatusSlice";
+import { createAgentStatusSlice, isUnreadWorthyState } from "./slices/agentStatusSlice";
 import type { AgentStatusSlice } from "./slices/agentStatusSlice";
 import { createPaneLayoutSlice } from "./slices/paneLayoutSlice";
 import type { PaneLayoutSlice, TabState } from "./slices/paneLayoutSlice";
@@ -149,7 +149,7 @@ type SliceSet = (
 export const useTerminalStore = create<TerminalState>()((set, get) => ({
   ...createSessionsSlice(set as SliceSet, get),
   ...createSessionActivitySlice(),
-  ...createAgentStatusSlice(),
+  ...createAgentStatusSlice(set as SliceSet),
   ...createPaneLayoutSlice(set as SliceSet, get),
   ...createWorkspaceLaunchSlice(set as SliceSet, get),
   ...createAppChromeSlice(set as SliceSet, get),
@@ -173,7 +173,7 @@ import {
   onPrChanged,
 } from "../lib/pty/transport";
 import type { PrChangedPayload } from "../lib/pty/transport";
-import { findLeafPath } from "../lib/pane-manager/layout";
+import { findLeafPath, focus as focusLeaf } from "../lib/pane-manager/layout";
 import { leafIds } from "./slices/layoutQueries";
 
 // Daemon-side mutations from any client must refresh the cards; debounced so a
@@ -217,10 +217,21 @@ void onSessionWorking(({ sessionId, working }) => {
 // the whole entry rides in so panes/pills never infer agent state themselves.
 void onAgentStatus(({ paneKey, entry }) => {
   if (!paneKey) return;
-  const statuses = useTerminalStore.getState().statusBySessionId;
-  if (statuses[paneKey]?.updated_at_ms === entry.updated_at_ms) return;
-  useTerminalStore.setState((state) => ({
-    statusBySessionId: { ...state.statusBySessionId, [paneKey]: entry },
+  const state = useTerminalStore.getState();
+  if (state.statusBySessionId[paneKey]?.updated_at_ms === entry.updated_at_ms) return;
+  // A done/blocked/waiting entry landing on a non-focused pane marks it unread
+  // so pills can draw the attention dot until the user brings the pane forward.
+  const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+  const focusedId = activeTab ? focusLeaf(activeTab.layout, activeTab.focusedPath) : null;
+  const focused = paneKey === focusedId || paneKey === state.maximizedSessionId;
+  const unread = isUnreadWorthyState(entry, focused)
+    ? { ...state.unreadBySessionId, [paneKey]: true }
+    : state.unreadBySessionId;
+  useTerminalStore.setState((prev) => ({
+    statusBySessionId: { ...prev.statusBySessionId, [paneKey]: entry },
+    ...(prev.unreadBySessionId[paneKey] !== unread[paneKey]
+      ? { unreadBySessionId: unread }
+      : {}),
   }));
 });
 

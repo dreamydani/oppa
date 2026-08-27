@@ -1,0 +1,72 @@
+/* Rich hook-classified agent status pill (Orca four-state). Renders alongside
+   the legacy dot; the amber/hollow/check states make blocked/waiting/done
+   visually distinct from the binary working pulse. */
+
+.agent-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* working: animated running pulse */
+.agent-status-working {
+  background-color: var(--status-running, #34d399);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--status-running, #34d399) 45%, transparent);
+  animation: agentStatusPulse 1.6s ease-in-out infinite;
+}
+
+.agent-status-spinner {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--bg-elevated, #fff);
+  opacity: 0.9;
+}
+
+/* blocked: solid amber, signals a permission decision is outstanding */
+.agent-status-blocked {
+  background-color: var(--status-blocked, #f59e0b);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--status-blocked, #f59e0b) 45%, transparent);
+}
+
+/* waiting: hollow amber ring — idle on a question but not hard-blocked */
+.agent-status-waiting {
+  background-color: transparent;
+  border: 1.5px solid var(--status-blocked, #f59e0b);
+}
+
+/* done: emerald check; interrupted renders with muted + strikethrough */
+.agent-status-done {
+  background-color: var(--status-running, #34d399);
+}
+
+.agent-status-done.agent-status-interrupted {
+  background-color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.agent-status-unread-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--status-blocked, #f59e0b);
+  box-shadow: 0 0 3px color-mix(in srgb, var(--status-blocked, #f59e0b) 60%, transparent);
+}
+
+@keyframes agentStatusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

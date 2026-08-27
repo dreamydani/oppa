@@ -17,6 +17,7 @@ import type { BranchNode, ProjectNode } from "../../store/terminalStore";
 import type { MergeModeInput, WorktreeRecord } from "../../lib/pty/transport";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { AgentStatusPill } from "../agent/AgentStatusPill";
 import "./worktree.css";
 import "./ProjectTreeView.css";
 
@@ -42,11 +43,15 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
   const worktrees = useTerminalStore((s) => s.worktrees);
   const sessions = useTerminalStore((s) => s.sessions);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
 
   const projectTree = useMemo(
     () => selectProjectTree({ repos, worktrees, sessions, workingBySessionId }),
     [repos, worktrees, sessions, workingBySessionId],
   );
+
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
 
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
@@ -122,6 +127,7 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
   };
 
   const handleOpenLinkedTerminal = (sessionId: string) => {
+    markAgentStatusSeen(sessionId);
     const tab = tabs.find((t) => findLeafPath(t.layout, sessionId) !== null);
     if (tab) {
       selectTab(tab.id);
@@ -386,6 +392,8 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
                             const isWorking = workingBySessionId[sId] ?? false;
                             const isExited = session?.status === "exited";
                             const title = session ? sessionDisplayTitle(session) : sId;
+                            const agentEntry = statusBySessionId[sId];
+                            const unread = unreadBySessionId[sId] ?? false;
 
                             return (
                               <button
@@ -398,10 +406,14 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
                                 }}
                                 title={`Switch to ${title}`}
                               >
-                                <span
-                                  className={`subsession-dot${isWorking ? " working" : ""}`}
-                                  aria-hidden="true"
-                                />
+                                {agentEntry ? (
+                                  <AgentStatusPill entry={agentEntry} unread={unread} />
+                                ) : (
+                                  <span
+                                    className={`subsession-dot${isWorking ? " working" : ""}`}
+                                    aria-hidden="true"
+                                  />
+                                )}
                                 <span className="subsession-title">{title}</span>
                               </button>
                             );
