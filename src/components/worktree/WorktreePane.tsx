@@ -136,10 +136,12 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
 
   // F11 finished state per card: retired cards never count as finished.
   const finishedByWorktreeId = useMemo(() => {
+    const statusBySessionId = useTerminalStore.getState().statusBySessionId;
     const finished: Record<string, boolean> = {};
     for (const { record } of worktrees) {
       finished[record.id] =
-        !record.retired && selectWorktreeFinished({ sessions, workingBySessionId }, record.id);
+        !record.retired &&
+        selectWorktreeFinished({ sessions, workingBySessionId, statusBySessionId }, record.id);
     }
     return finished;
   }, [worktrees, sessions, workingBySessionId]);

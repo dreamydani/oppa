@@ -110,6 +110,8 @@ export function createPaneLayoutSlice(
     createTab: async (cwd, worktreeId, existingId) => {
       const resolvedCwd = cwd ?? get().resolveDefaultCwd();
       const sessionId = await get().spawnSession(resolvedCwd, undefined, existingId, undefined, worktreeId);
+      // The new tab takes focus immediately: any pending attention flag is seen.
+      get().markAgentStatusSeen(sessionId);
       const currentTabs = getSyncedTabs(get());
       const tabId = generateNextTabId(currentTabs);
       const newTab: TabState = {
@@ -760,6 +762,8 @@ export function createPaneLayoutSlice(
           findLeafPath(foundTab.layout, foundSessionId) ?? firstLeafPath(foundTab.layout);
         get().selectTab(foundTab.id);
         get().focusPane(path);
+        // Bringing the branch forward is an implicit read of its agent truth.
+        get().markAgentStatusSeen(foundSessionId);
       } else {
         const wtEntry = state.worktrees.find((w) => w.record.id === worktreeId);
         const targetPath = wtEntry?.record.path;

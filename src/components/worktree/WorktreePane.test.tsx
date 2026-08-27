@@ -890,6 +890,8 @@ describe("WorktreePane finished detection", () => {
       prStatusByWorktreeId: {},
       sessions,
       workingBySessionId,
+      statusBySessionId: {},
+      unreadBySessionId: {},
       tabs: [],
       activeTabId: "",
     } as unknown as Record<string, unknown>);
@@ -920,6 +922,47 @@ describe("WorktreePane finished detection", () => {
     // Exited sessions never count toward the linked set.
     useTerminalStore.setState({ sessions: { gone: boundSession("gone", { status: "exited" }) } });
     expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+  });
+
+  it("hook truth wins: reported done finishes even when the quietness dot disagrees", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: true });
+    // Shell still reports working (fresh output), but the agent hook said done.
+    useTerminalStore.setState({
+      statusBySessionId: {
+        s1: { state: "done", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+      },
+    } as unknown as Record<string, unknown>);
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(true);
+  });
+
+  it("blocked/waiting keep the worktree active regardless of the quietness dot", () => {
+    for (const state of ["blocked", "waiting", "working"] as const) {
+      seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: false });
+      useTerminalStore.setState({
+        statusBySessionId: {
+          s1: { state, state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+        },
+      } as unknown as Record<string, unknown>);
+      expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+    }
+  });
+
+  it("mixed fleet: hook-busy agent blocks finish even when a peer reported done", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1"), s2: boundSession("s2") }, { s1: false, s2: false });
+    useTerminalStore.setState({
+      statusBySessionId: {
+        s1: { state: "done", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+        s2: { state: "waiting", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+      },
+    } as unknown as Record<string, unknown>);
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+  });
+
+  it("hookless shells still fall back to the quietness heuristic", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: true });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+    useTerminalStore.setState({ workingBySessionId: { s1: false } });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(true);
   });
 
   it("shows the finished chip only while every linked session is idle", () => {
