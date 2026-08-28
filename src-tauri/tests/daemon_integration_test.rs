@@ -4,6 +4,7 @@ use oppa_lib::git::worktree_registry::{
 };
 use oppa_lib::pty::daemon_client::DaemonClient;
 use oppa_lib::pty::daemon_server::{CancellationToken, DaemonServer};
+use std::collections::HashMap;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1423,4 +1424,203 @@ fn test_hosted_review_live_smoke_requires_gh_authed() {
         elig.eligible || elig.blocked_reason.is_some(),
         "live eligibility must return a decision, got {elig:?}"
     );
+}
+
+// Posts a hook envelope to the loopback agent-hook endpoint the way the
+// installed scripts do: JSON body, token echo, pane_key routing, /hook/<family>.
+fn post_hook(path: &str, body: &str, port: u16) {
+    use std::io::{Read, Write};
+    let mut stream =
+        std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect hook endpoint");
+    let request = format!(
+        "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        body.len(),
+        body
+    );
+    stream
+        .write_all(request.as_bytes())
+        .expect("write hook request");
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+}
+
+fn hook_wait_until(deadline: std::time::Instant, mut cond: impl FnMut() -> bool, label: &str) {
+    while !cond() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {label}");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
+#[test]
+fn test_e2e_daemon_agent_status_hook_lifecycle_over_http() {
+    // Build a real PTY session so the hook payload has a pane to route to.
+    let sessions: Arc<
+        parking_lot::Mutex<HashMap<String, Arc<oppa_lib::pty::daemon_session::DaemonSession>>>,
+    > = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+    let sh = sh_path_for_working_test();
+    let session = oppa_lib::pty::daemon_session::DaemonSession::spawn_with_args(
+        "e2e-agent-status-session".into(),
+        &sh,
+        &[],
+        None,
+        80,
+        24,
+        None,
+        &[],
+    )
+    .expect("spawn session for hook lifecycle");
+    sessions
+        .lock()
+        .insert("e2e-agent-status-session".into(), Arc::clone(&session));
+
+    // tokio runtime: the hook server is async; drive it on a background runtime.
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let server = rt
+        .block_on(oppa_lib::pty::agent_hook_server::AgentHookServer::start(
+            Arc::clone(&sessions),
+        ))
+        .expect("agent hook server started");
+    let port = server.port;
+    let token = server.token.clone();
+
+    let envelope = |payload: serde_json::Value| {
+        serde_json::json!({
+            "pane_key": "e2e-agent-status-session",
+            "token": token,
+            "payload": payload,
+        })
+        .to_string()
+    };
+    let status = || session.agent_status();
+
+    // Wrong token is rejected: no status change.
+    post_hook(
+        "/hook/claude",
+        &serde_json::json!({
+            "pane_key": "e2e-agent-status-session",
+            "token": "wrong-token",
+            "payload": { "hook_event_name": "Stop" }
+        })
+        .to_string(),
+        port,
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(status().is_none(), "bad token must be ignored");
+
+    // 1. SessionStart (boundary): working + prompt capture
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "prompt": "refactor the login flow",
+        })),
+        port,
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    hook_wait_until(deadline, || status().is_some(), "SessionStart entry");
+    let start_entry = status().unwrap();
+    assert_eq!(
+        start_entry.state,
+        oppa_lib::agents::status::AgentStatusState::Working
+    );
+    assert_eq!(start_entry.prompt, "refactor the login flow");
+
+    // 2. PreToolUse: tool activity rides the working state
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": { "file_path": "src/login.ts" },
+        })),
+        port,
+    );
+    hook_wait_until(
+        deadline,
+        || matches!(status(), Some(s) if s.tool_name.as_deref() == Some("Edit")),
+        "PreToolUse entry",
+    );
+    let tool_entry = status().unwrap();
+    assert_eq!(
+        tool_entry.state,
+        oppa_lib::agents::status::AgentStatusState::Working
+    );
+
+    // 3. Notification: waiting + the literal question the agent is stuck on
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({
+            "hook_event_name": "Notification",
+            "message": "Allow write access to /tmp?",
+        })),
+        port,
+    );
+    hook_wait_until(
+        deadline,
+        || matches!(status(), Some(s) if s.interactive_prompt.as_deref() == Some("Allow write access to /tmp?")),
+        "waiting entry",
+    );
+    let waiting_entry = status().unwrap();
+    assert_eq!(
+        waiting_entry.state,
+        oppa_lib::agents::status::AgentStatusState::Waiting
+    );
+
+    // 4. Stop: done with a completion timestamp
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({ "hook_event_name": "Stop" })),
+        port,
+    );
+    hook_wait_until(
+        deadline,
+        || matches!(status(), Some(s) if s.state == oppa_lib::agents::status::AgentStatusState::Done),
+        "done entry",
+    );
+    let done_entry = status().unwrap();
+    assert_eq!(done_entry.state, oppa_lib::agents::status::AgentStatusState::Done);
+    assert!(done_entry.turn_completed_at_ms.is_some());
+
+    // 5. Done-gate: non-boundary events are refused after done (no flip)
+    let done_updated = done_entry.updated_at_ms;
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+        })),
+        port,
+    );
+    std::thread::sleep(Duration::from_millis(250));
+    assert_eq!(
+        status().unwrap().updated_at_ms,
+        done_updated,
+        "done-gate must refuse non-boundary events after Stop"
+    );
+
+    // 6. Truncation: a boundary event after done resets state and clamps the
+    //    oversized prompt to the shared field cap.
+    let oversized_prompt = "x".repeat(3000);
+    post_hook(
+        "/hook/claude",
+        &envelope(serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "prompt": oversized_prompt,
+        })),
+        port,
+    );
+    hook_wait_until(
+        deadline,
+        || matches!(status(), Some(s) if s.state == oppa_lib::agents::status::AgentStatusState::Working),
+        "post-done boundary entry",
+    );
+    let clamped = status().unwrap();
+    assert_eq!(
+        clamped.prompt.len(),
+        oppa_lib::agents::status::AGENT_STATUS_MAX_FIELD_LENGTH,
+        "oversized prompt must clamp to the shared field cap"
+    );
+
+    let _ = session.kill();
 }
