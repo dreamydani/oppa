@@ -7,7 +7,6 @@ import {
   GitBranch,
   GitMerge,
   LayoutGrid,
-  Layers,
   MoreHorizontal,
   Plus,
 } from "lucide-react";
@@ -54,7 +53,6 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
   const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
 
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
-  const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
   const tileProjectBranches = useTerminalStore((s) => s.tileProjectBranches);
   const focusBranchPane = useTerminalStore((s) => s.focusBranchPane);
   const createTab = useTerminalStore((s) => s.createTab);
@@ -259,18 +257,6 @@ export function ProjectTreeView({ filter = "" }: ProjectTreeViewProps): React.Re
                   }}
                 >
                   <LayoutGrid size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="project-action-btn"
-                  title="Spawn Fleet"
-                  aria-label={`Spawn Fleet in ${project.repoName}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openFleetSheet({ repoPath: project.repoPath });
-                  }}
-                >
-                  <Layers size={13} />
                 </button>
                 <button
                   type="button"

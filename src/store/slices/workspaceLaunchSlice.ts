@@ -17,6 +17,7 @@ import type {
 } from "../../lib/workspace/transport";
 import { createGridLayout } from "../../lib/pane-manager/gridLayout";
 import type { TerminalState } from "../terminalStore";
+import type { FleetSpawnInput } from "./worktreeRegistrySlice";
 import { generateNextTabId, getActiveTab, getSyncedTabs } from "./layoutQueries";
 import { triggerDebouncedSaveLayout } from "./layoutSaveScheduler";
 import type { TabState } from "./paneLayoutSlice";
@@ -54,6 +55,11 @@ export interface WorkspaceLaunchSlice {
   createWizardTab: () => string;
   launchWorkspaceForTab: (tabId: string, config: WorkspaceConfig) => Promise<void>;
   launchCustomWorkspace: (config: WorkspaceConfig) => Promise<string>;
+  launchParallelWorkspace: (
+    tabId: string,
+    input: FleetSpawnInput,
+    opts?: { title?: string },
+  ) => Promise<{ ok: boolean; errors: string[] }>;
   getActiveCwd: () => string | undefined;
 }
 
@@ -256,6 +262,44 @@ export function createWorkspaceLaunchSlice(
 
       triggerDebouncedSaveLayout(get);
       return tabId;
+    },
+
+    // Parallel-agent launch: one fleet IPC fans out N worktree+agent spawns in
+    // the daemon; every successful slot warm-attaches into a single workspace
+    // tab so the grid shows all of them together (no per-slot tabs).
+    launchParallelWorkspace: async (tabId, input, opts) => {
+      const result = await get().spawnFleet(input);
+      const rawResults = Array.isArray(result) ? result : (result?.results ?? []);
+      const okSlots = rawResults.filter((r) => r.ok && r.record);
+      const errors = rawResults
+        .filter((r) => !r.ok)
+        .map((r) => `Slot ${(r.index ?? 0) + 1}: ${r.error ?? "unknown failure"}`);
+
+      if (okSlots.length > 0) {
+        const sessionIds = okSlots.map((r) => r.session_id).filter((id): id is string => !!id);
+        const worktreeIdsBySession: Record<string, string> = {};
+        for (const r of okSlots) {
+          if (r.session_id && r.record) worktreeIdsBySession[r.session_id] = r.record.id;
+        }
+        const title =
+          opts?.title?.trim() ||
+          input.repoPath.split(/[/\\]/).filter(Boolean).pop() ||
+          "Parallel Workspace";
+        await get().mergeSessionsIntoWorkspace(tabId, sessionIds, {
+          workspaceKey: input.repoPath,
+          title,
+          clearWizard: true,
+          worktreeIdsBySession,
+        });
+        await get().addRecentWorkspace({
+          name: title,
+          path: input.repoPath,
+          terminal_count: okSlots.length,
+          last_opened: Date.now(),
+        });
+      }
+
+      return { ok: errors.length === 0, errors };
     },
 
     getActiveCwd: () => {

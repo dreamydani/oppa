@@ -151,7 +151,6 @@ describe("ProjectTreeView", () => {
       tabs: [],
       activeTabId: "",
       isWorktreeCreateOpen: false,
-      isFleetSheetOpen: false,
     });
   });
 
@@ -216,7 +215,7 @@ describe("ProjectTreeView", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
   });
 
-  it("action buttons (+ Worktree, Fleet, Tile Grid) trigger respective actions", () => {
+  it("action buttons (+ Worktree, Tile Grid) trigger respective actions", () => {
     const tileSpy = vi.spyOn(useTerminalStore.getState(), "tileProjectBranches");
 
     render(<ProjectTreeView />);
@@ -228,13 +227,6 @@ describe("ProjectTreeView", () => {
     const addBtn = screen.getByTitle("New Worktree");
     fireEvent.click(addBtn);
     expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
-
-    const fleetBtn = screen.getByTitle("Spawn Fleet");
-    fireEvent.click(fleetBtn);
-    expect(useTerminalStore.getState().isFleetSheetOpen).toBe(true);
-    expect(useTerminalStore.getState().fleetSheetPrefill).toEqual({
-      repoPath: "C:/projects/oppa",
-    });
   });
 
   it("collapses and expands branches when project header chevron is clicked", () => {

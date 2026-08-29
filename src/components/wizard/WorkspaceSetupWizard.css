@@ -1102,3 +1102,210 @@
   white-space: nowrap;
   border-width: 0;
 }
+
+/* ==========================================================================
+   Parallel mode (replaces the fleet spawn sheet)
+   ========================================================================== */
+
+.wizard-mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.wizard-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.wizard-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.wizard-mode-btn.active {
+  background: var(--accent-soft, rgba(63, 185, 80, 0.12));
+  border-color: var(--accent, #3fb950);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .wizard-mode-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.wizard-parallel-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.1));
+  background: var(--bg-secondary, #1f1f1e);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.wizard-parallel-textarea {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.wizard-parallel-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wizard-parallel-slot {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.07));
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="light"] .wizard-parallel-slot {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.wizard-parallel-slot-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint, #707070);
+  padding-top: 8px;
+  min-width: 12px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.wizard-parallel-slot-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.wizard-parallel-slot-tools {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.wizard-parallel-slot-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.wizard-parallel-slot-tool:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .wizard-parallel-slot-tool:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.wizard-parallel-slot-tool.danger:hover {
+  color: var(--destructive, #f85149);
+}
+
+.wizard-parallel-add-slot {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px dashed var(--border-divider, rgba(255, 255, 255, 0.15));
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wizard-parallel-add-slot:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.wizard-parallel-add-slot:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wizard-parallel-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.wizard-parallel-summary-line.muted,
+.wizard-parallel-summary .muted {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.wizard-parallel-error {
+  margin: 8px 0 0;
+  color: var(--destructive, #f85149);
+  font-size: 12px;
+}
+
+.wizard-parallel-outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.wizard-parallel-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.wizard-parallel-outcome.spawning {
+  color: var(--text-muted);
+}
+
+.wizard-parallel-outcome.ok {
+  color: #3fb950;
+}
+
+.wizard-parallel-outcome.failed {
+  color: var(--destructive, #f85149);
+}
+
+.wizard-parallel-spin {
+  animation: wizardParallelSpin 0.9s linear infinite;
+}
+
+@keyframes wizardParallelSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

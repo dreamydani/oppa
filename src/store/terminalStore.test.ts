@@ -35,6 +35,7 @@ vi.mock("../lib/pty/transport", () => ({
   ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
+  worktreeCreateFleet: vi.fn(),
   scStatus: vi.fn().mockResolvedValue({
     entries: [],
     conflict_state: "none",
@@ -126,6 +127,7 @@ const repoAddMock = vi.mocked(transport.repoAdd);
 const repoListMock = vi.mocked(transport.repoList);
 const ptyListMock = vi.mocked(transport.ptyList);
 const worktreeCreateAgentMock = vi.mocked(transport.worktreeCreateAgent);
+const worktreeCreateFleetMock = vi.mocked(transport.worktreeCreateFleet);
 
 function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): transport.WorktreeRecord {
   return {
@@ -5101,8 +5103,108 @@ describe("terminalStore", () => {
       expect(ids).not.toContain("");
     });
   });
+
+  describe("launchParallelWorkspace", () => {
+    const fleetInput = (overrides: Record<string, unknown> = {}) =>
+      ({
+        repoPath: "C:/projects/demo",
+        slots: [
+          { agent: "claude", command: null, prompt: "fix login", name: null },
+          { agent: null, command: "my-agent --yolo", prompt: null, name: null },
+        ],
+        ...overrides,
+      }) as unknown as import("../lib/pty/transport").FleetSpawnOptions;
+
+    it("spawns fleet slots and merges them into one workspace tab", async () => {
+      worktreeCreateFleetMock.mockResolvedValue({
+        results: [
+          {
+            index: 0,
+            ok: true,
+            record: worktreeRecord({ id: "wt-a", branch: "feat-a", path: "C:/projects/demo/wt-a" }),
+            session_id: "daemon-s-1",
+            error: null,
+          },
+          {
+            index: 1,
+            ok: true,
+            record: worktreeRecord({ id: "wt-b", branch: "feat-b", path: "C:/projects/demo/wt-b" }),
+            session_id: "daemon-s-2",
+            error: null,
+          },
+        ],
+      });
+      worktreeListMock.mockResolvedValue([]);
+      ptySpawnMock.mockImplementation(async (opts) =>
+        spawnRes((opts as { id?: string })?.id ?? "fresh", false),
+      );
+
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-w", isWizard: true, title: "New Workspace", layout: { type: "leaf", id: "" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-w",
+        sessions: {},
+      });
+
+      const outcome = await useTerminalStore.getState().launchParallelWorkspace(
+        "tab-w",
+        fleetInput(),
+      );
+
+      expect(outcome.ok).toBe(true);
+      const state = useTerminalStore.getState();
+      const tab = state.tabs.find((t) => t.id === "tab-w");
+      expect(tab?.isWizard).toBeFalsy();
+      // Fleet sessions warm-attached into the one tab
+      expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
+        { id: "daemon-s-1", worktreeId: "wt-a" },
+        { id: "daemon-s-2", worktreeId: "wt-b" },
+      ]);
+      const ids = leafIdList(tab?.layout);
+      expect(ids).toEqual(["daemon-s-1", "daemon-s-2"]);
+      expect(state.sessions["daemon-s-1"].worktreeId).toBe("wt-a");
+    });
+
+    it("returns per-slot failure outcomes without failing the whole launch", async () => {
+      worktreeCreateFleetMock.mockResolvedValue({
+        results: [
+          {
+            index: 0,
+            ok: false,
+            record: null,
+            session_id: null,
+            error: "repo not registered",
+          },
+          {
+            index: 1,
+            ok: true,
+            record: worktreeRecord({ id: "wt-b" }),
+            session_id: "daemon-s-2",
+            error: null,
+          },
+        ],
+      });
+      worktreeListMock.mockResolvedValue([]);
+      ptySpawnMock.mockImplementation(async (opts) =>
+        spawnRes((opts as { id?: string })?.id ?? "fresh", false),
+      );
+
+      useTerminalStore.setState({
+        tabs: [
+          { id: "tab-w", isWizard: true, layout: { type: "leaf", id: "" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-w",
+        sessions: {},
+      });
+
+      const outcome = await useTerminalStore.getState().launchParallelWorkspace("tab-w", fleetInput());
+
+      expect(outcome.ok).toBe(false);
+      expect(outcome.errors).toEqual(["Slot 1: repo not registered"]);
+      // The one success still merged
+      const tab = useTerminalStore.getState().tabs.find((t) => t.id === "tab-w");
+      expect(leafIdList(tab?.layout)).toEqual(["daemon-s-2"]);
+    });
+  });
 });
-
-
-
-

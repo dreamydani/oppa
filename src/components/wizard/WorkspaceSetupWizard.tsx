@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { X, ArrowLeft, ArrowRight, Zap, Play } from "lucide-react";
+import { X, ArrowLeft, ArrowRight, Zap, Play, Terminal, Bot } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { WizardStepStart } from "./WizardStepStart";
 import { WizardStepLayout } from "./WizardStepLayout";
 import { WizardStepAgents } from "./WizardStepAgents";
+import {
+  WizardStepParallel,
+  emptyParallelSlot,
+  parallelDraftsValid,
+} from "./WizardStepParallel";
+import type { ParallelSlotDraft } from "./WizardStepParallel";
 import type {
   RecentWorkspace,
   WorkspacePreset,
@@ -15,6 +21,8 @@ const STEPS = [
   { step: 2, title: "Layout" },
   { step: 3, title: "Agents" },
 ] as const;
+
+export type WizardMode = "standard" | "parallel";
 
 export interface WorkspaceSetupWizardProps {
   tabId?: string;
@@ -31,6 +39,7 @@ export function WorkspaceSetupWizard({
   const loadWizardData = useTerminalStore((s) => s.loadWizardData);
   const launchCustomWorkspace = useTerminalStore((s) => s.launchCustomWorkspace);
   const launchWorkspaceForTab = useTerminalStore((s) => s.launchWorkspaceForTab);
+  const launchParallelWorkspace = useTerminalStore((s) => s.launchParallelWorkspace);
   const saveWorkspacePreset = useTerminalStore((s) => s.saveWorkspacePreset);
   const recentWorkspaces = useTerminalStore((s) => s.recentWorkspaces);
   const workspacePresets = useTerminalStore((s) => s.workspacePresets);
@@ -45,6 +54,14 @@ export function WorkspaceSetupWizard({
   const [commands, setCommands] = useState<string[]>([]);
   const [saveAsPreset, setSaveAsPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
+  // Parallel mode state (replaces the fleet spawn sheet)
+  const [mode, setMode] = useState<WizardMode>("standard");
+  const [repoPath, setRepoPath] = useState("");
+  const [baseRef, setBaseRef] = useState("");
+  const [sharedPrompt, setSharedPrompt] = useState("");
+  const [slots, setSlots] = useState<ParallelSlotDraft[]>([emptyParallelSlot(), emptyParallelSlot()]);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const setStep = (newStep: 1 | 2 | 3) => {
     setStepState(newStep);
@@ -127,7 +144,52 @@ export function WorkspaceSetupWizard({
     }
   };
 
+  // Parallel launch: fleet IPC in the daemon, then one workspace tab gridding
+  // every successful slot (the old fleet sheet's per-slot tabs are gone).
+  const handleParallelLaunch = async () => {
+    const problem = parallelDraftsValid(slots, sharedPrompt);
+    if (problem) {
+      setLaunchError(problem);
+      return;
+    }
+    if (!repoPath) {
+      setLaunchError("Pick a repository.");
+      return;
+    }
+    setLaunchError(null);
+    setLaunching(true);
+    try {
+      const outcome = await launchParallelWorkspace(
+        tabId ?? useTerminalStore.getState().createWizardTab(),
+        {
+          repoPath,
+          baseRef: baseRef.trim() || undefined,
+          sharedPrompt: sharedPrompt.trim() || undefined,
+          slots: slots.map((slot) => ({
+            name: null,
+            agent: slot.agentId && slot.agentId !== "generic" ? slot.agentId : null,
+            command: slot.agentId === "generic" ? slot.command.trim() : null,
+            prompt: slot.prompt.trim() || null,
+          })),
+        },
+        { title: name.trim() || undefined },
+      );
+      if (!outcome.ok) {
+        setLaunchError(outcome.errors.join(" · "));
+        return;
+      }
+      if (!tabId) closeSetupWizard();
+    } catch (e) {
+      setLaunchError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   const handleLaunch = async () => {
+    if (mode === "parallel") {
+      return handleParallelLaunch();
+    }
     if (saveAsPreset) {
       const finalPresetName =
         presetName.trim() || name.trim() || "Custom Preset";
@@ -219,15 +281,41 @@ export function WorkspaceSetupWizard({
         {/* Wizard Main Step Content */}
         <div className="wizard-step-body">
           {step === 1 && (
-            <WizardStepStart
-              name={name}
-              setName={setName}
-              shell={shell}
-              setShell={setShell}
-            />
+            <>
+              <div className="wizard-mode-toggle" role="radiogroup" aria-label="Workspace mode">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "standard"}
+                  data-testid="wizard-mode-standard"
+                  className={`wizard-mode-btn ${mode === "standard" ? "active" : ""}`}
+                  onClick={() => setMode("standard")}
+                >
+                  <Terminal size={14} />
+                  <span>Standard terminals</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "parallel"}
+                  data-testid="wizard-mode-parallel"
+                  className={`wizard-mode-btn ${mode === "parallel" ? "active" : ""}`}
+                  onClick={() => setMode("parallel")}
+                >
+                  <Bot size={14} />
+                  <span>Parallel agents</span>
+                </button>
+              </div>
+              <WizardStepStart
+                name={name}
+                setName={setName}
+                shell={shell}
+                setShell={setShell}
+              />
+            </>
           )}
 
-          {step === 2 && (
+          {step === 2 && mode === "standard" && (
             <WizardStepLayout
               cwd={cwd}
               setCwd={setCwd}
@@ -244,7 +332,22 @@ export function WorkspaceSetupWizard({
             />
           )}
 
-          {step === 3 && (
+          {step === 2 && mode === "parallel" && (
+            <WizardStepParallel
+              repoPath={repoPath}
+              setRepoPath={setRepoPath}
+              baseRef={baseRef}
+              setBaseRef={setBaseRef}
+              sharedPrompt={sharedPrompt}
+              setSharedPrompt={setSharedPrompt}
+              slots={slots}
+              setSlots={setSlots}
+              phase="edit"
+              launchError={launchError}
+            />
+          )}
+
+          {step === 3 && mode === "standard" && (
             <WizardStepAgents
               agentPersona={agentPersona}
               setAgentPersona={setAgentPersona}
@@ -255,6 +358,21 @@ export function WorkspaceSetupWizard({
               setSaveAsPreset={setSaveAsPreset}
               presetName={presetName}
               setPresetName={setPresetName}
+            />
+          )}
+
+          {step === 3 && mode === "parallel" && (
+            <WizardStepParallel
+              repoPath={repoPath}
+              setRepoPath={setRepoPath}
+              baseRef={baseRef}
+              setBaseRef={setBaseRef}
+              sharedPrompt={sharedPrompt}
+              setSharedPrompt={setSharedPrompt}
+              slots={slots}
+              setSlots={setSlots}
+              phase="confirm"
+              launchError={launchError}
             />
           )}
         </div>
@@ -296,7 +414,14 @@ export function WorkspaceSetupWizard({
                 aria-label="Next step"
               >
                 <span>
-                  Next: {step === 1 ? "Layout" : "Agents"}
+                  Next:{" "}
+                  {mode === "parallel"
+                    ? step === 1
+                      ? "Agents"
+                      : "Review"
+                    : step === 1
+                      ? "Layout"
+                      : "Agents"}
                 </span>
                 <ArrowRight size={15} />
               </button>
@@ -305,10 +430,17 @@ export function WorkspaceSetupWizard({
                 type="button"
                 className="wizard-nav-btn wizard-btn-launch"
                 onClick={handleLaunch}
-                aria-label="Launch Workspace"
+                disabled={launching}
+                aria-label={mode === "parallel" ? "Launch Parallel Workspace" : "Launch Workspace"}
               >
                 <Play size={15} />
-                <span>Launch Workspace</span>
+                <span>
+                  {launching
+                    ? "Launching…"
+                    : mode === "parallel"
+                      ? "Launch Parallel Workspace"
+                      : "Launch Workspace"}
+                </span>
               </button>
             )}
           </div>

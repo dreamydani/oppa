@@ -10,7 +10,6 @@ import { PaneSplit } from "./components/PaneSplit";
 import { StatusBar } from "./components/layout/StatusBar";
 import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { WorktreeCreateModal } from "./components/worktree/WorktreeCreateModal";
-import { FleetSpawnSheet } from "./components/worktree/FleetSpawnSheet";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
 // Lazy: the Monaco chunk (~MBs) should load only when the editor mode is
@@ -462,7 +461,6 @@ function App() {
       {showStatusBar && <StatusBar />}
       <WorkspaceLauncherModal />
       <WorktreeCreateModal />
-      <FleetSpawnSheet />
       {/* Extension consent + notification overlays are always mounted so they
           work from any mode/tab (the host pushes events app-wide). */}
       <ExtensionConsentModal />

@@ -117,8 +117,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
-  const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
-  const repos = useTerminalStore((s) => s.repos);
+  const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const closePane = useTerminalStore((s) => s.closePane);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const movePane = useTerminalStore((s) => s.movePane);
@@ -352,18 +351,12 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     [path, splitPane],
   );
 
-  // New branch…: seed the fleet sheet from this pane's owning repo; when the
-  // cwd maps to no registered repo the sheet opens unprefilled and the user
-  // picks there.
+  // New branch…: opens the worktree create modal; the user picks repo/name
+  // there (prefill lands with the workspace-card wiring).
   const splitNewBranch = useCallback(() => {
     setSplitChooserDir(null);
-    const repo = resolveRepoForCwd(session?.cwd, repos);
-    if (repo) {
-      openFleetSheet({ repoPath: repo.path, count: 1 });
-    } else {
-      openFleetSheet();
-    }
-  }, [openFleetSheet, repos, session?.cwd]);
+    openWorktreeCreate();
+  }, [openWorktreeCreate]);
 
   return (
     <div className="terminal-pane-header">

@@ -746,7 +746,7 @@ describe("TerminalPaneHeader", () => {
       const splitSpy = vi
         .spyOn(useTerminalStore.getState(), "splitPane")
         .mockResolvedValue(undefined);
-      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[0]} />);
 
       fireEvent.click(screen.getByTitle("Split Down Options"));
@@ -754,11 +754,11 @@ describe("TerminalPaneHeader", () => {
 
       expect(splitSpy).toHaveBeenCalledTimes(1);
       expect(splitSpy).toHaveBeenCalledWith("v", [0]);
-      expect(openSheetSpy).not.toHaveBeenCalled();
+      expect(openModalSpy).not.toHaveBeenCalled();
       expect(screen.queryByText("Same directory")).toBeNull();
     });
 
-    it("choosing New branch… opens the fleet sheet prefilled with the resolved repo and count=1 without splitting", async () => {
+    it("choosing New branch… opens the worktree create modal without splitting", async () => {
       useTerminalStore.setState({
         sessions: {
           s1: {
@@ -778,19 +778,18 @@ describe("TerminalPaneHeader", () => {
       const splitSpy = vi
         .spyOn(useTerminalStore.getState(), "splitPane")
         .mockResolvedValue(undefined);
-      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
       fireEvent.click(screen.getByTitle("Split Right Options"));
       fireEvent.click(screen.getByText("New branch…"));
 
-      expect(openSheetSpy).toHaveBeenCalledTimes(1);
-      expect(openSheetSpy).toHaveBeenCalledWith({ repoPath: "D:/repos/backend", count: 1 });
+      expect(openModalSpy).toHaveBeenCalledTimes(1);
       expect(splitSpy).not.toHaveBeenCalled();
       expect(screen.queryByText("New branch…")).toBeNull();
     });
 
-    it("choosing New branch… without a resolvable repo opens the sheet unprefilled", () => {
+    it("choosing New branch… without a resolvable repo still opens the modal", () => {
       useTerminalStore.setState({
         sessions: {
           s1: {
@@ -804,21 +803,20 @@ describe("TerminalPaneHeader", () => {
         },
         repos: [repoRecord()],
       });
-      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
       fireEvent.click(screen.getByTitle("Split Right Options"));
       fireEvent.click(screen.getByText("New branch…"));
 
-      expect(openSheetSpy).toHaveBeenCalledTimes(1);
-      expect(openSheetSpy).toHaveBeenCalledWith();
+      expect(openModalSpy).toHaveBeenCalledTimes(1);
     });
 
     it("closes the chooser on Escape without side effects", () => {
       const splitSpy = vi
         .spyOn(useTerminalStore.getState(), "splitPane")
         .mockResolvedValue(undefined);
-      const openSheetSpy = vi.spyOn(useTerminalStore.getState(), "openFleetSheet");
+      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
       fireEvent.click(screen.getByTitle("Split Right Options"));
@@ -828,7 +826,7 @@ describe("TerminalPaneHeader", () => {
 
       expect(screen.queryByText("Same directory")).toBeNull();
       expect(splitSpy).not.toHaveBeenCalled();
-      expect(openSheetSpy).not.toHaveBeenCalled();
+      expect(openModalSpy).not.toHaveBeenCalled();
     });
 
     it("closes the chooser on outside click", () => {

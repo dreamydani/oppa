@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Sparkles, GitBranch, Layers } from "lucide-react";
+import { Sparkles, GitBranch } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import {
@@ -38,7 +38,6 @@ export function LeftSidebar(): React.ReactElement {
   const leftSidebarView = useTerminalStore((s) => s.leftSidebarView);
   const setLeftSidebarView = useTerminalStore((s) => s.setLeftSidebarView);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
-  const openFleetSheet = useTerminalStore((s) => s.openFleetSheet);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -201,15 +200,6 @@ export function LeftSidebar(): React.ReactElement {
           </div>
           {leftSidebarView === "worktrees" ? (
             <>
-              <button
-                type="button"
-                className="sidebar-icon-btn"
-                title="Spawn fleet"
-                aria-label="Spawn fleet"
-                onClick={() => openFleetSheet()}
-              >
-                <Layers size={14} />
-              </button>
               <button
                 type="button"
                 className="sidebar-icon-btn"
