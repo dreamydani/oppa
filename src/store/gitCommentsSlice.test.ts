@@ -19,6 +19,7 @@ vi.mock("../lib/pty/transport", () => ({
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
   onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
   requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),

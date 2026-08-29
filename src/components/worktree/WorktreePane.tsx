@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { ExternalLink, GitBranch, GitMerge, GitPullRequest, MoreHorizontal } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, GitPullRequest, MoreHorizontal, Send } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
 import type { MergeModeInput } from "../../lib/pty/transport";
 import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { AgentStatusPill } from "../agent/AgentStatusPill";
+import { AgentPromptBar } from "../agent/AgentPromptBar";
 import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
 import {
   consumeAutoStatusOnFinish,
@@ -73,9 +75,13 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const purgeWorktree = useTerminalStore((s) => s.purgeWorktree);
   const mergeWorktreeToBase = useTerminalStore((s) => s.mergeWorktreeToBase);
   const createTab = useTerminalStore((s) => s.createTab);
+  const sendPromptToSession = useTerminalStore((s) => s.sendPromptToSession);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const sessions = useTerminalStore((s) => s.sessions);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
   const tabs = useTerminalStore((s) => s.tabs);
   const selectTab = useTerminalStore((s) => s.selectTab);
 
@@ -88,6 +94,8 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const [mergeKind, setMergeKind] = useState<MergeModeInput>("squash");
   const [actionError, setActionError] = useState<string | null>(null);
   const [finishByCardId, setFinishByCardId] = useState<Record<string, FinishCardState>>({});
+  // Send-target mode: the session currently receiving a prompt from the card.
+  const [promptTargetId, setPromptTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -132,10 +140,12 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
 
   // F11 finished state per card: retired cards never count as finished.
   const finishedByWorktreeId = useMemo(() => {
+    const statusBySessionId = useTerminalStore.getState().statusBySessionId;
     const finished: Record<string, boolean> = {};
     for (const { record } of worktrees) {
       finished[record.id] =
-        !record.retired && selectWorktreeFinished({ sessions, workingBySessionId }, record.id);
+        !record.retired &&
+        selectWorktreeFinished({ sessions, workingBySessionId, statusBySessionId }, record.id);
     }
     return finished;
   }, [worktrees, sessions, workingBySessionId]);
@@ -159,6 +169,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   }, [finishedByWorktreeId, worktrees, setWorktreeStatus]);
 
   const openLinkedTerminal = (sessionId: string) => {
+    markAgentStatusSeen(sessionId);
     const tab = tabs.find((t) => findLeafPath(t.layout, sessionId) !== null);
     if (tab) selectTab(tab.id);
   };
@@ -418,28 +429,70 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                       <div className="worktree-terminals-list">
                         {linked.map((session) => {
                           const isWorking = workingBySessionId[session.id] ?? false;
+                          const agentEntry = statusBySessionId[session.id];
+                          const unread = unreadBySessionId[session.id] ?? false;
+                          const targetable =
+                            session.status !== "exited" && session.status !== "error";
                           return (
-                            <button
+                            <div
                               key={session.id}
-                              type="button"
-                              className="worktree-terminal-row"
-                              title={`Switch to ${sessionDisplayTitle(session)}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openLinkedTerminal(session.id);
-                              }}
+                              className={`worktree-terminal-entry${promptTargetId === session.id ? " targeting" : ""}`}
                             >
-                              <span
-                                className={`worktree-terminal-dot${isWorking ? " working" : ""}`}
-                                aria-hidden="true"
-                              />
-                              <span className="worktree-terminal-title">
-                                {sessionDisplayTitle(session)}
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                className="worktree-terminal-row"
+                                title={`Switch to ${sessionDisplayTitle(session)}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openLinkedTerminal(session.id);
+                                }}
+                              >
+                                {agentEntry ? (
+                                  <AgentStatusPill entry={agentEntry} unread={unread} />
+                                ) : (
+                                  <span
+                                    className={`worktree-terminal-dot${isWorking ? " working" : ""}`}
+                                    aria-hidden="true"
+                                  />
+                                )}
+                                <span className="worktree-terminal-title">
+                                  {sessionDisplayTitle(session)}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="worktree-terminal-target-btn"
+                                aria-label={`Prompt ${sessionDisplayTitle(session)}`}
+                                aria-pressed={promptTargetId === session.id}
+                                disabled={!targetable}
+                                title={
+                                  targetable
+                                    ? "Send a prompt to this agent"
+                                    : "Exited sessions cannot be prompted"
+                                }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPromptTargetId((prev) =>
+                                    prev === session.id ? null : session.id,
+                                  );
+                                }}
+                              >
+                                <Send size={11} />
+                              </button>
+                            </div>
                           );
                         })}
                       </div>
+                      {promptTargetId && sessions[promptTargetId] && (
+                        <AgentPromptBar
+                          targetTitle={sessionDisplayTitle(sessions[promptTargetId])}
+                          onSend={async (prompt) => {
+                            await sendPromptToSession(promptTargetId, prompt);
+                            setPromptTargetId(null);
+                          }}
+                          onCancel={() => setPromptTargetId(null)}
+                        />
+                      )}
                     </div>
                   )}
                 </div>

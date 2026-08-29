@@ -55,6 +55,7 @@ vi.mock("../../lib/pty/transport", () => ({
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),

@@ -38,6 +38,7 @@ vi.mock("../../lib/pty/transport", () => ({
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -214,6 +215,170 @@ describe("WorktreePane", () => {
     expect(screen.getByText(/no workspaces yet/i)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /new worktree/i }));
     expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
+  });
+
+  it("hook-classified rows render the rich pill instead of the legacy dot", () => {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 2 },
+      sessions: {
+        "hooked-1": {
+          id: "hooked-1",
+          title: "hooked",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+        "plain-1": {
+          id: "plain-1",
+          title: "plain",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+      statusBySessionId: {
+        "hooked-1": {
+          state: "blocked",
+          interactive_prompt: "Allow write access?",
+          state_started_at_ms: 1,
+          updated_at_ms: 2,
+          origin: "hook",
+        },
+      },
+      unreadBySessionId: { "hooked-1": true },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    const hookedRow = screen.getByTitle("Switch to hooked").closest("button")!;
+    // Hook truth wins: pill with the amber blocked state + unread attention dot
+    const pill = hookedRow.querySelector<HTMLElement>(".agent-status-pill")!;
+    expect(pill.dataset.state).toBe("blocked");
+    expect(hookedRow.querySelector(".agent-status-unread-dot")).not.toBeNull();
+    expect(hookedRow.querySelector(".worktree-terminal-dot")).toBeNull();
+
+    // Hookless shell keeps the legacy dot and renders no pill
+    const plainRow = screen.getByTitle("Switch to plain").closest("button")!;
+    expect(plainRow.querySelector(".agent-status-pill")).toBeNull();
+    expect(plainRow.querySelector(".worktree-terminal-dot")).not.toBeNull();
+  });
+
+  it("send-target flow: target a live row, submit, and ptyWrite receives prompt+submit", async () => {
+    const ptyWriteMock = vi.mocked(transport.ptyWrite);
+    ptyWriteMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 1 },
+      sessions: {
+        "live-1": {
+          id: "live-1",
+          title: "live one",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt live one" }));
+    const bar = screen.getByRole("group", { name: /prompt live one/i });
+    expect(bar).toBeDefined();
+
+    const input = bar.querySelector("textarea")!;
+    fireEvent.change(input, { target: { value: "fix the failing login test" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    await vi.waitFor(() => {
+      expect(ptyWriteMock).toHaveBeenNthCalledWith(1, "live-1", "fix the failing login test");
+      expect(ptyWriteMock).toHaveBeenNthCalledWith(2, "live-1", "\r");
+    });
+    // Prompt delivered: the bar closes after a successful send.
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("group", { name: /prompt live one/i })).toBeNull();
+    });
+  });
+
+  it("store-level targeting guard refuses exited/error sessions before any write", async () => {
+    const ptyWriteMock = vi.mocked(transport.ptyWrite);
+    ptyWriteMock.mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      sessions: {
+        "dead-1": {
+          id: "dead-1",
+          title: "dead one",
+          status: "exited",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+        },
+        "broken-1": {
+          id: "broken-1",
+          title: "broken one",
+          status: "error",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("dead-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("broken-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    await expect(
+      useTerminalStore.getState().sendPromptToSession("missing-1", "hello"),
+    ).rejects.toThrow(/not live/);
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+  });
+
+  it("Escape cancels send-target mode without writing to the session", () => {
+    useTerminalStore.setState({
+      worktrees: [
+        {
+          record: record({ id: "demo::C:/ws/feat-a", name: "feat-a", workspace_status: "in-progress" }),
+          missing_on_disk: false,
+        },
+      ],
+      worktreeLiveSessions: { "demo::C:/ws/feat-a": 1 },
+      sessions: {
+        "live-1": {
+          id: "live-1",
+          title: "live one",
+          status: "running",
+          cwd: "C:/ws/feat-a",
+          cols: 80,
+          rows: 24,
+          worktreeId: "demo::C:/ws/feat-a",
+        },
+      },
+    } as unknown as Record<string, unknown>);
+
+    render(<WorktreePane />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt live one" }));
+    expect(screen.getByRole("group", { name: /prompt live one/i })).toBeDefined();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: /prompt live one/i })).toBeNull();
   });
 
   it("shows PR badge with number when linked_pr_url exists and hides when missing", () => {
@@ -834,6 +999,8 @@ describe("WorktreePane finished detection", () => {
       prStatusByWorktreeId: {},
       sessions,
       workingBySessionId,
+      statusBySessionId: {},
+      unreadBySessionId: {},
       tabs: [],
       activeTabId: "",
     } as unknown as Record<string, unknown>);
@@ -864,6 +1031,47 @@ describe("WorktreePane finished detection", () => {
     // Exited sessions never count toward the linked set.
     useTerminalStore.setState({ sessions: { gone: boundSession("gone", { status: "exited" }) } });
     expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+  });
+
+  it("hook truth wins: reported done finishes even when the quietness dot disagrees", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: true });
+    // Shell still reports working (fresh output), but the agent hook said done.
+    useTerminalStore.setState({
+      statusBySessionId: {
+        s1: { state: "done", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+      },
+    } as unknown as Record<string, unknown>);
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(true);
+  });
+
+  it("blocked/waiting keep the worktree active regardless of the quietness dot", () => {
+    for (const state of ["blocked", "waiting", "working"] as const) {
+      seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: false });
+      useTerminalStore.setState({
+        statusBySessionId: {
+          s1: { state, state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+        },
+      } as unknown as Record<string, unknown>);
+      expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+    }
+  });
+
+  it("mixed fleet: hook-busy agent blocks finish even when a peer reported done", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1"), s2: boundSession("s2") }, { s1: false, s2: false });
+    useTerminalStore.setState({
+      statusBySessionId: {
+        s1: { state: "done", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+        s2: { state: "waiting", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+      },
+    } as unknown as Record<string, unknown>);
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+  });
+
+  it("hookless shells still fall back to the quietness heuristic", () => {
+    seedFinishedCard("todo", { s1: boundSession("s1") }, { s1: true });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(false);
+    useTerminalStore.setState({ workingBySessionId: { s1: false } });
+    expect(selectWorktreeFinished(useTerminalStore.getState(), WID)).toBe(true);
   });
 
   it("shows the finished chip only while every linked session is idle", () => {

@@ -48,6 +48,9 @@ pub struct CreateOrAttachResult {
     // defaulted both ways so old daemons/clients keep interoperating
     #[serde(default)]
     pub working: bool,
+    // Additive MVP-status field: last hook-classified truth for instant pills
+    #[serde(default)]
+    pub agent_status: Option<crate::agents::status::AgentStatusEntry>,
 }
 
 // Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
@@ -350,6 +353,12 @@ pub enum DaemonEvent {
         session_id: String,
         working: bool,
     },
+    // Hook-derived rich truth; edge-only like SessionWorking, carrying the
+    // full classified entry so panes/pills never infer state themselves.
+    AgentStatusChanged {
+        pane_key: String,
+        entry: crate::agents::status::AgentStatusEntry,
+    },
     // Any successful source-control mutation anywhere; payload-less nudge to refresh panels
     GitChanged,
 }
@@ -509,6 +518,7 @@ mod tests {
             resume_declined_reason: None,
             worktree_id: None,
             working: false,
+            agent_status: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -546,6 +556,7 @@ mod tests {
                 resume_declined_reason: None,
                 worktree_id: None,
                 working: true,
+                agent_status: None,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -1024,6 +1035,7 @@ mod tests {
             resume_declined_reason: None,
             worktree_id: None,
             working: false,
+            agent_status: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");

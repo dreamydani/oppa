@@ -9,7 +9,15 @@ use std::path::{Path, PathBuf};
 
 /// Appears in every command we install so re-runs replace only our entries.
 const MANAGED_MARKER: &str = "oppa-claude-hook";
-const HOOK_EVENTS: &[&str] = &["SessionStart", "Stop", "UserPromptSubmit"];
+const HOOK_EVENTS: &[&str] = &[
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Notification",
+    "Stop",
+];
 
 // Antigravity (agy) hooks live in ~/.gemini/config/hooks.json as a named
 // bundle — same mechanism Orca registers under "orca-status".
@@ -700,6 +708,27 @@ mod tests {
     }
 
     #[test]
+    fn claude_registrations_request_tool_and_permission_lifecycle_events() {
+        // Status-truth MVP: without these events the daemon can only ever see
+        // session boundaries — no tool activity, no permission questions.
+        for required in [
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "Notification",
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
+            assert!(
+                HOOK_EVENTS.contains(&required),
+                "{required} must be registered with Claude Code"
+            );
+        }
+        assert_eq!(HOOK_EVENTS.len(), 7, "no stray registrations");
+    }
+
+    #[test]
     fn uninstall_removes_only_our_entries() {
         let home = tempfile::tempdir().expect("home tmp");
         let app = tempfile::tempdir().expect("app tmp");
@@ -732,7 +761,6 @@ mod tests {
         uninstall(home.path()).expect("noop uninstall");
     }
 
-    #[test]
     #[test]
     fn gemini_qwen_cursor_grok_opencode_roundtrip() {
         let home = tempfile::tempdir().expect("home tmp");

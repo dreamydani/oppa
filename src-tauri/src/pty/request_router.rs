@@ -83,6 +83,7 @@ impl DaemonServer {
                         resume_declined_reason: None,
                         worktree_id: session.worktree_id().map(str::to_string),
                         working: session.working_state(),
+                        agent_status: session.agent_status(),
                     })
                 } else {
                     // Cold restore: consult the disk checkpoint for agent resume state
@@ -145,6 +146,10 @@ impl DaemonServer {
                                 resume_declined_reason: declined,
                                 worktree_id,
                                 working,
+                                // Cold boot may carry last-known state from disk
+                                agent_status: checkpoint
+                                    .as_ref()
+                                    .and_then(|snap| snap.agent_status.clone()),
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),

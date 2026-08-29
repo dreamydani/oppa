@@ -62,18 +62,33 @@ export function resetAutoStatusAppliedForTests(): void {
   autoStatusAppliedIds.clear();
 }
 
-// F11: finished = at least one linked live session and every one of them idle.
+// F11 v2: hook truth wins. A linked live session that reported `done` finishes
+// the worktree; working/blocked/waiting keeps it active. The quietness
+// heuristic applies only to hookless shells (no hook row for the session).
 export function selectWorktreeFinished(
-  state: Pick<TerminalState, "sessions" | "workingBySessionId">,
+  state: Pick<
+    TerminalState,
+    "sessions" | "workingBySessionId" | "statusBySessionId"
+  >,
   worktreeId: string,
 ): boolean {
   let linkedCount = 0;
+  let hookBusy = false;
+  let legacyBusy = false;
   for (const session of Object.values(state.sessions)) {
     if (session.worktreeId !== worktreeId || session.status === "exited") continue;
     linkedCount += 1;
-    if (state.workingBySessionId[session.id]) return false;
+    const entry = state.statusBySessionId[session.id];
+    if (entry) {
+      // Blocked/waiting are attention states, never finished; working likewise.
+      if (entry.state !== "done") hookBusy = true;
+    } else if (state.workingBySessionId[session.id]) {
+      legacyBusy = true;
+    }
   }
-  return linkedCount > 0;
+  if (linkedCount === 0) return false;
+  if (hookBusy) return false;
+  return !legacyBusy;
 }
 
 export interface BranchNode {

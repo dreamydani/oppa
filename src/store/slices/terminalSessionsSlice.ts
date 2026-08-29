@@ -6,6 +6,7 @@ import {
   ptyKill,
   ptyResize,
   ptyAck,
+  ptyWrite,
 } from "../../lib/pty/transport";
 import type { PtySpawnOptions } from "../../lib/pty/transport";
 import { substituteLeafId } from "../../lib/pane-manager/layout";
@@ -97,6 +98,7 @@ export interface SessionSlice {
   updateSessionCwd: (id: string, cwd: string) => void;
   renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
+  sendPromptToSession: (sessionId: string, prompt: string) => Promise<void>;
 }
 
 export function createSessionsSlice(
@@ -166,6 +168,10 @@ export function createSessionsSlice(
         // Attach result carries the daemon's current working/idle so dots are
         // correct immediately on warm reattach.
         const working = typeof res !== "string" ? (res.working ?? false) : false;
+        // Last hook-classified rich status rides the attach result so pills show
+        // truth instantly (e.g. a finished or blocked agent on cold reattach).
+        const agentStatus =
+          typeof res !== "string" ? (res.agent_status ?? undefined) : undefined;
 
         const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
@@ -205,6 +211,9 @@ export function createSessionsSlice(
               },
             },
             workingBySessionId: { ...state.workingBySessionId, [id]: working },
+            ...(agentStatus
+              ? { statusBySessionId: { ...state.statusBySessionId, [id]: agentStatus } }
+              : {}),
           };
         });
         return id;
@@ -353,6 +362,17 @@ export function createSessionsSlice(
           layout: activeTab ? activeTab.layout : topLayout,
         };
       });
+    },
+
+    // Send-target prompting (Orca parity): paste-style delivery reuses the
+    // initial-command write path — text first, then a submit keystroke.
+    sendPromptToSession: async (sessionId, prompt) => {
+      const session = get().sessions[sessionId];
+      if (!session || session.status === "exited" || session.status === "error") {
+        throw new Error(`session ${sessionId} is not live; targeting refused`);
+      }
+      await ptyWrite(sessionId, prompt);
+      await ptyWrite(sessionId, "\r");
     },
   };
 }

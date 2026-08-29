@@ -312,6 +312,9 @@ pub fn run() {
                     manager.set_working_state_callback(
                         pty::commands::session_working_forwarder(&app_handle),
                     );
+                    manager.set_agent_status_callback(pty::commands::agent_status_forwarder(
+                        &app_handle,
+                    ));
                     let _ = manager.get_client();
                 }
             });

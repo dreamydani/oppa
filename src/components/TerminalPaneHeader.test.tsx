@@ -37,6 +37,7 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
 }));
