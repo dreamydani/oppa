@@ -249,6 +249,103 @@ describe("WorkspaceList", () => {
     expect(screen.getByLabelText("Status: working")).toBeInTheDocument();
   });
 
+  it("shows a status dot on idle rows too", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "quiet pane" }) },
+    });
+
+    render(<WorkspaceList />);
+    expect(screen.getByLabelText("Status: idle")).toBeInTheDocument();
+  });
+
+  it("shows the collapse chevron on folder headers only when there are multiple sessions", () => {
+    const twoPaneLayout = {
+      type: "split",
+      dir: "v",
+      ratio: 0.5,
+      a: { type: "leaf", id: "s-1" },
+      b: { type: "leaf", id: "s-2" },
+    } as const;
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "multi",
+          layout: twoPaneLayout,
+          focusedPath: [0],
+        },
+        {
+          id: "tab-2",
+          title: "single",
+          layout: { type: "leaf", id: "s-3" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "one" }),
+        "s-2": session({ id: "s-2", title: "two" }),
+        "s-3": session({ id: "s-3", title: "three" }),
+      },
+    });
+
+    render(<WorkspaceList />);
+
+    const multiCard = screen.getByTestId("ws-card-tab-1");
+    expect(multiCard.querySelector(".ws-card-chevron")).not.toBeNull();
+    expect(multiCard.querySelector(".ws-card-header")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+
+    const singleCard = screen.getByTestId("ws-card-tab-2");
+    expect(singleCard.querySelector(".ws-card-chevron")).toBeNull();
+  });
+
+  it("pins a session to the top of its folder and unpins it back", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "first" }),
+        "s-2": session({ id: "s-2", title: "second" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const rowTitles = () =>
+      Array.from(container.querySelectorAll(".ws-row-title")).map((el) => el.textContent);
+    expect(rowTitles()).toEqual(["first", "second"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin second" }));
+    expect(rowTitles()).toEqual(["second", "first"]);
+    expect(screen.getByRole("button", { name: "Unpin second" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Unpin second" }));
+    expect(rowTitles()).toEqual(["first", "second"]);
+  });
+
   it("renders folder section headers for each workspace", () => {
     useTerminalStore.setState({
       tabs: [

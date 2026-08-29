@@ -6,7 +6,7 @@ import { findLeafPath, focus } from "../../lib/pane-manager/layout";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
 import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
-import { Folder, Sparkles } from "lucide-react";
+import { ChevronDown, Folder, Pin, Sparkles } from "lucide-react";
 import "./workspace-list.css";
 
 
@@ -43,6 +43,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   data,
   expanded,
   activeSessionId,
+  pinnedSessionIds,
   onToggleExpand,
   onSelect,
   onFocusRow,
@@ -51,10 +52,12 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onWorktreeAction,
   onSplitRow,
   onCloseRow,
+  onTogglePin,
 }: {
   data: WorkspaceCardData;
   expanded: boolean;
   activeSessionId: string | null;
+  pinnedSessionIds: ReadonlySet<string>;
   onToggleExpand: (tabId: string) => void;
   onSelect: (tabId: string) => void;
   onFocusRow: (sessionId: string) => void;
@@ -63,6 +66,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onWorktreeAction: () => void;
   onSplitRow: (sessionId: string) => void;
   onCloseRow: (sessionId: string) => void;
+  onTogglePin: (sessionId: string) => void;
 }) {
   const title = data.tab.isWizard
     ? data.tab.title || "New Workspace"
@@ -71,6 +75,17 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
   const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
   const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
+
+  // Pinned sessions float to the top of their folder; the rest keep order.
+  const sortedRows = useMemo(
+    () =>
+      [...data.rows].sort(
+        (a, b) =>
+          Number(pinnedSessionIds.has(b.sessionId)) -
+          Number(pinnedSessionIds.has(a.sessionId)),
+      ),
+    [data.rows, pinnedSessionIds],
+  );
 
   if (data.tab.isWizard) {
     return (
@@ -104,6 +119,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
         }}
         role="button"
         tabIndex={0}
+        aria-expanded={data.rows.length > 0 ? expanded : undefined}
         onKeyDown={(e) => e.key === "Enter" && onSelect(data.tab.id)}
       >
         <span className="ws-card-avatar">
@@ -112,6 +128,14 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
         <span className="ws-card-title" title={data.tab.workspaceKey ?? title}>
           {title}
         </span>
+        {data.rows.length > 1 && (
+          <span
+            className={`ws-card-chevron${expanded ? " expanded" : ""}`}
+            aria-hidden="true"
+          >
+            <ChevronDown size={13} />
+          </span>
+        )}
         <span className="ws-card-header-spacer" />
         <div className="ws-card-actions">
           {data.tab.workspaceKey && (
@@ -148,32 +172,53 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
           {data.rows.length === 0 && (
             <div className="ws-card-empty">No terminals in this workspace.</div>
           )}
-          {data.rows.map((row) => {
+          {sortedRows.map((row) => {
             const agentEntry = statusBySessionId[row.sessionId];
             const unread = unreadBySessionId[row.sessionId] ?? false;
             const isWorking = workingBySessionId[row.sessionId] ?? false;
             const isFocusedLeaf = data.isActive && row.sessionId === activeSessionId;
             const age = relativeAge(agentEntry?.state_started_at_ms);
-            const showDot = isFocusedLeaf || Boolean(agentEntry) || isWorking;
+            const isPinned = pinnedSessionIds.has(row.sessionId);
+            // State mapping: focused=blue, working=pulsing indigo, done=green,
+            // blocked=red, waiting=amber, idle=indigo, exited(stopped)=grey.
+            const state = agentEntry
+              ? agentEntry.state
+              : row.exited
+                ? "exited"
+                : isWorking
+                  ? "working"
+                  : "idle";
 
             return (
               <div
                 key={row.sessionId}
                 role="listitem"
-                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}`}
+                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isPinned ? " pinned" : ""}`}
                 onClick={() => {
                   markAgentStatusSeen(row.sessionId);
                   onFocusRow(row.sessionId);
                 }}
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
-                {showDot && (
+                {!isPinned && (
                   <span
-                    className={`ws-status-circle ${agentEntry ? agentEntry.state : "working"}${isFocusedLeaf ? " focused" : ""}${unread ? " unread" : ""}`}
-                    title={`Status: ${agentEntry?.state ?? "working"}`}
-                    aria-label={`Status: ${agentEntry?.state ?? "working"}`}
+                    className={`ws-status-circle ${state}${isFocusedLeaf ? " focused" : ""}${unread ? " unread" : ""}`}
+                    title={`Status: ${state}`}
+                    aria-label={`Status: ${state}`}
                   />
                 )}
+                <button
+                  type="button"
+                  className={`ws-row-pin-btn${isPinned ? " is-pinned" : ""}`}
+                  title={isPinned ? "Unpin session" : "Pin session to top"}
+                  aria-label={isPinned ? `Unpin ${row.title}` : `Pin ${row.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePin(row.sessionId);
+                  }}
+                >
+                  <Pin size={11} />
+                </button>
                 <span className="ws-row-title">{row.title}</span>
                 {age && <span className="ws-row-time">{age}</span>}
                 <div className="ws-row-actions">
@@ -210,7 +255,6 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 )}
               </div>
             );
-
           })}
         </div>
       )}
@@ -253,6 +297,17 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
       const isDefaultExpanded = tabId === useTerminalStore.getState().activeTabId;
       const currentlyExpanded = prev[tabId] === undefined ? isDefaultExpanded : !prev[tabId];
       return { ...prev, [tabId]: !currentlyExpanded };
+    });
+  };
+
+  // Pinned sessions float to the top of their folder (session-scoped).
+  const [pinnedSessionIds, setPinnedSessionIds] = useState<ReadonlySet<string>>(new Set());
+  const togglePin = (sessionId: string) => {
+    setPinnedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
     });
   };
 
@@ -354,6 +409,7 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
             data={data}
             expanded={expanded}
             activeSessionId={activeSessionId}
+            pinnedSessionIds={pinnedSessionIds}
             onToggleExpand={toggleExpand}
             onSelect={(tabId) => selectTab(tabId)}
             onFocusRow={(sessionId) => {
@@ -398,10 +454,10 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
                 void closePane(path);
               }
             }}
+            onTogglePin={togglePin}
           />
         );
       })}
     </div>
   );
 }
-

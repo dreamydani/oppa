@@ -71,6 +71,21 @@
   flex: 1;
 }
 
+/* Collapse/expand indicator for folders holding multiple sessions. */
+.ws-card-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #737373);
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease, color 0.12s ease;
+}
+
+.ws-card-chevron.expanded {
+  transform: rotate(0deg);
+}
+
 .ws-card-actions {
   display: flex;
   align-items: center;
@@ -173,6 +188,44 @@
   left: 8px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+/* Pin button occupies the gutter; hover swaps it in for the status dot. */
+.ws-row-pin-btn {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.ws-row:hover .ws-row-pin-btn {
+  opacity: 1;
+}
+
+.ws-row:hover .ws-status-circle {
+  opacity: 0;
+}
+
+.ws-row-pin-btn:hover {
+  color: var(--text-primary);
+}
+
+.ws-row-pin-btn.is-pinned {
+  opacity: 1;
+  color: var(--accent-blue, #58a6ff);
 }
 
 .ws-status-circle {
