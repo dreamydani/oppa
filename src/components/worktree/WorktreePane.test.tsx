@@ -592,6 +592,33 @@ describe("WorktreePane linked terminals", () => {
     expect(card.querySelector(".worktree-terminals")).toBeNull();
     expect(card.querySelectorAll(".worktree-terminal-row").length).toBe(0);
   });
+
+  it("interrupt writes Ctrl+C once to the linked live session", async () => {
+    seedStore({
+      "s-fix": session({ id: "s-fix", title: "runaway", worktreeId: WID }),
+    });
+    render(<WorktreePane />);
+
+    const btn = screen.getByRole("button", { name: /interrupt runaway/i });
+    fireEvent.click(btn);
+
+    await act(async () => {});
+    const calls = vi.mocked(transport.ptyWrite).mock.calls;
+    expect(calls.filter(([id]) => id === "s-fix")).toEqual([["s-fix", "\x03"]]);
+  });
+
+  it("interrupt is disabled for exited sessions and writes nothing", () => {
+    seedStore({
+      gone: session({ id: "gone", title: "done-deal", status: "exited", worktreeId: WID }),
+    });
+    vi.mocked(transport.ptyWrite).mockClear();
+    render(<WorktreePane />);
+
+    // Exited sessions are excluded from the linked list entirely, so no
+    // interrupt control can even be reached for them.
+    expect(screen.queryByRole("button", { name: /interrupt done-deal/i })).toBeNull();
+    expect(vi.mocked(transport.ptyWrite).mock.calls).toHaveLength(0);
+  });
 });
 
 describe("WorktreePane finish chain", () => {

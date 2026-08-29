@@ -99,6 +99,7 @@ export interface SessionSlice {
   renameSession: (id: string, title: string) => void;
   substituteSessionId: (from: string, to: string) => void;
   sendPromptToSession: (sessionId: string, prompt: string) => Promise<void>;
+  interruptSession: (sessionId: string) => Promise<void>;
 }
 
 export function createSessionsSlice(
@@ -373,6 +374,15 @@ export function createSessionsSlice(
       }
       await ptyWrite(sessionId, prompt);
       await ptyWrite(sessionId, "\r");
+    },
+
+    // Single Ctrl+C, exactly what a user would type into the pane.
+    interruptSession: async (sessionId) => {
+      const session = get().sessions[sessionId];
+      if (!session || session.status === "exited" || session.status === "error") {
+        throw new Error(`session ${sessionId} is not live; interrupt refused`);
+      }
+      await ptyWrite(sessionId, "\x03");
     },
   };
 }

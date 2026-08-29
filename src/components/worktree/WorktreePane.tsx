@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { ExternalLink, GitBranch, GitMerge, GitPullRequest, MoreHorizontal, Send } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, GitPullRequest, MoreHorizontal, Send, Square } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { WorktreeRecord, WorktreeStatus, WorktreeListEntry } from "../../lib/pty/transport";
@@ -76,6 +76,7 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
   const mergeWorktreeToBase = useTerminalStore((s) => s.mergeWorktreeToBase);
   const createTab = useTerminalStore((s) => s.createTab);
   const sendPromptToSession = useTerminalStore((s) => s.sendPromptToSession);
+  const interruptSession = useTerminalStore((s) => s.interruptSession);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const sessions = useTerminalStore((s) => s.sessions);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
@@ -477,6 +478,23 @@ export function WorktreePane({ filter = "" }: { filter?: string }): React.ReactE
                                 }}
                               >
                                 <Send size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                className="worktree-terminal-target-btn danger"
+                                aria-label={`Interrupt ${sessionDisplayTitle(session)}`}
+                                disabled={!targetable}
+                                title={
+                                  targetable
+                                    ? "Send Ctrl+C to this agent"
+                                    : "Exited sessions cannot be interrupted"
+                                }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void interruptSession(session.id).catch(() => {});
+                                }}
+                              >
+                                <Square size={11} />
                               </button>
                             </div>
                           );

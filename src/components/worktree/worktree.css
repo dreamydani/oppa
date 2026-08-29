@@ -275,6 +275,11 @@
   opacity: 0.25;
 }
 
+/* Interrupt tint: stopping is a destructive-leaning action. */
+.worktree-terminal-target-btn.danger:hover:not(:disabled) {
+  color: var(--destructive, #e05252);
+}
+
 .worktree-pr-badge {
   display: inline-flex;
   align-items: center;
