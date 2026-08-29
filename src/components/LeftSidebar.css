@@ -1,13 +1,15 @@
 /* ==========================================================================
-   Left Sidebar - Pro-grade Devtool Navigation & Workspace Tree
+   Left Sidebar - Borderless, Linear/Cursor-style navigation panel.
+   No boxes or borders on any child component; hierarchy comes from type,
+   tint tokens, and the accent-bar active state only.
    ========================================================================== */
 
 .left-sidebar {
   background-color: var(--bg-sidebar, #171717);
-  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.07));
-  border-radius: 10px;
-  margin: 4px 0 4px 4px;
-  height: calc(100% - 8px);
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  height: 100%;
   /* Width lives on a custom property (set inline) for the drag-resize handle;
      open/close motion is transform-driven by sideDrawer.ts, never layout. */
   width: var(--sidebar-w, 240px);
@@ -16,7 +18,7 @@
   position: relative;
   flex-shrink: 0;
   user-select: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
   overflow: hidden;
   z-index: 15;
 }
@@ -36,18 +38,11 @@
   min-height: 0;
 }
 
-[data-theme="light"] .left-sidebar {
-  background-color: #f8f8f7;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-
 /* --------------------------------------------------------------------------
-   Header / Search Area (Completely borderless, flat, no box)
+   Header / Search Area (fully borderless; hint hides on focus or typing)
    -------------------------------------------------------------------------- */
 .left-sidebar-top {
-  padding: 10px 12px 6px 12px;
+  padding: 12px 12px 4px 12px;
   background: transparent;
   flex-shrink: 0;
 }
@@ -55,7 +50,7 @@
 .sidebar-search-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sidebar-search-box {
@@ -91,7 +86,22 @@
 }
 
 .sidebar-search-input::placeholder {
-  color: var(--text-muted, #737373);
+  color: var(--text-faint, #737373);
+}
+
+/* Shortcut hint: muted text-only, disappears the moment the field is used. */
+.sidebar-search-hint {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-faint, #737373);
+  letter-spacing: 0.02em;
+  user-select: none;
+  pointer-events: none;
+}
+
+.sidebar-search-box:focus-within .sidebar-search-hint {
+  display: none;
 }
 
 .sidebar-search-clear-btn {
@@ -100,7 +110,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -121,7 +131,7 @@
   color: var(--text-muted, #808080);
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -132,13 +142,8 @@
 }
 
 .sidebar-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--tint-hover, rgba(255, 255, 255, 0.06));
   color: var(--text-primary, #ffffff);
-}
-
-[data-theme="light"] .sidebar-icon-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #18181b;
 }
 
 /* --------------------------------------------------------------------------
@@ -148,7 +153,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 8px 8px 8px;
+  padding: 2px 8px 8px 8px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -159,36 +164,28 @@
 }
 
 .left-sidebar-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border-divider, rgba(255, 255, 255, 0.08));
   border-radius: 9999px;
   transition: background 0.15s ease;
 }
 
 .left-sidebar-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-[data-theme="light"] .left-sidebar-body::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--border-strong, rgba(255, 255, 255, 0.18));
 }
 
 /* --------------------------------------------------------------------------
-   Footer Area (Fixed Bottom Utility Bar)
+   Footer Area (fixed bottom utility bar, no divider line)
    -------------------------------------------------------------------------- */
 .left-sidebar-footer {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-divider, rgba(255, 255, 255, 0.06));
+  padding: 10px 12px;
+  border-top: none;
   background: transparent;
   flex-shrink: 0;
   margin-top: auto;
-}
-
-[data-theme="light"] .left-sidebar-footer {
-  border-top-color: rgba(0, 0, 0, 0.08);
 }
 
 .sidebar-footer-status {
@@ -226,7 +223,7 @@
   color: var(--text-muted, #808080);
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -237,13 +234,8 @@
 }
 
 .sidebar-footer-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--tint-hover, rgba(255, 255, 255, 0.06));
   color: var(--text-primary, #ffffff);
-}
-
-[data-theme="light"] .sidebar-footer-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #18181b;
 }
 
 /* --------------------------------------------------------------------------
@@ -261,7 +253,7 @@
 
 .resize-handle-right:hover,
 .resize-handle-right:active {
-  background: rgba(88, 166, 255, 0.4);
+  background: var(--accent-blue, rgba(88, 166, 255, 0.4));
 }
 
 /* --------------------------------------------------------------------------
@@ -290,32 +282,23 @@
   margin-bottom: 8px;
 }
 
+/* Text-style at rest; tint only on hover — no box, no border. */
 .sidebar-empty-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
   border: none;
-  color: var(--text-primary);
+  color: var(--text-muted);
   padding: 5px 12px;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .sidebar-empty-btn:hover {
-  background: rgba(255, 255, 255, 0.10);
+  background: var(--tint-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary);
 }
-
-[data-theme="light"] .sidebar-empty-btn {
-  background: #ffffff;
-  color: #18181b;
-}
-
-[data-theme="light"] .sidebar-empty-btn:hover {
-  background: #f4f4f2;
-}
-
-

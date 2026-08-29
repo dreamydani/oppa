@@ -79,7 +79,7 @@ describe("WorkspaceList", () => {
     expect(screen.getByText("desktop lane")).toBeInTheDocument();
   });
 
-  it("shows a worktree badge on rows whose session is bound to a worktree", () => {
+  it("surfaces the worktree name and branch in the row tooltip", () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -118,7 +118,7 @@ describe("WorkspaceList", () => {
 
     render(<WorkspaceList />);
 
-    expect(screen.getByTitle("Branch perf/render")).toBeInTheDocument();
+    expect(screen.getByTitle("web-runtime-render · perf/render")).toBeInTheDocument();
   });
 
   it("collapses inactive workspaces and expands the active one", () => {
@@ -221,7 +221,7 @@ describe("WorkspaceList", () => {
     expect(screen.queryByText("web runtime render")).not.toBeInTheDocument();
   });
 
-  it("shows aggregate severity counts on the card header", () => {
+  it("shows a gutter status dot on rows whose session has an agent status", () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -246,7 +246,57 @@ describe("WorkspaceList", () => {
     });
 
     render(<WorkspaceList />);
-    expect(screen.getByText("1 working")).toBeInTheDocument();
+    expect(screen.getByLabelText("Status: working")).toBeInTheDocument();
+  });
+
+  it("renders folder section headers for each workspace", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "a" }) },
+    });
+
+    render(<WorkspaceList />);
+    const header = screen.getByText("oppa").closest(".ws-card-header");
+    expect(header?.querySelector(".ws-card-avatar")).not.toBeNull();
+  });
+
+  it("shows a relative age next to the row title from the agent status timestamp", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000_000_000);
+    const startedAt = Date.now() - 5 * 60_000;
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "agent run" }),
+      },
+      statusBySessionId: {
+        "s-1": {
+          state: "working",
+          state_started_at_ms: startedAt,
+          updated_at_ms: startedAt,
+          origin: "hook",
+        },
+      },
+    });
+
+    render(<WorkspaceList />);
+    expect(screen.getByText("5m")).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 
   it("applies is-active class to the currently focused session row in the active tab", () => {

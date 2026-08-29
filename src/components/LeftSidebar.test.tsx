@@ -290,6 +290,16 @@ describe("LeftSidebar", () => {
     expect(statusText?.textContent).toBe("2 live");
   });
 
+  it("shows the search shortcut hint only while the search box is empty", () => {
+    const { container } = render(<LeftSidebar />);
+    expect(container.querySelector(".sidebar-search-hint")).not.toBeNull();
+
+    const searchInput = screen.getByPlaceholderText(/search workspaces/i);
+    fireEvent.change(searchInput, { target: { value: "test" } });
+
+    expect(container.querySelector(".sidebar-search-hint")).toBeNull();
+  });
+
   it("focuses search input when Ctrl+K is pressed", () => {
     render(<LeftSidebar />);
     const searchInput = screen.getByPlaceholderText(/search workspaces/i);

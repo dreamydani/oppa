@@ -20,6 +20,9 @@ import "./LeftSidebar.css";
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 420;
 
+const isMacPlatform =
+  typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+
 export function LeftSidebar(): React.ReactElement {
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
@@ -39,8 +42,7 @@ export function LeftSidebar(): React.ReactElement {
   // Global Ctrl+K / Cmd+K search focus binding
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-      const mod = isMac ? e.metaKey : e.ctrlKey;
+      const mod = isMacPlatform ? e.metaKey : e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
@@ -127,6 +129,11 @@ export function LeftSidebar(): React.ReactElement {
                 aria-label="Search workspaces"
                 className="sidebar-search-input"
               />
+              {!searchQuery && (
+                <span className="sidebar-search-hint" aria-hidden="true">
+                  {isMacPlatform ? "⌘K" : "Ctrl+K"}
+                </span>
+              )}
               {searchQuery && (
                 <button
                   type="button"

@@ -3,32 +3,22 @@ import { useTerminalStore } from "../../store/terminalStore";
 import type { TabState } from "../../store/slices/paneLayoutSlice";
 import { leafIds } from "../../store/slices/layoutQueries";
 import { findLeafPath, focus } from "../../lib/pane-manager/layout";
-import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
-import { CloseIcon, PlusIcon, SplitSquareIcon, WorktreeForkIcon } from "../icons/MinimalIcons";
-import { ChevronDown, ChevronRight, Folder, Sparkles, TerminalSquare } from "lucide-react";
+import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
+import { Folder, Sparkles } from "lucide-react";
 import "./workspace-list.css";
 
 
-// Worst-state-first ordering for the aggregate severity chip.
-const SEVERITY_ORDER = ["blocked", "waiting", "working", "done"] as const;
-type Severity = (typeof SEVERITY_ORDER)[number];
-
-function aggregateSeverity(
-  entries: AgentStatusEntry[],
-): { label: string; state: Severity } | null {
-  const counts = new Map<Severity, number>();
-  for (const entry of entries) {
-    const state = entry.state as Severity;
-    if (!SEVERITY_ORDER.includes(state)) continue;
-    counts.set(state, (counts.get(state) ?? 0) + 1);
-  }
-  for (const state of SEVERITY_ORDER) {
-    const count = counts.get(state);
-    if (count) return { label: `${count} ${state}`, state };
-  }
-  return null;
+// Claude-style compact relative age: 2m, 51m, 1h, 5h, 2d.
+function relativeAge(ms: number | undefined): string | null {
+  if (!ms || ms <= 0) return null;
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 interface WorkspaceRow {
@@ -45,9 +35,6 @@ interface WorkspaceCardData {
   tab: TabState;
   isActive: boolean;
   rows: WorkspaceRow[];
-  severity: { label: string; state: Severity } | null;
-  liveCount: number;
-  unread: boolean;
 }
 
 // Memoized card: an agent-status flip re-renders only its own card, never the
@@ -119,32 +106,12 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
         tabIndex={0}
         onKeyDown={(e) => e.key === "Enter" && onSelect(data.tab.id)}
       >
-        <button
-          type="button"
-          className="ws-card-chevron"
-          aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
-          aria-expanded={expanded}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleExpand(data.tab.id);
-          }}
-        >
-          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
         <span className="ws-card-avatar">
           <Folder size={13} />
         </span>
         <span className="ws-card-title" title={data.tab.workspaceKey ?? title}>
           {title}
         </span>
-        {data.severity && (
-          <span className={`ws-severity-chip ws-severity-${data.severity.state}`}>
-            {data.severity.label}
-          </span>
-        )}
-        {data.liveCount > 0 && !data.severity && (
-          <span className="ws-live-chip">{data.liveCount} live</span>
-        )}
         <span className="ws-card-header-spacer" />
         <div className="ws-card-actions">
           {data.tab.workspaceKey && (
@@ -186,52 +153,29 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
             const unread = unreadBySessionId[row.sessionId] ?? false;
             const isWorking = workingBySessionId[row.sessionId] ?? false;
             const isFocusedLeaf = data.isActive && row.sessionId === activeSessionId;
+            const age = relativeAge(agentEntry?.state_started_at_ms);
+            const showDot = isFocusedLeaf || Boolean(agentEntry) || isWorking;
 
             return (
               <div
                 key={row.sessionId}
                 role="listitem"
-                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isWorking && !agentEntry ? " working" : ""}`}
+                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}`}
                 onClick={() => {
                   markAgentStatusSeen(row.sessionId);
                   onFocusRow(row.sessionId);
                 }}
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
-                <span className="ws-row-icon">
-                  <TerminalSquare size={13} className="ws-icon-term" />
-                </span>
-                <span className="ws-row-title">{row.title}</span>
-                {row.worktreeId && (
+                {showDot && (
                   <span
-                    className="ws-row-worktree-logo"
-                    title={`Branch ${row.branch}`}
-                    aria-label={`Branch ${row.branch}`}
-                  >
-                    <WorktreeForkIcon size={13} className="ws-worktree-svg" />
-                  </span>
+                    className={`ws-status-circle ${agentEntry ? agentEntry.state : "working"}${isFocusedLeaf ? " focused" : ""}${unread ? " unread" : ""}`}
+                    title={`Status: ${agentEntry?.state ?? "working"}`}
+                    aria-label={`Status: ${agentEntry?.state ?? "working"}`}
+                  />
                 )}
-                <span className="ws-row-status">
-                  {agentEntry ? (
-                    <span
-                      className={`ws-status-circle ${agentEntry.state}${unread ? " unread" : ""}`}
-                      title={`Status: ${agentEntry.state}`}
-                      aria-label={`Status: ${agentEntry.state}`}
-                    />
-                  ) : isWorking ? (
-                    <span
-                      className="ws-status-circle working"
-                      title="Status: working"
-                      aria-label="Status: working"
-                    />
-                  ) : (
-                    <span
-                      className={`ws-status-circle ${row.exited ? "exited" : "idle"}`}
-                      title={row.exited ? "Status: exited" : "Status: idle"}
-                      aria-label={row.exited ? "Status: exited" : "Status: idle"}
-                    />
-                  )}
-                </span>
+                <span className="ws-row-title">{row.title}</span>
+                {age && <span className="ws-row-time">{age}</span>}
                 <div className="ws-row-actions">
                   <button
                     type="button"
@@ -283,8 +227,6 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const sessions = useTerminalStore((s) => s.sessions);
   const worktrees = useTerminalStore((s) => s.worktrees);
-  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
-  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const focusPane = useTerminalStore((s) => s.focusPane);
@@ -322,18 +264,12 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
     for (const tab of tabs) {
       const ids = tab.isWizard ? [] : leafIds(tab.layout);
       const rows: WorkspaceRow[] = [];
-      const statusEntries: AgentStatusEntry[] = [];
-      let liveCount = 0;
-      let unread = false;
 
       for (const sessionId of ids) {
         const session = sessions[sessionId];
         if (!session) continue;
         const record = session.worktreeId ? worktreeById.get(session.worktreeId) : undefined;
         const exited = session.status === "exited";
-        if (!exited) liveCount += 1;
-        if (statusBySessionId[sessionId]) statusEntries.push(statusBySessionId[sessionId]);
-        if (unreadBySessionId[sessionId]) unread = true;
         rows.push({
           sessionId,
           title: record?.display_name || sessionDisplayTitle(session),
@@ -345,7 +281,6 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
         });
       }
 
-      const severity = aggregateSeverity(statusEntries);
       const title = tab.isWizard
         ? tab.title || "New Workspace"
         : tab.title || "Workspace";
@@ -366,18 +301,15 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
             tab,
             isActive: tab.id === activeTabId,
             rows: matchingRows,
-            severity,
-            liveCount,
-            unread,
           });
           continue;
         }
       }
 
-      result.push({ tab, isActive: tab.id === activeTabId, rows, severity, liveCount, unread });
+      result.push({ tab, isActive: tab.id === activeTabId, rows });
     }
     return result;
-  }, [tabs, sessions, worktrees, statusBySessionId, unreadBySessionId, activeTabId, filter]);
+  }, [tabs, sessions, worktrees, activeTabId, filter]);
 
   if (tabs.length === 0) {
     return (
