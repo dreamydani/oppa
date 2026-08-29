@@ -3,7 +3,8 @@ import { useTerminalStore } from "../../store/terminalStore";
 import {
   SIDEBAR_CLOSE_MS,
   SIDEBAR_OPEN_MS,
-  SLIDE_EASING,
+  SLIDE_EASING_CLOSE,
+  SLIDE_EASING_OPEN,
   SlideDrawer,
 } from "../../lib/layout/sideDrawer";
 import { createRafCoalescer } from "../../lib/layout/rafThrottle";
@@ -38,9 +39,10 @@ export function RightSidebar(): React.ReactElement {
       direction: "right",
       openMs: SIDEBAR_OPEN_MS,
       closeMs: SIDEBAR_CLOSE_MS,
-      easing: SLIDE_EASING,
+      easing: SLIDE_EASING_OPEN,
+      easingClose: SLIDE_EASING_CLOSE,
       gapPx: 4,
-      parallaxPx: 44,
+      parallaxPx: 0,
       suppressMotion: () =>
         !document.querySelector(".app-container.app-booted"),
     });

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SIDEBAR_OPEN_MS,
   SIDEBAR_CLOSE_MS,
-  SLIDE_EASING,
+  SLIDE_EASING_OPEN,
+  SLIDE_EASING_CLOSE,
   SlideDrawer,
 } from "./sideDrawer";
 import { isLayoutAnimating, resetLayoutAnimationGateForTests } from "./layoutAnimationGate";
@@ -42,9 +43,10 @@ describe("SlideDrawer", () => {
       direction,
       openMs: SIDEBAR_OPEN_MS,
       closeMs: SIDEBAR_CLOSE_MS,
-      easing: SLIDE_EASING,
+      easing: SLIDE_EASING_OPEN,
+      easingClose: SLIDE_EASING_CLOSE,
       gapPx: 4,
-      parallaxPx: 44,
+      parallaxPx: 0,
     });
   }
 
@@ -67,6 +69,7 @@ describe("SlideDrawer", () => {
     expect(el.style.position).toBe("absolute");
     expect(isLayoutAnimating()).toBe(true);
     expect(el.style.visibility).not.toBe("hidden");
+    expect(el.style.transition).toContain(SLIDE_EASING_CLOSE);
 
     // Past close duration + fallback: hidden and gate released.
     vi.advanceTimersByTime(SIDEBAR_CLOSE_MS + 100);
@@ -152,9 +155,10 @@ describe("SlideDrawer", () => {
       direction: "left",
       openMs: SIDEBAR_OPEN_MS,
       closeMs: SIDEBAR_CLOSE_MS,
-      easing: SLIDE_EASING,
+      easing: SLIDE_EASING_OPEN,
+      easingClose: SLIDE_EASING_CLOSE,
       gapPx: 4,
-      parallaxPx: 44,
+      parallaxPx: 0,
       suppressMotion: () => true,
     });
 

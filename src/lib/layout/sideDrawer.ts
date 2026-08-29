@@ -11,9 +11,10 @@ import {
   endLayoutAnimation,
 } from "./layoutAnimationGate";
 
-export const SIDEBAR_OPEN_MS = 380; // mirror --dur-panel-open
-export const SIDEBAR_CLOSE_MS = 300; // mirror --dur-panel-close
-export const SLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)"; // mirror --ease-slide
+export const SIDEBAR_OPEN_MS = 460; // mirror --dur-panel-open
+export const SIDEBAR_CLOSE_MS = 360; // mirror --dur-panel-close
+export const SLIDE_EASING_OPEN = "cubic-bezier(0.22, 1, 0.36, 1)"; // mirror --ease-slide-open
+export const SLIDE_EASING_CLOSE = "cubic-bezier(0.55, 0, 0.85, 0.25)"; // mirror --ease-slide-close
 
 const ANIM_FALLBACK_MS = 100;
 
@@ -24,6 +25,7 @@ export interface SlideDrawerOptions {
   openMs: number;
   closeMs: number;
   easing: string;
+  easingClose?: string;
   gapPx: number;
   parallaxPx: number;
   suppressMotion?: () => boolean;
@@ -56,6 +58,7 @@ export class SlideDrawer {
   private readonly openMs: number;
   private readonly closeMs: number;
   private readonly easing: string;
+  private readonly easingClose: string;
   private readonly gapPx: number;
   private readonly parallaxPx: number;
   private readonly suppressMotion?: () => boolean;
@@ -70,6 +73,7 @@ export class SlideDrawer {
     this.openMs = opts.openMs;
     this.closeMs = opts.closeMs;
     this.easing = opts.easing;
+    this.easingClose = opts.easingClose ?? opts.easing;
     this.gapPx = opts.gapPx;
     this.parallaxPx = opts.parallaxPx;
     this.suppressMotion = opts.suppressMotion;
@@ -198,12 +202,12 @@ export class SlideDrawer {
     void this.el.offsetWidth;
 
     const duration = this.closeMs;
-    this.el.style.transition = `transform ${duration}ms ${this.easing}, opacity ${duration}ms ease`;
+    this.el.style.transition = `transform ${duration}ms ${this.easingClose}, opacity ${duration}ms ease`;
     this.el.style.transform = this.offscreenTransform();
     this.el.style.opacity = "0";
     if (this.innerEl) {
       const sign = this.direction === "left" ? -1 : 1;
-      this.innerEl.style.transition = `transform ${duration}ms ${this.easing}`;
+      this.innerEl.style.transition = `transform ${duration}ms ${this.easingClose}`;
       this.innerEl.style.transform = `translateX(${sign * this.parallaxPx}px)`;
     }
     this.phase = "to-closed";
