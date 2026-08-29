@@ -11,6 +11,10 @@ type Set = (
     | ((state: TerminalState) => Partial<TerminalState>),
 ) => void;
 
+export interface WorktreeCreatePrefill {
+  repoPath?: string;
+}
+
 export interface AppChromeSlice {
   leftSidebarOpen: boolean;
   leftSidebarWidth: number;
@@ -18,6 +22,7 @@ export interface AppChromeSlice {
   rightSidebarWidth: number;
   rightSidebarTab: "explorer" | "git" | "extensions";
   isWorktreeCreateOpen: boolean;
+  worktreeCreatePrefill: WorktreeCreatePrefill | null;
   isSettingsOpen: boolean;
   activeSettingsTab: import("../../lib/settings/types").SettingsTabId;
   toggleLeftSidebar: () => void;
@@ -25,7 +30,7 @@ export interface AppChromeSlice {
   toggleRightSidebar: () => void;
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: "explorer" | "git" | "extensions") => void;
-  openWorktreeCreate: () => void;
+  openWorktreeCreate: (prefill?: WorktreeCreatePrefill) => void;
   closeWorktreeCreate: () => void;
   openSettings: (tab?: import("../../lib/settings/types").SettingsTabId) => void;
   closeSettings: () => void;
@@ -42,6 +47,7 @@ export function createAppChromeSlice(
     rightSidebarWidth: 280,
     rightSidebarTab: "explorer",
     isWorktreeCreateOpen: false,
+    worktreeCreatePrefill: null,
     isSettingsOpen: false,
     activeSettingsTab: "general",
 
@@ -70,8 +76,10 @@ export function createAppChromeSlice(
       triggerDebouncedSaveLayout(get);
     },
 
-    openWorktreeCreate: () => set({ isWorktreeCreateOpen: true }),
-    closeWorktreeCreate: () => set({ isWorktreeCreateOpen: false }),
+    openWorktreeCreate: (prefill) =>
+      set({ isWorktreeCreateOpen: true, worktreeCreatePrefill: prefill ?? null }),
+    closeWorktreeCreate: () =>
+      set({ isWorktreeCreateOpen: false, worktreeCreatePrefill: null }),
 
     openSettings: (tab) =>
       set({ isSettingsOpen: true, activeSettingsTab: tab || "general" }),

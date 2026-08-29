@@ -6,6 +6,7 @@ import { findLeafPath } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { AgentStatusPill } from "../agent/AgentStatusPill";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
+import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
 import { CloseIcon, PlusIcon } from "../icons/MinimalIcons";
 import { ChevronDown, ChevronRight, Folder, GitBranch, Sparkles, TerminalSquare } from "lucide-react";
 import "./workspace-list.css";
@@ -36,6 +37,7 @@ interface WorkspaceRow {
   worktreeId?: string;
   branch?: string;
   worktreeName?: string;
+  worktreeRecord?: import("../../lib/pty/transport").WorktreeRecord;
   exited: boolean;
 }
 
@@ -58,6 +60,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onFocusRow,
   onClose,
   onAddAgent,
+  onWorktreeAction,
 }: {
   data: WorkspaceCardData;
   expanded: boolean;
@@ -66,6 +69,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onFocusRow: (sessionId: string) => void;
   onClose: (tabId: string) => void;
   onAddAgent: () => void;
+  onWorktreeAction: () => void;
 }) {
   const title = data.tab.isWizard
     ? data.tab.title || "New Workspace"
@@ -200,6 +204,12 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                     <span className="ws-row-dot working" aria-hidden="true" />
                   ) : null}
                 </span>
+                {row.worktreeRecord && (
+                  <WorktreeActionsMenu
+                    record={row.worktreeRecord}
+                    onActionFinished={onWorktreeAction}
+                  />
+                )}
               </div>
             );
           })}
@@ -262,6 +272,7 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
           worktreeId: session.worktreeId,
           branch: record?.branch,
           worktreeName: record?.name,
+          worktreeRecord: record,
           exited,
         });
       }
@@ -353,7 +364,18 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
               if (path) focusPane(path);
             }}
             onClose={(tabId) => void closeTab(tabId)}
-            onAddAgent={openWorktreeCreate}
+            onAddAgent={() => {
+              // Prefill the repo when the workspace's folder matches one;
+              // unresolved folders open the modal unprefilled.
+              const key = data.tab.workspaceKey;
+              const repo = useTerminalStore
+                .getState()
+                .repos.find((r) => r.path === key);
+              openWorktreeCreate(repo ? { repoPath: repo.path } : undefined);
+            }}
+            onWorktreeAction={() => {
+              void useTerminalStore.getState().loadWorktrees().catch(() => {});
+            }}
           />
         );
       })}

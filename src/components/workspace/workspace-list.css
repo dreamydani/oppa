@@ -274,3 +274,78 @@
   color: var(--text-faint);
   padding: 4px 6px;
 }
+
+/* ---- row actions menu (worktree rows) ---- */
+
+.ws-row-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.15s ease;
+}
+
+.ws-row:hover .ws-row-menu-btn {
+  opacity: 1;
+}
+
+.ws-row-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .ws-row-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.ws-row {
+  position: relative;
+}
+
+.ws-row .worktree-card-menu {
+  position: absolute;
+  right: 4px;
+  top: 100%;
+  z-index: 30;
+}
+
+/* ---- finish outcome row ---- */
+
+.ws-finish-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.ws-finish-row.failed .ws-finish-text {
+  color: var(--destructive, #f85149);
+}
+
+.ws-finish-row.created .ws-finish-text {
+  color: #3fb950;
+}
+
+.ws-finish-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
+  border-top-color: transparent;
+  animation: wsSpin 0.8s linear infinite;
+}
+
+@keyframes wsSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -36,7 +36,9 @@ export function WorktreeCreateModal(): React.ReactElement | null {
 
   useEffect(() => {
     if (!isOpen) return;
-    setRepoPath("");
+    // Prefill (workspace card "+"): preselect the owning repo when resolvable.
+    const prefill = useTerminalStore.getState().worktreeCreatePrefill;
+    setRepoPath(prefill?.repoPath ?? "");
     setIsAddingRepo(false);
     setNewRepoPath("");
     setName("");
@@ -145,7 +147,7 @@ export function WorktreeCreateModal(): React.ReactElement | null {
       <div className="wt-create-card">
         <div className="wt-create-header">
           <h3>New Worktree</h3>
-          <p>Creates a git worktree on a new branch from the workspace registry.</p>
+          <p>Creates a worktree (optionally with an agent) and attaches it to the active workspace grid.</p>
         </div>
 
         {error && <p className="wt-error" role="alert">{error}</p>}

@@ -395,7 +395,17 @@ export function createWorktreeRegistrySlice(
       // Attach only when ListSessions confirms the daemon actually spawned the agent
       const liveSessions = await ptyList().catch(() => [] as string[]);
       if (!liveSessions.includes(handoff.session_id)) return handoff;
-      await get().createTab(handoff.record.path, handoff.record.id, handoff.session_id);
+      // New agent lands in the ACTIVE workspace's grid (the always-grid rule);
+      // only when nothing is active does it open its own workspace tab.
+      const activeTabId = get().activeTabId;
+      if (activeTabId) {
+        await get().mergeSessionsIntoWorkspace(activeTabId, [handoff.session_id], {
+          worktreeIdsBySession: { [handoff.session_id]: handoff.record.id },
+          ...(input.repoPath ? { workspaceKey: input.repoPath } : {}),
+        });
+      } else {
+        await get().createTab(handoff.record.path, handoff.record.id, handoff.session_id);
+      }
       return handoff;
     },
 

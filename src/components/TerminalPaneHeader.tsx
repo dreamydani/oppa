@@ -118,6 +118,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
+  const repos = useTerminalStore((s) => s.repos);
   const closePane = useTerminalStore((s) => s.closePane);
   const focusPane = useTerminalStore((s) => s.focusPane);
   const movePane = useTerminalStore((s) => s.movePane);
@@ -351,12 +352,13 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     [path, splitPane],
   );
 
-  // New branch…: opens the worktree create modal; the user picks repo/name
-  // there (prefill lands with the workspace-card wiring).
+  // New branch…: opens the worktree create modal prefilled with this pane's
+  // owning repo when resolvable.
   const splitNewBranch = useCallback(() => {
     setSplitChooserDir(null);
-    openWorktreeCreate();
-  }, [openWorktreeCreate]);
+    const repo = resolveRepoForCwd(session?.cwd, repos);
+    openWorktreeCreate(repo ? { repoPath: repo.path } : undefined);
+  }, [openWorktreeCreate, repos, session?.cwd]);
 
   return (
     <div className="terminal-pane-header">
