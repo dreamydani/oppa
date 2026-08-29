@@ -1,5 +1,6 @@
 import React from "react";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
+import { formatElapsed, useElapsedTicker } from "./useElapsedTicker";
 import "./AgentStatusPill.css";
 
 interface AgentStatusPillProps {
@@ -31,6 +32,7 @@ export function AgentStatusPill({
   entry,
   unread,
 }: AgentStatusPillProps): React.ReactElement | null {
+  const now = useElapsedTicker();
   if (!entry) return null;
   const tip = pillTip(entry);
   return (
@@ -46,6 +48,9 @@ export function AgentStatusPill({
       {entry.state === "working" && (
         <span className="agent-status-spinner" aria-hidden="true" />
       )}
+      <span className="agent-status-elapsed" aria-hidden="true">
+        {formatElapsed(now, entry.state_started_at_ms)}
+      </span>
       {unread && <span className="agent-status-unread-dot" aria-hidden="true" />}
     </span>
   );

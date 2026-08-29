@@ -1,59 +1,71 @@
-/* Rich hook-classified agent status pill (Orca four-state). Renders alongside
-   the legacy dot; the amber/hollow/check states make blocked/waiting/done
-   visually distinct from the binary working pulse. */
+/* Rich hook-classified agent status pill (Orca four-state) with compact
+   time-in-state label. The colored core is an ::before dot so the label
+   can ride beside it; states recolor only the core. */
 
 .agent-status-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  gap: 4px;
   flex-shrink: 0;
   position: relative;
 }
 
+/* The 8px colored core every state tints. */
+.agent-status-pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--text-muted);
+}
+
 /* working: animated running pulse */
-.agent-status-working {
+.agent-status-working::before {
   background-color: var(--status-running, #34d399);
   box-shadow: 0 0 5px color-mix(in srgb, var(--status-running, #34d399) 45%, transparent);
   animation: agentStatusPulse 1.6s ease-in-out infinite;
 }
 
+/* Kept for callers that still probe the spinner node; the core now pulses. */
 .agent-status-spinner {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background-color: var(--bg-elevated, #fff);
-  opacity: 0.9;
+  display: none;
 }
 
 /* blocked: solid amber, signals a permission decision is outstanding */
-.agent-status-blocked {
+.agent-status-blocked::before {
   background-color: var(--status-blocked, #f59e0b);
   box-shadow: 0 0 5px color-mix(in srgb, var(--status-blocked, #f59e0b) 45%, transparent);
 }
 
 /* waiting: hollow amber ring — idle on a question but not hard-blocked */
-.agent-status-waiting {
+.agent-status-waiting::before {
   background-color: transparent;
   border: 1.5px solid var(--status-blocked, #f59e0b);
 }
 
-/* done: emerald check; interrupted renders with muted + strikethrough */
-.agent-status-done {
+/* done: emerald core; interrupted renders muted */
+.agent-status-done::before {
   background-color: var(--status-running, #34d399);
 }
 
-.agent-status-done.agent-status-interrupted {
+.agent-status-done.agent-status-interrupted::before {
   background-color: var(--text-muted);
   opacity: 0.6;
+}
+
+/* Time-in-state label; muted so the color state still leads the eye. */
+.agent-status-elapsed {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-muted, #8a8f98);
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-status-unread-dot {
   position: absolute;
   top: -3px;
-  right: -3px;
+  left: 5px;
   width: 5px;
   height: 5px;
   border-radius: 50%;

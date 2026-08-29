@@ -77,4 +77,33 @@ describe("AgentStatusPill", () => {
     );
     expect(read.querySelector(".agent-status-unread-dot")).toBeNull();
   });
+
+  it("renders compact elapsed time since the state began", () => {
+    const now = Date.now();
+    const cases: Array<[number, string]> = [
+      [now - 25_000, "now"],
+      [now - 90_000, "1m"],
+      [now - 12 * 60_000, "12m"],
+      [now - 3 * 3_600_000, "3h"],
+      [now - 2 * 86_400_000, "2d"],
+    ];
+    for (const [startedAt, expected] of cases) {
+      const { container } = render(
+        <AgentStatusPill entry={entry("working", { state_started_at_ms: startedAt })} />,
+      );
+      const elapsed = container.querySelector<HTMLElement>(".agent-status-elapsed")!;
+      expect(elapsed.textContent).toBe(expected);
+    }
+  });
+
+  it("appends the elapsed span after the state content without breaking tooltips", () => {
+    const started = Date.now() - 5 * 60_000;
+    const { container } = render(
+      <AgentStatusPill entry={entry("working", { tool_name: "Edit", state_started_at_ms: started })} />,
+    );
+    const pill = container.querySelector<HTMLElement>(".agent-status-pill")!;
+    expect(pill.querySelector(".agent-status-elapsed")!.textContent).toBe("5m");
+    // Tooltip keeps the state description; the elapsed span is display-only.
+    expect(pill.getAttribute("title")).toBe("Working — Edit");
+  });
 });
