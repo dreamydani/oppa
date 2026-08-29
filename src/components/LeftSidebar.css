@@ -1,5 +1,5 @@
-/* ==========================================================================
-   Left Sidebar — sole home for its styles (values are today's effective
+﻿/* ==========================================================================
+   Left Sidebar â€” sole home for its styles (values are today's effective
    cascade winners from App.css).
    ========================================================================== */
 
@@ -129,42 +129,6 @@
   border-color: var(--border-divider);
 }
 
-.sidebar-view-toggle {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
-  padding: 3px;
-  border-radius: 7px;
-  background-color: rgba(255, 255, 255, 0.04);
-}
-
-[data-theme="light"] .sidebar-view-toggle {
-  background-color: rgba(0, 0, 0, 0.04);
-}
-
-.sidebar-view-btn {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.sidebar-view-btn:hover {
-  color: var(--text-primary);
-}
-
-.sidebar-view-btn.active {
-  background-color: var(--bg-card-active);
-  color: var(--text-primary);
 }
 
 .left-sidebar-body {
@@ -195,148 +159,6 @@
 
 [data-theme="light"] .left-sidebar-body::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
-}
-
-.tab-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-}
-
-/* Warp-style session cards */
-.tab-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background-color: transparent;
-  color: var(--text-muted);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  position: relative;
-  user-select: none;
-}
-
-.tab-card:hover {
-  background-color: var(--bg-card-hover);
-  color: var(--text-primary);
-}
-
-.tab-card.active {
-  background-color: var(--bg-card-active);
-  color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-[data-theme="light"] .tab-card.active {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-/* Dark rounded avatar badge */
-.tab-card-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  background-color: #171717;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.tab-card.active .tab-card-avatar {
-  background-color: #171717;
-  color: var(--text-primary);
-}
-
-[data-theme="light"] .tab-card-avatar {
-  background-color: #e4e4e2;
-  color: #71717a;
-}
-
-[data-theme="light"] .tab-card.active .tab-card-avatar {
-  background-color: #dcdcd8;
-  color: #18181b;
-}
-
-/* Content column: title row + cwd row */
-.tab-card-content {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-  gap: 2px;
-}
-
-.tab-card-row-top {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.tab-card-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tab-card-cwd {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-}
-
-.tab-rename-input {
-  background-color: var(--bg-terminal);
-  color: var(--text-primary);
-  border: 1px solid var(--accent-blue);
-  border-radius: 4px;
-  padding: 1px 4px;
-  font-family: inherit;
-  font-size: 12px;
-  outline: none;
-  width: 100%;
-}
-
-.tab-card-close {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-  flex-shrink: 0;
-}
-
-.tab-card:hover .tab-card-close {
-  opacity: 1;
-}
-
-.tab-card-close:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--destructive);
-}
-
-[data-theme="light"] .tab-card-close:hover {
-  background-color: rgba(0, 0, 0, 0.06);
 }
 
 .left-sidebar-footer {

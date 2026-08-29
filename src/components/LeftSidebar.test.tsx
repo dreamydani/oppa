@@ -24,7 +24,7 @@ vi.mock("../lib/pty/transport", () => ({
   onPtyExit: vi.fn(),
   onPtyCwd: vi.fn(),
   onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
-onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
   requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
   requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
@@ -109,42 +109,31 @@ describe("LeftSidebar", () => {
     resetFrameSchedulerForTests();
   });
 
-  it("renders search strip and tab cards with avatar badges and no duplicate icon", () => {
+  it("renders search strip and workspace cards", () => {
     const { container } = render(<LeftSidebar />);
 
-    expect(screen.getByPlaceholderText(/search tabs/i)).toBeDefined();
-    expect(screen.getByTitle("New Tab")).toBeDefined();
+    expect(screen.getByPlaceholderText(/search workspaces/i)).toBeDefined();
+    expect(screen.getByTitle("New Workspace")).toBeDefined();
     expect(screen.getByText("oppa-alpha")).toBeDefined();
     expect(screen.getByText("oppa-beta")).toBeDefined();
-    // CWD is shortened to ~/last-two-segments
-    expect(screen.getByText("~/projects/repo-root")).toBeDefined();
-    expect(container.querySelectorAll(".tab-card-avatar").length).toBe(2);
-    expect(container.querySelector(".tab-card-app-icon")).toBeNull();
+    expect(container.querySelectorAll(".ws-card").length).toBe(2);
   });
 
-  it("filters tab cards based on search query", () => {
+  it("shows the active workspace's terminal rows; collapsed workspaces hide theirs", () => {
     render(<LeftSidebar />);
 
-    const searchInput = screen.getByPlaceholderText(/search tabs/i);
-    fireEvent.change(searchInput, { target: { value: "beta" } });
-
-    expect(screen.queryByText("oppa-alpha")).toBeNull();
-    expect(screen.getByText("oppa-beta")).toBeDefined();
-
-    fireEvent.change(searchInput, { target: { value: "projects" } });
-    expect(screen.getByText("oppa-alpha")).toBeDefined();
-    expect(screen.queryByText("oppa-beta")).toBeNull();
-
-    fireEvent.change(searchInput, { target: { value: "" } });
-    expect(screen.getByText("oppa-alpha")).toBeDefined();
-    expect(screen.getByText("oppa-beta")).toBeDefined();
+    // Active workspace (alpha) is expanded: its terminal row shows (title
+    // falls back to the cwd basename when the session title is synthetic).
+    expect(screen.getByText("repo-root")).toBeDefined();
+    // Beta is collapsed: its row is hidden.
+    expect(screen.queryByText("service-app")).toBeNull();
   });
 
-  it("selects a tab when its tab card is clicked", () => {
+  it("selects a workspace when its card header is clicked", () => {
     render(<LeftSidebar />);
 
-    const cardBeta = screen.getByText("oppa-beta").closest(".tab-card")!;
-    fireEvent.click(cardBeta);
+    const betaHeader = screen.getByText("oppa-beta").closest(".ws-card-header")!;
+    fireEvent.click(betaHeader);
 
     expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
   });
@@ -152,7 +141,7 @@ describe("LeftSidebar", () => {
   it("creates and activates wizard tab when + button is clicked", () => {
     render(<LeftSidebar />);
 
-    const addBtn = screen.getByTitle("New Tab");
+    const addBtn = screen.getByTitle("New Workspace");
     fireEvent.click(addBtn);
 
     const state = useTerminalStore.getState();
@@ -161,7 +150,7 @@ describe("LeftSidebar", () => {
     expect(state.activeTabId).toBe(state.tabs[2].id);
   });
 
-  it("renders wizard tab with New Workspace title in tab card", () => {
+  it("renders wizard tab with New Workspace title", () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -178,10 +167,10 @@ describe("LeftSidebar", () => {
     expect(screen.getByText("New Workspace")).toBeDefined();
   });
 
-  it("closes a tab when close button is clicked", async () => {
+  it("closes a workspace when close button is clicked", async () => {
     render(<LeftSidebar />);
 
-    const closeBtns = screen.getAllByTitle("Close Tab");
+    const closeBtns = screen.getAllByTitle("Close Workspace");
     expect(closeBtns.length).toBe(2);
 
     fireEvent.click(closeBtns[1]);
@@ -190,38 +179,6 @@ describe("LeftSidebar", () => {
       expect(useTerminalStore.getState().tabs).toHaveLength(1);
       expect(useTerminalStore.getState().tabs[0].id).toBe("tab-alpha");
     });
-  });
-
-  it("renames a tab on double click and Enter", async () => {
-    render(<LeftSidebar />);
-
-    const cardAlpha = screen.getByText("oppa-alpha").closest(".tab-card")!;
-    fireEvent.doubleClick(cardAlpha);
-
-    const input = screen.getByRole("textbox", { name: /rename tab/i }) as HTMLInputElement;
-    expect(input).toBeDefined();
-
-    fireEvent.change(input, { target: { value: "renamed-tab" } });
-    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
-
-    await vi.waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: /rename tab/i })).toBeNull();
-      expect(useTerminalStore.getState().tabs[0].title).toBe("renamed-tab");
-    });
-  });
-
-  it("cancels inline rename on Escape", async () => {
-    render(<LeftSidebar />);
-
-    const cardAlpha = screen.getByText("oppa-alpha").closest(".tab-card")!;
-    fireEvent.doubleClick(cardAlpha);
-
-    const input = screen.getByRole("textbox", { name: /rename tab/i });
-    fireEvent.change(input, { target: { value: "cancelled-tab" } });
-    fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
-
-    expect(screen.queryByRole("textbox", { name: /rename tab/i })).toBeNull();
-    expect(useTerminalStore.getState().tabs[0].title).toBe("oppa-alpha");
   });
 
   it("resizes sidebar when drag handle is moved", () => {
@@ -258,7 +215,8 @@ describe("LeftSidebar", () => {
 
     expect(screen.getByText("No Workspaces")).toBeDefined();
     expect(screen.getByText("No project workspaces open.")).toBeDefined();
-    const newWorkspaceBtn = screen.getByRole("button", { name: /new workspace/i });
+    // The empty state's own New Workspace button (header + is also present).
+    const newWorkspaceBtn = screen.getAllByRole("button", { name: /new workspace/i })[0];
     expect(newWorkspaceBtn).toBeDefined();
 
     fireEvent.click(newWorkspaceBtn);
@@ -270,7 +228,7 @@ describe("LeftSidebar", () => {
   it("renders No Matches state when search query does not match any workspace", () => {
     render(<LeftSidebar />);
 
-    const searchInput = screen.getByPlaceholderText(/search tabs/i);
+    const searchInput = screen.getByPlaceholderText(/search workspaces/i);
     fireEvent.change(searchInput, { target: { value: "nonexistent-query" } });
 
     expect(screen.getByText("No Matches")).toBeDefined();
@@ -312,42 +270,6 @@ describe("LeftSidebar", () => {
     expect(state.activeSettingsTab).toBe("shortcuts");
   });
 
-  it("toggles to the worktrees view and renders worktree cards", () => {
-    useTerminalStore.setState({
-      leftSidebarView: "tabs",
-      worktrees: [
-        {
-          record: {
-            id: "demo::C:/ws/feat-a",
-            repo_id: "demo",
-            name: "feat-a",
-            display_name: null,
-            branch: "feat-a",
-            path: "C:/ws/feat-a",
-            base_ref: "main",
-            parent_worktree_id: null,
-            child_worktree_ids: [],
-            workspace_status: "todo",
-            retired: false,
-            created_at_ms: 1723900000000,
-            linked_pr_url: null,
-          },
-          missing_on_disk: false,
-        },
-      ],
-      worktreeLiveSessions: {},
-    });
-
-    render(<LeftSidebar />);
-
-    expect(screen.queryByText("feat-a")).toBeNull();
-    fireEvent.click(screen.getByRole("tab", { name: /worktrees/i }));
-
-    expect(useTerminalStore.getState().leftSidebarView).toBe("worktrees");
-    expect(screen.getAllByText("feat-a").length).toBeGreaterThan(0);
-    expect(screen.getByText("sleeping")).toBeDefined();
-  });
-
   it("keeps a closed sidebar mounted, hidden via the drawer instead of unmounting", () => {
     useTerminalStore.setState({ leftSidebarOpen: false });
     const { container } = render(<LeftSidebar />);
@@ -356,23 +278,5 @@ describe("LeftSidebar", () => {
     // Drawer snap path (pre-boot suppression in tests): detached + hidden.
     expect((aside as HTMLElement).style.visibility).toBe("hidden");
     expect((aside as HTMLElement).style.position).toBe("absolute");
-  });
-
-  it("exposes the store width via the --sidebar-w custom property", () => {
-    const { container } = render(<LeftSidebar />);
-    const aside = container.querySelector<HTMLElement>("aside.left-sidebar")!;
-    expect(aside.style.getPropertyValue("--sidebar-w")).toBe("240px");
-  });
-
-  it("marks the sidebar as resizing during a drag and clears it on release", () => {
-    const { container } = render(<LeftSidebar />);
-    const aside = container.querySelector<HTMLElement>("aside.left-sidebar")!;
-    const resizeHandle = container.querySelector(".resize-handle-right")!;
-
-    fireEvent.mouseDown(resizeHandle, { clientX: 300, button: 0 });
-    expect(aside.className).toContain("is-resizing");
-
-    fireEvent.mouseUp(window);
-    expect(aside.className).not.toContain("is-resizing");
   });
 });

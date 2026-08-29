@@ -632,7 +632,7 @@ describe("App", () => {
     });
     const { getByRole, getByTitle } = render(<App />);
 
-    const newTabBtn = getByTitle("New Tab");
+    const newTabBtn = getByTitle("New Workspace");
     fireEvent.click(newTabBtn);
 
     expect(getByRole("region", { name: /workspace setup wizard/i })).toBeTruthy();

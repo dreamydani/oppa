@@ -90,7 +90,6 @@ describe("WorktreeCreateModal", () => {
     useTerminalStore.setState({
       isWorktreeCreateOpen: true,
       repos: [demoRepo],
-      leftSidebarView: "tabs",
       tabs: [],
       activeTabId: "",
       sessions: {},
@@ -153,7 +152,6 @@ describe("WorktreeCreateModal", () => {
       });
     });
     await vi.waitFor(() => {
-      expect(useTerminalStore.getState().leftSidebarView).toBe("worktrees");
       expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(false);
     });
     // Terminal must be bound to the new worktree id, not just its cwd

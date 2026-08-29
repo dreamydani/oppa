@@ -17,7 +17,6 @@ export interface AppChromeSlice {
   rightSidebarOpen: boolean;
   rightSidebarWidth: number;
   rightSidebarTab: "explorer" | "git" | "extensions";
-  leftSidebarView: "tabs" | "worktrees";
   isWorktreeCreateOpen: boolean;
   isSettingsOpen: boolean;
   activeSettingsTab: import("../../lib/settings/types").SettingsTabId;
@@ -26,7 +25,6 @@ export interface AppChromeSlice {
   toggleRightSidebar: () => void;
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: "explorer" | "git" | "extensions") => void;
-  setLeftSidebarView: (view: "tabs" | "worktrees") => void;
   openWorktreeCreate: () => void;
   closeWorktreeCreate: () => void;
   openSettings: (tab?: import("../../lib/settings/types").SettingsTabId) => void;
@@ -43,7 +41,6 @@ export function createAppChromeSlice(
     rightSidebarOpen: false,
     rightSidebarWidth: 280,
     rightSidebarTab: "explorer",
-    leftSidebarView: "tabs",
     isWorktreeCreateOpen: false,
     isSettingsOpen: false,
     activeSettingsTab: "general",
@@ -71,10 +68,6 @@ export function createAppChromeSlice(
     setRightSidebarTab: (tab) => {
       set({ rightSidebarTab: tab });
       triggerDebouncedSaveLayout(get);
-    },
-
-    setLeftSidebarView: (view) => {
-      set({ leftSidebarView: view });
     },
 
     openWorktreeCreate: () => set({ isWorktreeCreateOpen: true }),

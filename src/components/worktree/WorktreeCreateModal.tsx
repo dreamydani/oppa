@@ -19,7 +19,6 @@ export function WorktreeCreateModal(): React.ReactElement | null {
   const addRepo = useTerminalStore((s) => s.addRepo);
   const createWorktree = useTerminalStore((s) => s.createWorktree);
   const createWorktreeWithAgent = useTerminalStore((s) => s.createWorktreeWithAgent);
-  const setLeftSidebarView = useTerminalStore((s) => s.setLeftSidebarView);
   const createTab = useTerminalStore((s) => s.createTab);
 
   const [repoPath, setRepoPath] = useState("");
@@ -126,7 +125,6 @@ export function WorktreeCreateModal(): React.ReactElement | null {
         }
       }
       closeWorktreeCreate();
-      setLeftSidebarView("worktrees");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -1,0 +1,276 @@
+/* ==========================================================================
+   Workspace list — one card per workspace; terminal rows beneath each title.
+   Row anatomy per sketch: [>_] title [branch] (status)
+   ========================================================================== */
+
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.ws-card {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ws-card.active {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-divider, rgba(255, 255, 255, 0.08));
+}
+
+[data-theme="light"] .ws-card.active {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.ws-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-card-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="light"] .ws-card-header:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.ws-card-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ws-card-chevron:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .ws-card-chevron:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.ws-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+[data-theme="light"] .ws-card-avatar {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ws-card-avatar.wizard {
+  color: var(--accent, #3fb950);
+}
+
+.ws-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-card-header-spacer {
+  flex: 1;
+}
+
+.ws-severity-chip {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .ws-severity-chip {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ws-severity-chip.ws-severity-blocked {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.ws-severity-chip.ws-severity-waiting {
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.ws-severity-chip.ws-severity-working {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.ws-live-chip {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+[data-theme="light"] .ws-live-chip {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ws-card-add,
+.ws-card-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.ws-card-header:hover .ws-card-add,
+.ws-card-header:hover .ws-card-close {
+  opacity: 1;
+}
+
+.ws-card-add:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.ws-card-close:hover {
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
+}
+
+[data-theme="light"] .ws-card-add:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ---- rows ---- */
+
+.ws-card-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px 6px 30px;
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.ws-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .ws-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.ws-row.exited {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.ws-row-icon {
+  display: inline-flex;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.ws-row-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ws-row-branch {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 6px;
+  border-radius: 99px;
+  flex-shrink: 0;
+  max-width: 90px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-theme="light"] .ws-row-branch {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ws-row-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.ws-row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.ws-row-dot.working {
+  background: #3fb950;
+  animation: wsDotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wsDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.ws-card-empty {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 6px;
+}
