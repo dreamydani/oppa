@@ -367,8 +367,7 @@ describe("FleetSpawnSheet", () => {
       is_new: false,
       snapshot: null,
     });
-    const tileSpy = vi
-      .spyOn(useTerminalStore.getState(), "tileProjectBranches")
+    vi.spyOn(useTerminalStore.getState(), "tileProjectBranches")
       .mockRejectedValue(new Error("grid exploded"));
 
     render(<FleetSpawnSheet />);
