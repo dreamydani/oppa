@@ -131,7 +131,16 @@ export class SlideDrawer {
     if (this.innerEl) {
       this.innerEl.style.transform = "";
       this.innerEl.style.transition = "";
+      this.innerEl.style.willChange = "";
     }
+  }
+
+  // Pin the inner subtree to the panel's compositor layer for the slide, so
+  // children never repaint on the main thread and lag behind the panel.
+  private pinInnerLayer(): void {
+    if (!this.innerEl) return;
+    this.innerEl.style.willChange = "transform";
+    this.innerEl.style.transform = "translateZ(0)";
   }
 
   private cancelFallback(): void {
@@ -190,13 +199,14 @@ export class SlideDrawer {
     this.el.style.visibility = "";
 
     this.el.style.willChange = "transform";
+    this.pinInnerLayer();
     this.el.style.transition = "none";
     this.el.style.opacity = "1";
     this.el.style.transform =
       startX === 0 ? "" : `translateX(${startX}px)`;
     if (this.innerEl) {
       this.innerEl.style.transition = "none";
-      this.innerEl.style.transform = "";
+      this.innerEl.style.transform = "translateZ(0)";
     }
     // Commit the start frame before releasing toward the off-screen pose.
     void this.el.offsetWidth;
@@ -208,7 +218,7 @@ export class SlideDrawer {
     if (this.innerEl) {
       const sign = this.direction === "left" ? -1 : 1;
       this.innerEl.style.transition = `transform ${duration}ms ${this.easingClose}`;
-      this.innerEl.style.transform = `translateX(${sign * this.parallaxPx}px)`;
+      this.innerEl.style.transform = `translateX(${sign * this.parallaxPx}px) translateZ(0)`;
     }
     this.phase = "to-closed";
 
@@ -238,6 +248,7 @@ export class SlideDrawer {
 
     this.el.style.visibility = "";
     this.el.style.willChange = "transform";
+    this.pinInnerLayer();
 
     let start: string;
     if (this.phase === "hidden") {
@@ -254,7 +265,7 @@ export class SlideDrawer {
     if (this.innerEl && this.phase === "hidden") {
       const sign = this.direction === "left" ? -1 : 1;
       this.innerEl.style.transition = "none";
-      this.innerEl.style.transform = `translateX(${sign * this.parallaxPx}px)`;
+      this.innerEl.style.transform = `translateX(${sign * this.parallaxPx}px) translateZ(0)`;
     }
     void this.el.offsetWidth;
 
@@ -263,7 +274,7 @@ export class SlideDrawer {
     this.el.style.transform = "";
     if (this.innerEl) {
       this.innerEl.style.transition = `transform ${duration}ms ${this.easing}`;
-      this.innerEl.style.transform = "";
+      this.innerEl.style.transform = "translateZ(0)";
     }
     this.phase = "to-open";
 
