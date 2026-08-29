@@ -217,7 +217,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                     onTogglePin(row.sessionId);
                   }}
                 >
-                  <Pin size={11} />
+                  <Pin size={10} />
                 </button>
                 <span className="ws-row-title">{row.title}</span>
                 {age && <span className="ws-row-time">{age}</span>}

@@ -190,17 +190,17 @@
   transform: translateY(-50%);
 }
 
-/* Pin button occupies the gutter; hover swaps it in for the status dot. */
+/* Pin button sits exactly on the status dot's center; hover swaps them. */
 .ws-row-pin-btn {
   position: absolute;
-  left: 8px;
+  left: 4px;
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -209,6 +209,11 @@
   padding: 0;
   opacity: 0;
   transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.ws-row-pin-btn svg {
+  transform: rotate(-45deg);
+  transition: fill 0.12s ease;
 }
 
 .ws-row:hover .ws-row-pin-btn {
@@ -226,6 +231,10 @@
 .ws-row-pin-btn.is-pinned {
   opacity: 1;
   color: var(--accent-blue, #58a6ff);
+}
+
+.ws-row-pin-btn.is-pinned svg {
+  fill: currentColor;
 }
 
 .ws-status-circle {
