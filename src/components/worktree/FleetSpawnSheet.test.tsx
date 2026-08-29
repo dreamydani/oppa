@@ -326,4 +326,87 @@ describe("FleetSpawnSheet", () => {
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("done phase offers Open grid with only successful slots and closes on success", async () => {
+    worktreeCreateFleetMock.mockResolvedValue({
+      results: [okSlot(0), failedSlot(1, "agent executable not found on PATH: qwen")],
+    });
+    vi.mocked(transport.ptySpawn).mockResolvedValue({
+      id: "agent-0",
+      is_new: false,
+      snapshot: null,
+    });
+    const tileSpy = vi
+      .spyOn(useTerminalStore.getState(), "tileProjectBranches")
+      .mockResolvedValue("grid-tab");
+
+    render(<FleetSpawnSheet />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    setSlotAgent(1, "Claude Code");
+    setSlotAgent(2, "Qwen Code");
+    fireEvent.click(screen.getByRole("button", { name: /review fleet/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm launch/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /open grid/i }));
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().isFleetSheetOpen).toBe(false);
+    });
+    expect(tileSpy).toHaveBeenCalledTimes(1);
+    // Only the successful slot's worktree is tiled; the failed one has no record.
+    expect(tileSpy).toHaveBeenCalledWith("demo", ["demo::wt-0"]);
+  });
+
+  it("Open grid failure keeps the sheet open with an inline error", async () => {
+    worktreeCreateFleetMock.mockResolvedValue({ results: [okSlot(0)] });
+    vi.mocked(transport.ptySpawn).mockResolvedValue({
+      id: "agent-0",
+      is_new: false,
+      snapshot: null,
+    });
+    const tileSpy = vi
+      .spyOn(useTerminalStore.getState(), "tileProjectBranches")
+      .mockRejectedValue(new Error("grid exploded"));
+
+    render(<FleetSpawnSheet />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    setSlotAgent(1, "Claude Code");
+    setSlotAgent(2, "Claude Code");
+    fireEvent.click(screen.getByRole("button", { name: /review fleet/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm launch/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /open grid/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("grid exploded");
+    });
+    expect(useTerminalStore.getState().isFleetSheetOpen).toBe(true);
+  });
+
+  it("done phase hides Open grid when every slot failed", async () => {
+    worktreeCreateFleetMock.mockResolvedValue({
+      results: [failedSlot(0, "unknown agent: nope"), failedSlot(1, "also bad")],
+    });
+
+    render(<FleetSpawnSheet />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: /repository/i }), {
+      target: { value: demoRepo.path },
+    });
+    setSlotAgent(1, "Qwen Code");
+    setSlotAgent(2, "Qwen Code");
+    fireEvent.click(screen.getByRole("button", { name: /review fleet/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm launch/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText(/unknown agent: nope/i)).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /open grid/i })).toBeNull();
+  });
 });

@@ -51,6 +51,7 @@ export function FleetSpawnSheet(): React.ReactElement | null {
   const repos = useTerminalStore((s) => s.repos);
   const spawnFleet = useTerminalStore((s) => s.spawnFleet);
   const createTab = useTerminalStore((s) => s.createTab);
+  const tileProjectBranches = useTerminalStore((s) => s.tileProjectBranches);
 
   const [phase, setPhase] = useState<SheetPhase>("edit");
   const [repoPath, setRepoPath] = useState("");
@@ -63,6 +64,7 @@ export function FleetSpawnSheet(): React.ReactElement | null {
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [gridError, setGridError] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<RowOutcome[] | null>(null);
 
   useEffect(() => {
@@ -77,6 +79,7 @@ export function FleetSpawnSheet(): React.ReactElement | null {
     setPhase("edit");
     setValidationError(null);
     setLaunchError(null);
+    setGridError(null);
     setOutcomes(null);
     setProfiles([]);
     void useTerminalStore.getState().loadRepos().catch(() => {});
@@ -190,6 +193,28 @@ export function FleetSpawnSheet(): React.ReactElement | null {
     setSlots((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
 
+  // Done-phase action: tile every successful slot into one grid tab. The
+  // tiling action reuses live sessions, so no duplicate spawns occur.
+  const okRecords = outcomes
+    ? outcomes.flatMap((o) => (o.record ? [o.record] : []))
+    : [];
+
+  const handleOpenGrid = async () => {
+    if (okRecords.length === 0) return;
+    const repo = repos.find((r) => r.path === repoPath);
+    setGridError(null);
+    try {
+      await tileProjectBranches(
+        repo?.repo_id ?? okRecords[0].repo_id,
+        okRecords.map((r) => r.id),
+      );
+      closeFleetSheet();
+    } catch (e) {
+      // The fleet already landed; keep the sheet open so the error is seen.
+      setGridError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const removeSlot = (index: number) => {
     setSlots((prev) => (prev.length <= MIN_SLOTS ? prev : prev.filter((_, i) => i !== index)));
   };
@@ -216,9 +241,9 @@ export function FleetSpawnSheet(): React.ReactElement | null {
           <p>Creates one worktree + terminal per agent from a single launch.</p>
         </div>
 
-        {(validationError || launchError) && (
+        {(validationError || launchError || gridError) && (
           <p className="wt-error" role="alert">
-            {validationError ?? launchError}
+            {validationError ?? launchError ?? gridError}
           </p>
         )}
 
@@ -427,7 +452,17 @@ export function FleetSpawnSheet(): React.ReactElement | null {
             )}
 
             <div className="wt-create-actions">
-              {phase === "done" ? (
+            {phase === "done" ? (
+              <>
+                {okRecords.length > 0 && (
+                  <button
+                    type="button"
+                    className="wt-btn"
+                    onClick={() => void handleOpenGrid()}
+                  >
+                    Open grid
+                  </button>
+                )}
                 <button
                   type="button"
                   className="wt-btn primary"
@@ -435,7 +470,8 @@ export function FleetSpawnSheet(): React.ReactElement | null {
                 >
                   Done
                 </button>
-              ) : (
+              </>
+            ) : (
                 <button
                   type="button"
                   className="wt-btn primary"
