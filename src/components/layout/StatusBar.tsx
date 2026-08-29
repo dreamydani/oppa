@@ -1,9 +1,82 @@
-import React, { useEffect, useState } from "react";
-import { GitBranch, Folder, Terminal } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { GitBranch, Folder, Terminal, Users } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { focus } from "../../lib/pane-manager/layout";
+import { findLeafPath } from "../../lib/pane-manager/layout";
+import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { getGitStatus, GitStatusResult } from "../../lib/git/transport";
 import "./StatusBar.css";
+
+// Attention order for the fleet aggregate click: what needs a human first.
+const FLEET_ATTENTION: AgentStatusEntry["state"][] = ["blocked", "waiting", "working", "done"];
+
+function FleetAggregate(): React.ReactElement | null {
+  const sessions = useTerminalStore((s) => s.sessions);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const tabs = useTerminalStore((s) => s.tabs);
+  const selectTab = useTerminalStore((s) => s.selectTab);
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
+
+  // Live hooked sessions only; the aggregate is about agents, not shells.
+  const fleet = useMemo(() => {
+    const counts: Record<AgentStatusEntry["state"], number> = {
+      working: 0,
+      blocked: 0,
+      waiting: 0,
+      done: 0,
+    };
+    const byState: Record<AgentStatusEntry["state"], string[]> = {
+      working: [],
+      blocked: [],
+      waiting: [],
+      done: [],
+    };
+    for (const session of Object.values(sessions)) {
+      if (session.status === "exited") continue;
+      const entry = statusBySessionId[session.id];
+      if (!entry) continue;
+      counts[entry.state] += 1;
+      byState[entry.state].push(session.id);
+    }
+    return { counts, byState };
+  }, [sessions, statusBySessionId]);
+
+  const total = FLEET_ATTENTION.reduce((sum, state) => sum + fleet.counts[state], 0);
+  if (total === 0) return null;
+
+  const jumpToAttention = () => {
+    for (const state of FLEET_ATTENTION) {
+      const candidate = fleet.byState[state].find(
+        (sessionId) => tabs.some((t) => findLeafPath(t.layout, sessionId) !== null),
+      );
+      if (!candidate) continue;
+      markAgentStatusSeen(candidate);
+      const tab = tabs.find((t) => findLeafPath(t.layout, candidate) !== null);
+      if (tab) selectTab(tab.id);
+      return;
+    }
+  };
+
+  const label = (state: AgentStatusEntry["state"], n: number) =>
+    n === 0 ? null : (
+      <span className={`fleet-agg-count fleet-agg-${state}`} key={state}>
+        {state} {n}
+      </span>
+    );
+
+  return (
+    <button
+      type="button"
+      className="status-bar-item fleet-aggregate"
+      data-testid="fleet-aggregate"
+      title="Jump to the agent that needs attention first"
+      onClick={jumpToAttention}
+    >
+      <Users size={13} />
+      {FLEET_ATTENTION.map((state) => label(state, fleet.counts[state]))}
+    </button>
+  );
+}
 
 export function StatusBar(): React.ReactElement {
   const cwd = useTerminalStore((s) => s.getActiveCwd());
@@ -101,6 +174,8 @@ export function StatusBar(): React.ReactElement {
             <span>{`localhost:${port.port}`}</span>
           </button>
         ))}
+
+        <FleetAggregate />
       </div>
 
       <div className="status-bar-section status-bar-section-right">
