@@ -40,7 +40,7 @@ import {
   leafIds,
 } from "./layoutQueries";
 import { triggerDebouncedSaveLayout } from "./layoutSaveScheduler";
-import { buildMultiBranchGridLayout } from "../../lib/pane-manager/gridLayout";
+import { buildMultiBranchGridLayout, createGridLayout } from "../../lib/pane-manager/gridLayout";
 import { extractRepoName } from "./worktreeRegistrySlice";
 
 type Set = (
@@ -52,6 +52,9 @@ type Set = (
 export interface TabState {
   id: string;
   title?: string;
+  // Sticky folder/repo binding: set at creation, never re-derived from live
+  // cwd (a cd must not hop workspaces). Empty for wizard/legacy tabs.
+  workspaceKey?: string;
   layout: Layout;
   focusedPath: Path;
   isWizard?: boolean;
@@ -90,6 +93,16 @@ export interface PaneLayoutSlice {
   swapFocusedPane: (dir: "left" | "right" | "up" | "down") => void;
   tileProjectBranches: (repoId: string, worktreeIds?: string[]) => Promise<string>;
   focusBranchPane: (worktreeId: string) => Promise<void>;
+  mergeSessionsIntoWorkspace: (
+    tabId: string,
+    sessionIds: string[],
+    opts?: {
+      workspaceKey?: string;
+      title?: string;
+      clearWizard?: boolean;
+      worktreeIdsBySession?: Record<string, string>;
+    },
+  ) => Promise<void>;
   saveLayout: () => Promise<void>;
   loadLayout: () => Promise<void>;
 }
@@ -116,6 +129,7 @@ export function createPaneLayoutSlice(
       const tabId = generateNextTabId(currentTabs);
       const newTab: TabState = {
         id: tabId,
+        ...(resolvedCwd ? { workspaceKey: resolvedCwd } : {}),
         layout: { type: "leaf", id: sessionId },
         focusedPath: [],
       };
@@ -270,7 +284,7 @@ export function createPaneLayoutSlice(
               savedSession && (savedSession.cols !== undefined || savedSession.rows !== undefined)
                 ? { cols: savedSession.cols, rows: savedSession.rows }
                 : undefined;
-            const newId = await get().spawnSession(savedSession?.cwd, undefined, oldId, geometry);
+            const newId = await get().spawnSession(savedSession?.cwd, undefined, oldId, geometry, savedSession?.worktreeId);
             remap[oldId] = newId;
 
             if (oldId !== newId) {
@@ -771,6 +785,72 @@ export function createPaneLayoutSlice(
       }
     },
 
+    // Attach daemon-held sessions (fleet slots, reopened worktrees) into an
+    // existing tab and re-tile its grid. Snapshot-then-set: leaf ids captured
+    // before the async attaches, one layout write after — a user split racing
+    // the merge lands in the rebuilt grid, never a torn tree.
+    mergeSessionsIntoWorkspace: async (tabId, sessionIds, opts) => {
+      const state = get();
+      const tab = getSyncedTabs(state).find((t) => t.id === tabId);
+      if (!tab || sessionIds.length === 0) return;
+
+      const isPlaceholder = tab.layout.type === "leaf" && !tab.layout.id;
+      // Existing leaves minus the throwaway placeholder; DFS order preserved.
+      const existingLeaves = isPlaceholder ? [] : leafIds(tab.layout);
+      const incoming = sessionIds.filter((id) => id && !existingLeaves.includes(id));
+      if (incoming.length === 0 && !opts?.clearWizard) return;
+
+      const attached: string[] = [];
+      // Attach in parallel — order comes from the array, not the resolve order.
+      await Promise.all(
+        incoming.map(async (sessionId) => {
+          const worktreeId = opts?.worktreeIdsBySession?.[sessionId];
+          const id = await get().spawnSession(
+            undefined,
+            undefined,
+            sessionId,
+            undefined,
+            worktreeId,
+          );
+          if (id) attached.push(id);
+        }),
+      );
+
+      set((s) => {
+        const currentTabs = getSyncedTabs(s);
+        const current = currentTabs.find((t) => t.id === tabId);
+        if (!current) return {};
+        // Re-read leaves at write time: mid-merge splits must survive.
+        const liveLeaves =
+          current.layout.type === "leaf" && !current.layout.id
+            ? []
+            : leafIds(current.layout);
+        const merged = [...liveLeaves, ...attached];
+        // ponytail: equal-ratio grid on membership change; ratio-preserving
+        // reflow if users demand their manual tuning survives merges.
+        const layout = createGridLayout(merged.length, merged);
+        const focusedPath = firstLeafPath(layout);
+        const updated = currentTabs.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                layout,
+                focusedPath,
+                ...(opts?.clearWizard ? { isWizard: false } : {}),
+                ...(opts?.workspaceKey ? { workspaceKey: opts.workspaceKey } : {}),
+                ...(opts?.title ? { title: opts.title } : {}),
+              }
+            : t,
+        );
+        const isActive = s.activeTabId === tabId;
+        return {
+          tabs: updated,
+          ...(isActive ? { layout, focusedPath } : {}),
+        };
+      });
+      triggerDebouncedSaveLayout(get);
+    },
+
     // Persist the current multi-tab layout, session state, UI view state, and active scrollbacks.
     saveLayout: async () => {
       if (!get().ready) return;
@@ -795,7 +875,7 @@ export function createPaneLayoutSlice(
       const currentTabs = getSyncedTabs(get());
       const windowState = await getSavedWindowState();
       const snapshot = {
-        version: 2,
+        version: 3,
         ...(windowState ? { window: windowState } : {}),
         ui: {
           leftSidebarOpen,
@@ -814,6 +894,7 @@ export function createPaneLayoutSlice(
         tabs: currentTabs.map((t) => ({
           id: t.id,
           ...(t.title !== undefined ? { title: t.title } : {}),
+          ...(t.workspaceKey !== undefined ? { workspaceKey: t.workspaceKey } : {}),
           ...(t.isWizard !== undefined ? { isWizard: t.isWizard } : {}),
           layout: t.layout,
           focusedPath: t.focusedPath,
@@ -826,6 +907,7 @@ export function createPaneLayoutSlice(
           cwd: s.cwd,
           cols: s.cols,
           rows: s.rows,
+          ...(s.worktreeId ? { worktreeId: s.worktreeId } : {}),
         })),
       };
       await transportSaveLayout(JSON.stringify(snapshot));
@@ -913,7 +995,19 @@ export function createPaneLayoutSlice(
         const remap: Record<string, string> = {};
 
         if (Array.isArray(parsed.tabs)) {
-          if (parsed.tabs.length === 0) {
+          // v3 migration: derive a sticky folder binding for v2 tabs that
+          // lack one — the first session's cwd is the best proxy for where
+          // the workspace lived. Wizard tabs keep an empty key.
+          const restoredTabsInput: TabState[] = parsed.tabs.map((t) =>
+            t.workspaceKey === undefined && !t.isWizard
+              ? {
+                  ...t,
+                  workspaceKey:
+                    byId.get(leafIds(t.layout).find((id) => id) ?? "")?.cwd ?? undefined,
+                }
+              : t,
+          );
+          if (restoredTabsInput.length === 0) {
             set({
               tabs: [],
               activeTabId: "",
@@ -993,6 +1087,7 @@ export function createPaneLayoutSlice(
                   cols: saved?.cols || DEFAULT_COLS,
                   rows: saved?.rows || DEFAULT_ROWS,
                   ...(saved?.isRestored ? { isRestored: true } : {}),
+                  ...(saved?.worktreeId ? { worktreeId: saved.worktreeId } : {}),
                 };
               }
             }
@@ -1012,6 +1107,7 @@ export function createPaneLayoutSlice(
                 undefined,
                 oldId,
                 geometry,
+                savedSession?.worktreeId,
               );
               remap[oldId] = newId;
               if (oldId !== newId) {
@@ -1049,7 +1145,7 @@ export function createPaneLayoutSlice(
             }),
           );
 
-          const restoredTabs: TabState[] = parsed.tabs.map((tab) => {
+          const restoredTabs: TabState[] = restoredTabsInput.map((tab) => {
             if (tab.isWizard) {
               return {
                 id: tab.id,
@@ -1059,11 +1155,13 @@ export function createPaneLayoutSlice(
                 focusedPath: [],
               };
             }
+            const key = tab.workspaceKey;
             if (tab.id === activeTabId) {
               const remappedLayout = remapLeafIds(tab.layout, remap);
               return {
                 id: tab.id,
                 ...(tab.title !== undefined ? { title: tab.title } : {}),
+                ...(key !== undefined ? { workspaceKey: key } : {}),
                 layout: remappedLayout,
                 focusedPath: tab.focusedPath ?? firstLeafPath(remappedLayout),
                 isSleeping: false,
@@ -1072,6 +1170,7 @@ export function createPaneLayoutSlice(
             return {
               id: tab.id,
               ...(tab.title !== undefined ? { title: tab.title } : {}),
+              ...(key !== undefined ? { workspaceKey: key } : {}),
               layout: tab.layout,
               focusedPath: tab.focusedPath ?? firstLeafPath(tab.layout),
               isSleeping: true,
@@ -1140,6 +1239,7 @@ export function createPaneLayoutSlice(
                 undefined,
                 oldId,
                 geometry,
+                savedSession?.worktreeId,
               );
               remap[oldId] = newId;
               if (oldId !== newId) {

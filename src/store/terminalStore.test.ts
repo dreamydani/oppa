@@ -150,6 +150,14 @@ function spawnRes(id: string, is_new = true, snapshot?: string | null): transpor
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
 }
 
+// Leaf ids in DFS order for asserting rebuilt grid layouts.
+function leafIdList(node: unknown): string[] {
+  if (!node || typeof node !== "object") return [];
+  const n = node as { type?: string; id?: string; a?: unknown; b?: unknown };
+  if (n.type === "leaf") return [n.id ?? ""];
+  return [...leafIdList(n.a), ...leafIdList(n.b)];
+}
+
 // Module-init subscriptions register during import; capture before clearAllMocks runs.
 const titleChangedHandler = vi.mocked(transport.onTitleChanged).mock.calls[0]?.[0];
 const focusRequestedHandler = vi.mocked(transport.onFocusRequested).mock.calls[0]?.[0];
@@ -1104,7 +1112,7 @@ describe("terminalStore", () => {
       const parsed = JSON.parse(json);
       expect(parsed).toEqual(
         expect.objectContaining({
-          version: 2,
+          version: 3,
           ui: expect.any(Object),
           tabs: [
             {
@@ -1244,7 +1252,7 @@ describe("terminalStore", () => {
       await useTerminalStore.getState().saveLayout();
       expect(saveLayoutMock).toHaveBeenCalled();
       const savedJson = JSON.parse(saveLayoutMock.mock.calls[0][0]);
-      expect(savedJson.version).toBe(2);
+      expect(savedJson.version).toBe(3);
       expect(savedJson.ui).toEqual(
         expect.objectContaining({
           leftSidebarOpen: true,
@@ -4876,6 +4884,221 @@ describe("terminalStore", () => {
       await useTerminalStore.getState().focusBranchPane("wt-unopened");
 
       expect(createTabSpy).toHaveBeenCalledWith("C:/projects/oppa/wt-new", "wt-unopened");
+    });
+  });
+
+  describe("workspace model (workspaceKey, mergeSessionsIntoWorkspace)", () => {
+    it("saveLayout persists workspaceKey and worktreeId per tab/session (v3)", async () => {
+      useTerminalStore.setState({
+        ready: true,
+        tabs: [
+          {
+            id: "tab-1",
+            title: "oppa",
+            workspaceKey: "C:/projects/oppa",
+            layout: { type: "leaf", id: "sess-1" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-1",
+        sessions: {
+          "sess-1": {
+            id: "sess-1",
+            title: "feat-a",
+            status: "running",
+            cwd: "C:/projects/oppa/wt-1",
+            worktreeId: "wt-1",
+            cols: 80,
+            rows: 24,
+          },
+        },
+      });
+
+      await useTerminalStore.getState().saveLayout();
+
+      const parsed = JSON.parse(saveLayoutMock.mock.calls[0][0]);
+      expect(parsed.version).toBe(3);
+      expect(parsed.tabs[0].workspaceKey).toBe("C:/projects/oppa");
+      expect(parsed.sessions[0].worktreeId).toBe("wt-1");
+    });
+
+    it("loadLayout restores workspaceKey and worktreeId from a v3 snapshot", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          version: 3,
+          tabs: [
+            {
+              id: "tab-1",
+              title: "oppa",
+              workspaceKey: "C:/projects/oppa",
+              layout: { type: "leaf", id: "old-1" },
+              focusedPath: [],
+            },
+          ],
+          activeTabId: "tab-1",
+          sessions: [
+            {
+              id: "old-1",
+              title: "feat-a",
+              status: "running",
+              cwd: "C:/projects/oppa/wt-1",
+              worktreeId: "wt-1",
+              cols: 80,
+              rows: 24,
+            },
+          ],
+        }),
+      );
+      ptySpawnMock.mockResolvedValue(spawnRes("new-1"));
+
+      await useTerminalStore.getState().loadLayout();
+
+      const state = useTerminalStore.getState();
+      expect(state.tabs[0].workspaceKey).toBe("C:/projects/oppa");
+      expect(state.sessions["new-1"].worktreeId).toBe("wt-1");
+    });
+
+    it("loadLayout migrates a v2 snapshot by deriving workspaceKey from the first session cwd", async () => {
+      loadLayoutMock.mockResolvedValue(
+        JSON.stringify({
+          version: 2,
+          tabs: [
+            {
+              id: "tab-1",
+              title: "oppa",
+              layout: { type: "leaf", id: "old-1" },
+              focusedPath: [],
+            },
+          ],
+          activeTabId: "tab-1",
+          sessions: [
+            { id: "old-1", title: "shell", status: "running", cwd: "C:/legacy/dir", cols: 80, rows: 24 },
+          ],
+        }),
+      );
+      ptySpawnMock.mockResolvedValue(spawnRes("new-1"));
+
+      await useTerminalStore.getState().loadLayout();
+
+      const state = useTerminalStore.getState();
+      expect(state.tabs[0].workspaceKey).toBe("C:/legacy/dir");
+    });
+
+    it("mergeSessionsIntoWorkspace attaches warm sessions and rebuilds one grid", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "tab-1",
+            title: "oppa",
+            workspaceKey: "C:/projects/oppa",
+            layout: { type: "leaf", id: "s-base" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-1",
+        sessions: {
+          "s-base": { id: "s-base", title: "base", status: "running", cwd: "C:/projects/oppa", cols: 80, rows: 24 },
+        },
+      });
+      // Daemon already holds the fleet sessions; attaching passes existingId only.
+      ptySpawnMock
+        .mockResolvedValueOnce(spawnRes("s-agent-1", false))
+        .mockResolvedValueOnce(spawnRes("s-agent-2", false));
+
+      await useTerminalStore.getState().mergeSessionsIntoWorkspace("tab-1", ["s-agent-1", "s-agent-2"]);
+
+      // Attach calls reuse the daemon session ids (no fresh shell spawns).
+      expect(ptySpawnMock.mock.calls.map((c) => c[0])).toEqual([
+        { id: "s-agent-1" },
+        { id: "s-agent-2" },
+      ]);
+      const state = useTerminalStore.getState();
+      const tab = state.tabs.find((t) => t.id === "tab-1");
+      expect(leafIdList(tab?.layout)).toEqual(["s-base", "s-agent-1", "s-agent-2"]);
+      expect(state.sessions["s-agent-1"].status).toBe("running");
+    });
+
+    it("mergeSessionsIntoWorkspace replaces an empty placeholder leaf instead of keeping it", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "tab-wizard",
+            title: "New Workspace",
+            isWizard: true,
+            layout: { type: "leaf", id: "" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-wizard",
+        sessions: {},
+      });
+      ptySpawnMock
+        .mockResolvedValueOnce(spawnRes("s-a", false))
+        .mockResolvedValueOnce(spawnRes("s-b", false));
+
+      await useTerminalStore
+        .getState()
+        .mergeSessionsIntoWorkspace("tab-wizard", ["s-a", "s-b"], {
+          workspaceKey: "C:/projects/oppa",
+          title: "oppa agents",
+          clearWizard: true,
+        });
+
+      const state = useTerminalStore.getState();
+      const tab = state.tabs.find((t) => t.id === "tab-wizard");
+      expect(tab?.isWizard).toBeFalsy();
+      expect(tab?.title).toBe("oppa agents");
+      expect(tab?.workspaceKey).toBe("C:/projects/oppa");
+      expect(leafIdList(tab?.layout)).toEqual(["s-a", "s-b"]);
+    });
+
+    it("mergeSessionsIntoWorkspace keeps manual split changes racing the merge (snapshot-then-set)", async () => {
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "tab-1",
+            title: "oppa",
+            workspaceKey: "C:/projects/oppa",
+            layout: { type: "leaf", id: "s-base" },
+            focusedPath: [],
+          },
+        ],
+        activeTabId: "tab-1",
+        sessions: {
+          "s-base": { id: "s-base", title: "base", status: "running", cwd: "C:/projects/oppa", cols: 80, rows: 24 },
+        },
+      });
+      ptySpawnMock.mockImplementation(async (opts) => {
+        // User splits the pane while the attach is in flight: base gains a child.
+        if (opts && typeof opts === "object" && "id" in opts) {
+          useTerminalStore.setState((s) => ({
+            tabs: s.tabs.map((t) =>
+              t.id === "tab-1"
+                ? {
+                    ...t,
+                    layout: {
+                      type: "split",
+                      dir: "h",
+                      ratio: 0.5,
+                      a: { type: "leaf", id: "s-base" },
+                      b: { type: "leaf", id: "s-mid-race" },
+                    },
+                  }
+                : t,
+            ),
+          }));
+        }
+        return spawnRes((opts as { id?: string })?.id ?? "s-x", false);
+      });
+
+      await useTerminalStore.getState().mergeSessionsIntoWorkspace("tab-1", ["s-agent-1"]);
+
+      const tab = useTerminalStore.getState().tabs.find((t) => t.id === "tab-1");
+      const ids = leafIdList(tab?.layout);
+      expect(ids).toContain("s-base");
+      expect(ids).toContain("s-mid-race");
+      expect(ids).toContain("s-agent-1");
+      expect(ids).not.toContain("");
     });
   });
 });

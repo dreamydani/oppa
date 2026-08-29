@@ -162,15 +162,15 @@ export function createWorkspaceLaunchSlice(
 
     launchWorkspaceForTab: async (tabId, config) => {
       const count = Math.max(1, config.terminalCount || 1);
-      const sessionIds: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const id = await get().spawnSession(config.cwd, config.shell);
-        sessionIds.push(id);
-        if (config.commands && config.commands[i] && config.commands[i].trim()) {
-          const cmd = config.commands[i].trim();
-          void ptyWrite(id, `${cmd}\n`).catch(() => {});
-        }
-      }
+      // Parallel spawns; array order preserves pane order regardless of resolve order.
+      const sessionIds = await Promise.all(
+        Array.from({ length: count }, async (_, i) => {
+          const id = await get().spawnSession(config.cwd, config.shell);
+          const cmd = config.commands?.[i]?.trim();
+          if (cmd) void ptyWrite(id, `${cmd}\n`).catch(() => {});
+          return id;
+        }),
+      );
 
       const layout = createGridLayout(count, sessionIds);
       const title = deriveWorkspaceTitle(config, tabId);
@@ -183,6 +183,7 @@ export function createWorkspaceLaunchSlice(
             ? {
                 ...t,
                 title,
+                workspaceKey: config.cwd || t.workspaceKey,
                 isWizard: false,
                 layout,
                 focusedPath: targetFocusedPath,
@@ -209,15 +210,15 @@ export function createWorkspaceLaunchSlice(
 
     launchCustomWorkspace: async (config) => {
       const count = Math.max(1, config.terminalCount || 1);
-      const sessionIds: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const id = await get().spawnSession(config.cwd, config.shell);
-        sessionIds.push(id);
-        if (config.commands && config.commands[i] && config.commands[i].trim()) {
-          const cmd = config.commands[i].trim();
-          void ptyWrite(id, `${cmd}\n`).catch(() => {});
-        }
-      }
+      // Parallel spawns; array order preserves pane order regardless of resolve order.
+      const sessionIds = await Promise.all(
+        Array.from({ length: count }, async (_, i) => {
+          const id = await get().spawnSession(config.cwd, config.shell);
+          const cmd = config.commands?.[i]?.trim();
+          if (cmd) void ptyWrite(id, `${cmd}\n`).catch(() => {});
+          return id;
+        }),
+      );
 
       const layout = createGridLayout(count, sessionIds);
       const currentTabs = getSyncedTabs(get());
@@ -227,6 +228,7 @@ export function createWorkspaceLaunchSlice(
       const newTab: TabState = {
         id: tabId,
         title,
+        ...(config.cwd ? { workspaceKey: config.cwd } : {}),
         layout,
         focusedPath: firstLeafPath(layout),
       };
