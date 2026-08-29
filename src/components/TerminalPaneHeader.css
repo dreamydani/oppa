@@ -44,7 +44,8 @@
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  transition: color 0.12s ease, background-color 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out);
   max-width: 180px;
   line-height: normal;
 }
@@ -86,7 +87,7 @@
   height: 24px;
   box-sizing: border-box;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: border-color 0.12s ease;
+  transition: border-color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-pane-header-rename-input:focus {
@@ -112,7 +113,12 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   padding: 0;
 }
 
@@ -163,7 +169,8 @@
   border-radius: 4px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.1s ease, color 0.1s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-pane-header-menu-item:hover {
@@ -232,7 +239,7 @@
   border-radius: 4px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-pane-header-switcher-row:hover {
@@ -278,7 +285,7 @@
   background-color: var(--status-running);
   opacity: 1;
   box-shadow: 0 0 5px color-mix(in srgb, var(--status-running) 45%, transparent);
-  animation: workingDotPulse 1.6s ease-in-out infinite;
+  animation: workingDotPulse 1.6s var(--ease-in-out) infinite;
 }
 
 @keyframes workingDotPulse {
@@ -307,9 +314,11 @@
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
-  animation: restoredBadgeFadeIn 0.2s ease-out;
+  animation: restoredBadgeFadeIn var(--dur-base) var(--ease-out);
   flex-shrink: 0;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-restored-badge:hover {
@@ -365,7 +374,8 @@
   color: var(--text-muted);
   cursor: pointer;
   border-radius: 3px;
-  transition: color 0.1s ease, background-color 0.1s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out);
 }
 
 .restored-dismiss-btn:hover {
@@ -399,7 +409,9 @@
   user-select: none;
   max-width: 140px;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-pane-header-branch-badge:hover {

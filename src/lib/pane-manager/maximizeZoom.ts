@@ -52,13 +52,7 @@ export function computeFlipTransform(
   };
 }
 
-export function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+export { prefersReducedMotion } from "../motion/reducedMotion";
 
 // Applies the inverted start state, releases it under a transform transition,
 // and cleans up inline styles on transitionend with a timer fallback.

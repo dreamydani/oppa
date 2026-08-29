@@ -1,0 +1,299 @@
+/* ==========================================================================
+   MOTION LAYER — shared enter/exit choreography.
+
+   Imported after theme.css. Holds only @keyframes and [data-motion] state
+   rules: the tokens themselves live in theme.css (enforced by tokens.test.ts),
+   and this sheet defines no custom properties so it cannot fork them.
+
+   Why `data-state` + animation rather than a transition:
+   A transition has nothing to interpolate from on mount, so the open half of
+   an open/close pair cannot animate without a forced-reflow dance in JS.
+   Keyframes auto-play, so both directions are declarative and the only thing
+   JS contributes is keeping the node mounted long enough to play its exit
+   (see lib/motion/useExitPresence.ts).
+
+   Contract for a surface:
+     data-motion="pop" | "modal" | "scrim" | "view" | "reveal"
+     data-state="open" | "closed"
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Context menus
+   Entrance only, by design. A dismissed context menu must be gone the instant
+   the user clicks away — anything else delays the next interaction, and every
+   native OS menu dismisses instantly too. What it *does* need is to appear to
+   grow out of the point that summoned it, so the origin is set inline from the
+   click coordinates rather than defaulting to the element's centre.
+   -------------------------------------------------------------------------- */
+[data-motion="menu"] {
+  animation: oppa-menu-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes oppa-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Popovers, menus, dropdowns
+   Entrance is 200ms arriving fast and settling; exit is a quicker 140ms
+   departure so a dismissed menu stops eating the cursor's time. Exits use
+   --ease-in: the element lingers a beat, then leaves, which reads as "thrown
+   away" instead of the entrance played backwards.
+   -------------------------------------------------------------------------- */
+[data-motion="pop"][data-state="open"] {
+  animation: oppa-pop-in var(--dur-base) var(--ease-out) both;
+}
+
+[data-motion="pop"][data-state="closed"] {
+  animation: oppa-pop-out var(--dur-fast) var(--ease-in) both;
+  pointer-events: none;
+}
+
+@keyframes oppa-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translate3d(0, -4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes oppa-pop-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98) translate3d(0, -2px, 0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Modals — heavier and slower than a popover because a modal is a page-level
+   interruption. --ease-spring gives the card mass: it passes 1.0 and settles.
+   -------------------------------------------------------------------------- */
+[data-motion="modal"][data-state="open"] {
+  animation: oppa-modal-in var(--dur-mid) var(--ease-spring) both;
+}
+
+[data-motion="modal"][data-state="closed"] {
+  animation: oppa-modal-out var(--dur-fast) var(--ease-in) both;
+  pointer-events: none;
+}
+
+@keyframes oppa-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes oppa-modal-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97) translate3d(0, 4px, 0);
+  }
+}
+
+/* A scrim must never pop. Without this the dim + blur snaps on and off while
+   the card above it animates, which reads as a screen tear. */
+[data-motion="scrim"][data-state="open"] {
+  animation: oppa-scrim-in var(--dur-mid) var(--ease-out) both;
+}
+
+[data-motion="scrim"][data-state="closed"] {
+  animation: oppa-scrim-out var(--dur-fast) var(--ease-in) both;
+}
+
+@keyframes oppa-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes oppa-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   View swaps — settings panes, sidebar tabs, wizard steps, browser hub.
+   Travels a short distance so direction is legible without implying a page
+   that slides all the way across the viewport.
+   -------------------------------------------------------------------------- */
+[data-motion="view"][data-state="open"] {
+  animation: oppa-view-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes oppa-view-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Inline reveals — hover-revealed row actions, badges, toasts.
+   Deliberately faster than a popover: these appear under a stationary cursor
+   and anything slower feels like the UI is hesitating.
+   -------------------------------------------------------------------------- */
+[data-motion="reveal"][data-state="open"] {
+  animation: oppa-reveal-in var(--dur-fast) var(--ease-out) both;
+}
+
+[data-motion="reveal"][data-state="closed"] {
+  animation: oppa-reveal-out var(--dur-fast) var(--ease-in) both;
+}
+
+@keyframes oppa-reveal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-4px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes oppa-reveal-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   List staggering.
+   The cap is the important part: --stagger-cap bounds total latency so a
+   40-row workspace list still finishes arriving inside ~200ms. Rows past the
+   cap share the final delay and land together.
+   Consumers set --row-index inline (see WorkspaceList.tsx).
+   -------------------------------------------------------------------------- */
+[data-motion="stagger"][data-state="open"] > * {
+  animation: oppa-row-in var(--dur-base) var(--ease-out) both;
+  animation-delay: calc(
+    var(--stagger-step) * min(var(--row-index, 0), var(--stagger-cap))
+  );
+}
+
+@keyframes oppa-row-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Press feedback.
+   Every button in the app changes colour on :active or not at all. A 2%
+   contraction on press is the single cheapest way to make a surface feel
+   physical, and it is the one interaction in the app that is guaranteed to
+   be user-initiated, so it can never feel gratuitous.
+   -------------------------------------------------------------------------- */
+[data-motion="pressable"]:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* --------------------------------------------------------------------------
+   Travelling indicator.
+   A sliding pill communicates that tabs share one axis and that the active
+   state is a single value moving along it. Recolouring in place does not.
+   translate + scaleX only: width/height would relayout the whole tab strip on
+   every frame, and the pill is an empty box so a non-uniform scale is invisible
+   to the user. Consumers position it with `--indicator-shift` / `--indicator-x`
+   computed from the active tab's offsetLeft/offsetWidth.
+   -------------------------------------------------------------------------- */
+[data-motion="indicator"] {
+  transition: transform var(--dur-base) var(--ease-in-out),
+              opacity var(--dur-micro) var(--ease-out);
+}
+
+/* Reduced motion: the global override in theme.css removes displacement from
+   transitions but animations are separate. Strip the travel from every
+   entrance here and let the opacity carry it. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes oppa-pop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes oppa-modal-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes oppa-view-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes oppa-row-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes oppa-reveal-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  [data-motion="pressable"]:active:not(:disabled) {
+    transform: none;
+  }
+}

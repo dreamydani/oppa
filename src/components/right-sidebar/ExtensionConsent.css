@@ -89,7 +89,7 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.15s ease;
+  transition: filter var(--dur-micro) var(--ease-out);
 }
 
 .ext-consent-btn:hover {
@@ -130,7 +130,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: ext-toast-in 160ms ease-out;
+  animation: ext-toast-in var(--dur-base) var(--ease-out) both;
 }
 
 .extension-toast strong {

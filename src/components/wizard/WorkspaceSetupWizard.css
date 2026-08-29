@@ -129,7 +129,12 @@
   border: 1px solid var(--wizard-border);
   color: var(--wizard-text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-close-btn:hover {
@@ -167,7 +172,12 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -336,7 +346,7 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 8px;
-  transition: border-color 0.12s ease;
+  transition: border-color var(--dur-micro) var(--ease-out);
   box-sizing: border-box;
 }
 
@@ -400,7 +410,12 @@
   color: var(--wizard-text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
   box-sizing: border-box;
 }
@@ -421,7 +436,7 @@
 
 .wizard-dropdown-chevron {
   color: var(--wizard-text-muted);
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-custom-dropdown.open .wizard-dropdown-chevron {
@@ -458,7 +473,12 @@
   color: var(--wizard-text-secondary);
   font-size: 12.5px;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   text-align: left;
   width: 100%;
 }
@@ -557,7 +577,12 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-cd-submit-btn:hover {
@@ -586,7 +611,12 @@
   gap: 6px;
   min-height: 60px;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -686,7 +716,12 @@
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-recent-card:hover {
@@ -764,7 +799,12 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-preset-chip:hover {
@@ -804,7 +844,12 @@
   border: 1px solid var(--wizard-border);
   cursor: pointer;
   text-align: left;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -910,7 +955,12 @@
    Save Preset Switch Card
    ========================================================================== */
 .wizard-preset-save-card {
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-preset-toggle-row {
@@ -982,7 +1032,12 @@
   background: var(--wizard-bg-sunken);
   border: 1px solid var(--wizard-border);
   border-radius: 9999px;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-switch-slider::before {
@@ -994,7 +1049,12 @@
   bottom: 2px;
   background: var(--wizard-text-muted);
   border-radius: 50%;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .wizard-switch-input:checked + .wizard-switch-slider {
@@ -1043,7 +1103,12 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -1125,7 +1190,9 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out);
 }
 
 .wizard-mode-btn:hover {
@@ -1215,7 +1282,8 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .wizard-parallel-slot-tool:hover {

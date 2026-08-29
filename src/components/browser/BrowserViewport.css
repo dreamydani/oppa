@@ -42,7 +42,12 @@
   border: 1px solid transparent;
   color: var(--muted-foreground, #9e9e9a);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   padding: 0;
 }
 
@@ -71,7 +76,8 @@
   border-radius: var(--radius-md, 6px);
   padding: 0 8px;
   gap: 6px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out);
 }
 
 .omnibox-input-wrapper:focus-within {
@@ -132,7 +138,12 @@
   color: var(--muted-foreground, #9e9e9a);
   cursor: pointer;
   padding: 0;
-  transition: all 0.1s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .omnibox-clear-btn:hover {
@@ -175,7 +186,12 @@
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .device-preset-btn:hover {
@@ -338,7 +354,12 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-lg, 8px);
   padding: 0 6px 0 12px;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .hub-search-input-wrapper:focus-within {
@@ -375,7 +396,7 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .hub-search-btn:hover {
@@ -436,7 +457,12 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-lg, 8px);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   text-align: left;
   font-family: var(--font-sans);
 }
@@ -531,7 +557,12 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-lg, 8px);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   text-align: left;
   font-family: var(--font-sans);
 }
@@ -557,7 +588,8 @@
 
 .bookmark-arrow {
   color: var(--text-faint, #71717a);
-  transition: color 0.15s ease, transform 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .hub-bookmark-card:hover .bookmark-arrow {

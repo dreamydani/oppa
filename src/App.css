@@ -269,7 +269,8 @@
   outline: none;
   font-family: inherit;
   line-height: normal;
-  transition: color 0.12s ease, background-color 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out);
 }
 
 .mode-tab:hover:not(.disabled):not(.active) {
@@ -308,7 +309,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .title-bar-icon-btn:hover {
@@ -339,7 +341,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .window-control-btn:hover {
@@ -474,9 +477,9 @@
   contain: layout paint style;
   /* Reveal-side durations: a restored sibling fades/scales back in here;
      the hide side lives on .pane-hidden (destination-state rule wins). */
-  transition: border-color 0.12s ease,
+  transition: border-color var(--dur-micro) var(--ease-out),
               border-radius var(--dur-zoom-in) var(--ease-dolly),
-              opacity var(--dur-zoom-in) ease,
+              opacity var(--dur-zoom-in) var(--ease-out),
               transform var(--dur-zoom-in) var(--ease-dolly);
 }
 
@@ -501,7 +504,7 @@
   visibility: hidden;
   pointer-events: none;
   transform: scale(0.985);
-  transition: opacity var(--dur-zoom-out) ease,
+  transition: opacity var(--dur-zoom-out) var(--ease-out),
               transform var(--dur-zoom-out) var(--ease-dolly),
               visibility 0s linear var(--dur-zoom-out);
 }
@@ -512,7 +515,7 @@
 
 .pane-leaf.is-drag-source {
   opacity: 0.35;
-  transition: opacity 0.1s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .pane-drop-overlay {
@@ -523,11 +526,12 @@
   border: 1.5px dashed var(--accent-blue, #58a6ff);
   border-radius: 6px;
   box-sizing: border-box;
-  transition: top 0.12s cubic-bezier(0.16, 1, 0.3, 1),
-              left 0.12s cubic-bezier(0.16, 1, 0.3, 1),
-              width 0.12s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.12s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.1s ease;
+  /* Position snaps deliberately. Easing top/left/width/height costs a relayout
+     of the pane grid on every frame of a pointermove-driven drag, and worse,
+     leaves the indicator sitting somewhere other than where the drop would
+     actually land for the duration of the ease. Only the appearance fades.
+     Mirrors the `.is-resizing { transition: none }` decision in LeftSidebar. */
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 .pane-drop-overlay.zone-top {
@@ -563,7 +567,7 @@
   background-color: transparent;
   position: relative;
   z-index: 2;
-  transition: background-color 0.1s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .pane-divider.dir-h {
@@ -651,7 +655,7 @@
   font-size: 12px;
   outline: none;
   width: 150px;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur-micro) var(--ease-out);
 }
 
 .terminal-search-input:focus {
@@ -673,7 +677,12 @@
   min-width: 24px;
   height: 22px;
   user-select: none;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .terminal-search-btn:hover {
@@ -790,7 +799,12 @@
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
   box-sizing: border-box;
 }

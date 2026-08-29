@@ -10,6 +10,7 @@ import {
   beginLayoutAnimation,
   endLayoutAnimation,
 } from "./layoutAnimationGate";
+import { prefersReducedMotion } from "../motion/reducedMotion";
 
 export const SIDEBAR_OPEN_MS = 460; // mirror --dur-panel-open
 export const SIDEBAR_CLOSE_MS = 360; // mirror --dur-panel-close
@@ -32,14 +33,6 @@ export interface SlideDrawerOptions {
 }
 
 type Phase = "in-flow" | "hidden" | "to-open" | "to-closed";
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 // Current translateX in px from the computed matrix (interruption start).
 function currentTranslateX(el: HTMLElement): number {

@@ -36,7 +36,7 @@
   cursor: pointer;
   user-select: none;
   min-height: 28px;
-  transition: background-color 0.12s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .ws-card-header:hover {
@@ -79,7 +79,11 @@
   color: var(--text-muted, #737373);
   flex-shrink: 0;
   transform: rotate(-90deg);
-  transition: transform 0.15s ease, color 0.12s ease;
+  /* A chevron travels between two settled poses, so it moves symmetrically:
+     --dur-fast is slow enough to read the 90° arc, and neither end is an
+     arrival the eye is waiting for, hence --ease-in-out not --ease-out. */
+  transition: transform var(--dur-fast) var(--ease-in-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .ws-card-chevron.expanded {
@@ -107,7 +111,8 @@
   flex-shrink: 0;
   opacity: 0;
   padding: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .ws-card-header:hover .ws-card-action-btn {
@@ -145,7 +150,8 @@
   color: var(--text-primary, #e6e6e6);
   border: none;
   background: transparent;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .ws-row:hover {
@@ -208,12 +214,13 @@
   cursor: pointer;
   padding: 0;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .ws-row-pin-btn svg {
   transform: rotate(-45deg);
-  transition: fill 0.12s ease;
+  transition: fill var(--dur-micro) var(--ease-out);
 }
 
 .ws-row:hover .ws-row-pin-btn {
@@ -258,7 +265,7 @@
 .ws-status-circle.working {
   background: #818cf8;
   box-shadow: 0 0 6px rgba(129, 140, 248, 0.6);
-  animation: wsCirclePulse 1.4s ease-in-out infinite;
+  animation: wsCirclePulse 1.4s var(--ease-in-out) infinite;
 }
 
 .ws-status-circle.done {
@@ -291,7 +298,7 @@
   gap: 2px;
   margin-left: 4px;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
   flex-shrink: 0;
 }
 
@@ -311,7 +318,7 @@
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
-  transition: color 0.12s ease;
+  transition: color var(--dur-micro) var(--ease-out);
 }
 
 .ws-row-action-btn:hover {
@@ -344,7 +351,8 @@
   cursor: pointer;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .ws-row:hover .ws-row-menu-btn {

@@ -6,10 +6,14 @@ import type {
   RepoRecord,
   WorktreeListEntry,
 } from "../../lib/pty/transport";
+import { useExitPresence } from "../../lib/motion/useExitPresence";
 import "./worktree.css";
 
 // Catalog id of the raw-command pseudo profile; it takes a --command, not a prompt
 const GENERIC_AGENT_ID = "generic";
+
+// Mirrors the [data-motion="modal"] exit duration in styles/motion.css.
+const MODAL_EXIT_MS = 140;
 
 export function WorktreeCreateModal(): React.ReactElement | null {
   const isOpen = useTerminalStore((s) => s.isWorktreeCreateOpen);
@@ -68,7 +72,12 @@ export function WorktreeCreateModal(): React.ReactElement | null {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isOpen, closeWorktreeCreate]);
 
-  if (!isOpen) return null;
+  // Keeps the node mounted through its exit animation; without this the modal
+  // scales in over 260ms and vanishes in 0ms. Must match the --dur-fast exit in
+  // motion.css, otherwise the unmount cuts the departure short.
+  const { present, state } = useExitPresence(isOpen, MODAL_EXIT_MS);
+
+  if (!present) return null;
 
   const parentCandidates: WorktreeListEntry[] = worktrees.filter(
     (w) => !w.record.retired && w.record.repo_id === repoIdFromPath(repoPath, repos),
@@ -137,6 +146,8 @@ export function WorktreeCreateModal(): React.ReactElement | null {
   return (
     <div
       className="wt-modal-backdrop"
+      data-motion="scrim"
+      data-state={state}
       onClick={(e) => {
         if (e.target === e.currentTarget) closeWorktreeCreate();
       }}
@@ -144,7 +155,7 @@ export function WorktreeCreateModal(): React.ReactElement | null {
       aria-modal="true"
       aria-label="New Worktree"
     >
-      <div className="wt-create-card">
+      <div className="wt-create-card" data-motion="modal" data-state={state}>
         <div className="wt-create-header">
           <h3>New Worktree</h3>
           <p>Creates a worktree (optionally with an agent) and attaches it to the active workspace grid.</p>

@@ -24,7 +24,7 @@
 .agent-status-working::before {
   background-color: var(--status-running, #34d399);
   box-shadow: 0 0 5px color-mix(in srgb, var(--status-running, #34d399) 45%, transparent);
-  animation: agentStatusPulse 1.6s ease-in-out infinite;
+  animation: agentStatusPulse 1.6s var(--ease-in-out) infinite;
 }
 
 /* Kept for callers that still probe the spinner node; the core now pulses. */

@@ -18,20 +18,25 @@
   font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 }
 
+/* Sweep one narrow band instead of animating `background-position` across the
+   whole viewport: background-position repaints every frame, the worst possible
+   thing to run fullscreen on a machine already streaming PTY output.
+   translate3d keeps it on the compositor. */
 .terminal-loading-shimmer {
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
   bottom: 0;
+  left: -60%;
+  width: 60%;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.025) 50%,
+    rgba(255, 255, 255, 0.045) 50%,
     transparent 100%
   );
-  background-size: 200% 100%;
-  animation: terminalShimmer 2s infinite ease-in-out;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  animation: terminalShimmer 1.6s var(--ease-in-out) infinite;
   pointer-events: none;
 }
 
@@ -76,18 +81,20 @@
 }
 
 @keyframes terminalShimmer {
-  0% {
-    background-position: -200% 0;
+  /* The band is 60% of the container and starts fully off the left edge, so
+     clearing the right edge is 160% of container = 266.67% of its own width. */
+  from {
+    transform: translate3d(0, 0, 0);
   }
-  100% {
-    background-position: 200% 0;
+  to {
+    transform: translate3d(266.67%, 0, 0);
   }
 }
 
 /* Inactive Pane Dimming */
 .terminal-pane.dimmed {
   opacity: 0.78;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .terminal-pane.dimmed:hover,

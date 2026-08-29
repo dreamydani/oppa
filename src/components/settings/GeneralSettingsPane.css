@@ -83,7 +83,7 @@
   gap: 24px;
   padding: 16px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .settings-row:last-child {
@@ -163,7 +163,12 @@
   letter-spacing: -0.01em;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -190,7 +195,12 @@
   cursor: pointer;
   position: relative;
   padding: 0;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              opacity var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
   outline: none;
   flex-shrink: 0;
 }
@@ -216,7 +226,8 @@
   position: absolute;
   top: 2px;
   left: 2px;
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
   pointer-events: none;
 }
 
@@ -239,7 +250,8 @@
   font-family: var(--font-sans);
   letter-spacing: -0.01em;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out);
   box-sizing: border-box;
 }
 

@@ -1,3 +1,7 @@
+// @vitest-environment node
+// Reads the stylesheet off disk, so it cannot run in the happy-dom default
+// project. Without the override vite externalises `node:fs`, the file fails to
+// collect, and these theme invariants silently never run.
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

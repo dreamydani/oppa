@@ -25,12 +25,26 @@ function listCssFiles(dir: string): string[] {
   });
 }
 
+// Blank out CSS comment bodies while preserving every line number, so the
+// scanners below cannot be fooled by prose. Without this, a sentence like
+// "why data-state rather than a transition:" parses as a declaration whose
+// value runs until the next semicolon in the file, so the comment swallows real
+// rules and the guard reports phantom offenders.
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, (block) =>
+    block.replace(/[^\n]/g, " "),
+  );
+}
+
+function readSheet(cssPath: string): string {
+  return stripComments(readFileSync(cssPath, "utf8"));
+}
+
 function findGlobalTokenDeclarations(
   cssPath: string,
 ): { name: string; line: number }[] {
   const hits: { name: string; line: number }[] = [];
-  const lines = readFileSync(cssPath, "utf8").split(/\r?\n/);
-  lines.forEach((line, index) => {
+  readSheet(cssPath).split(/\r?\n/).forEach((line, index) => {
     const match = line.match(DECL_LINE_RE);
     if (!match) return;
     const name = `--${match[1]}`;
@@ -104,25 +118,62 @@ describe("design token one-home invariant", () => {
    fixed state in place so new CSS cannot reintroduce the drift.
    ========================================================================== */
 const TRANSITION_RE = /transition\s*:\s*([^;]+);/g;
+const ANIMATION_RE = /(?:^|[^-])animation\s*:\s*([^;]+);/g;
 // A raw duration is any <number>m?s literal. `0s` stays legal: it is how a
 // transition delays a discrete property (visibility) without moving anything.
 const RAW_DURATION_RE = /(?:^|[\s,(])(?!0s(?:\s|$))(\d*\.?\d+m?s)\b/;
 const ALL_TRANSITION_RE = /^\s*all(?:$|[\s,])/;
+// An aesthetic curve. `linear` and `steps()` are deliberately absent: those are
+// functional timing for rotations and blinkers, not taste, so they are allowed
+// to stay literal.
+const CURVE_RE = /(cubic-bezier|ease-in-out|ease-out|ease-in|\bease\b)/;
+const NAMED_TOKEN_RE = /var\(--ease-[\w-]+\)/;
+// Anything here forces a relayout on every frame of the animation. `gap` and
+// `font-size` are included because they reflow siblings too.
+const LAYOUT_PROP_RE =
+  /^(width|height|top|left|right|bottom|inset|margin|padding|gap|font-size|line-height|flex-basis)$/;
 
 type Clause = { text: string; line: number };
 
-function transitionClauses(cssPath: string): Clause[] {
-  const raw = readFileSync(cssPath, "utf8");
+/**
+ * Split a declaration into per-property clauses. Paren-aware, so the commas
+ * inside `cubic-bezier(a, b, c, d)` are never treated as separators — and
+ * checks are therefore per clause: a single tokenised property in a
+ * multi-property declaration must not excuse its neighbours.
+ */
+function splitClauses(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+function declarations(re: RegExp, cssPath: string): Clause[] {
+  const raw = readSheet(cssPath);
   const hits: Clause[] = [];
   let m: RegExpExecArray | null;
-  TRANSITION_RE.lastIndex = 0;
-  while ((m = TRANSITION_RE.exec(raw)) !== null) {
-    // Collapse the folded-whitespace of multi-line declarations onto one line.
-    const text = m[1].replace(/\s*\n\s*/g, " ").trim();
-    hits.push({ text, line: raw.slice(0, m.index).split(/\r?\n/).length });
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const line = raw.slice(0, m.index).split(/\r?\n/).length;
+    const collapsed = m[1].replace(/\s*\n\s*/g, " ").trim();
+    for (const text of splitClauses(collapsed)) hits.push({ text, line });
   }
   return hits;
 }
+
+const transitionClauses = (p: string) => declarations(TRANSITION_RE, p);
+const animationClauses = (p: string) => declarations(ANIMATION_RE, p);
 
 describe("motion discipline", () => {
   const componentSheets = listCssFiles(SRC_DIR).filter(
@@ -162,16 +213,11 @@ describe("motion discipline", () => {
     ).toEqual([]);
   });
 
-  it("requires every component transition to use an --ease-* token", () => {
+  it("requires every component transition clause to use an --ease-* token", () => {
     const offenders: string[] = [];
     for (const file of componentSheets) {
       for (const { text, line } of transitionClauses(file)) {
-        if (/^\s*none\b/.test(text)) continue;
-        const usesNamedCurve = /var\(--ease-[\w-]+\)/.test(text);
-        const namesACurve = /(cubic-bezier|ease-in-out|ease-out|ease-in|\bease\b|linear|steps\()/.test(
-          text,
-        );
-        if (namesACurve && !usesNamedCurve) {
+        if (CURVE_RE.test(text) && !NAMED_TOKEN_RE.test(text)) {
           offenders.push(
             `${relative(SRC_DIR, file)}:${line} → ${text.slice(0, 70)}`,
           );
@@ -181,6 +227,40 @@ describe("motion discipline", () => {
     expect(
       offenders,
       `Easing must come from an --ease-* token:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("keeps animation easing on tokens (linear/steps stay legal)", () => {
+    const offenders: string[] = [];
+    for (const file of componentSheets) {
+      for (const { text, line } of animationClauses(file)) {
+        if (CURVE_RE.test(text) && !NAMED_TOKEN_RE.test(text)) {
+          offenders.push(
+            `${relative(SRC_DIR, file)}:${line} → ${text.slice(0, 70)}`,
+          );
+        }
+      }
+    }
+    expect(
+      offenders,
+      `Animation easing must come from an --ease-* token:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("never interpolates a layout property", () => {
+    const offenders: string[] = [];
+    for (const file of componentSheets) {
+      for (const { text, line } of transitionClauses(file)) {
+        const prop = text.split(/\s+/)[0];
+        if (LAYOUT_PROP_RE.test(prop)) {
+          offenders.push(`${relative(SRC_DIR, file)}:${line} → ${text.slice(0, 70)}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      `Layout properties trigger relayout+repaint each frame; animate ` +
+        `transform/opacity instead:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 });

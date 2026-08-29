@@ -95,7 +95,8 @@
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .activity-tab-btn:hover {
@@ -126,7 +127,8 @@
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .activity-action-btn:hover {
@@ -180,7 +182,8 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
   border-radius: var(--radius-sm);
-  transition: background-color 0.1s ease, color 0.1s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -262,7 +265,8 @@
   font-family: var(--font-mono, monospace);
   color: var(--text-muted);
   text-align: left;
-  transition: background-color 0.1s ease, color 0.1s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .file-context-menu-item:hover {
@@ -406,7 +410,8 @@
   color: var(--muted-foreground);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .git-refresh-btn:hover {
@@ -430,7 +435,8 @@
   background: rgba(255, 255, 255, 0.03);
   color: var(--foreground);
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out);
 }
 
 .git-sync-btn:hover:not(:disabled) {
@@ -494,7 +500,7 @@
   letter-spacing: 0.05em;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .git-section-header:hover {
@@ -527,7 +533,9 @@
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out);
 }
 
 .git-bulk-btn:hover {
@@ -585,7 +593,7 @@
   font-size: 12px;
   color: var(--foreground);
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .git-file-item:hover {
@@ -631,7 +639,7 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .git-file-item:hover .git-file-actions {
@@ -650,7 +658,8 @@
   color: var(--muted-foreground);
   cursor: pointer;
   padding: 0;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .git-action-btn:hover {
@@ -772,7 +781,7 @@
   background: #238636;
   color: #ffffff;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .git-commit-btn:hover:not(:disabled) {
@@ -804,7 +813,7 @@
   color: var(--muted-foreground);
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .git-history-toggle:hover {
@@ -989,7 +998,7 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .git-note-item:hover .git-note-actions {
@@ -1309,7 +1318,8 @@
   color: var(--muted-foreground);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
 }
 
 .pr-checks-refresh-btn:hover {

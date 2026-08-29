@@ -57,7 +57,12 @@
   font-family: var(--font-sans);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color var(--dur-micro) var(--ease-in-out),
+              background-color var(--dur-micro) var(--ease-in-out),
+              border-color var(--dur-micro) var(--ease-in-out),
+              opacity var(--dur-micro) var(--ease-in-out),
+              box-shadow var(--dur-micro) var(--ease-in-out),
+              transform var(--dur-micro) var(--ease-in-out);
   white-space: nowrap;
 }
 
@@ -114,7 +119,12 @@
   padding: 0;
   margin-left: 2px;
   opacity: 0.6;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   flex-shrink: 0;
 }
 
@@ -145,7 +155,12 @@
   border: 1px solid transparent;
   color: var(--muted-foreground, #9e9e9a);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .editor-tab-btn:hover {
@@ -198,7 +213,7 @@
 
 .editor-breadcrumb-segment {
   color: var(--muted-foreground, #9e9e9a);
-  transition: color 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out);
 }
 
 .editor-breadcrumb-segment.current {
@@ -240,7 +255,12 @@
   padding: 3px 8px;
   border-radius: var(--radius-sm, 4px);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   font-family: var(--font-sans);
 }
 
@@ -270,7 +290,12 @@
   font-family: var(--font-sans);
   padding: 0 9px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
   user-select: none;
 }
 
@@ -379,7 +404,12 @@
   padding: 3px 8px;
   border-radius: var(--radius-sm, 4px);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .ai-diff-toggle-btn.active {
@@ -401,7 +431,12 @@
   border-radius: var(--radius-md, 6px);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .ai-diff-reject-btn {
@@ -467,7 +502,12 @@
   color: var(--muted-foreground, #9e9e9a);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .view-only-diff-close:hover {
@@ -504,7 +544,12 @@
   color: var(--muted-foreground, #9e9e9a);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .view-only-diff-note-btn:hover:not(:disabled) {
@@ -709,7 +754,12 @@
   padding: 2px 8px;
   border-radius: 3px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color var(--dur-micro),
+              background-color var(--dur-micro),
+              border-color var(--dur-micro),
+              opacity var(--dur-micro),
+              box-shadow var(--dur-micro),
+              transform var(--dur-micro);
 }
 
 .md-code-copy-btn:hover {
@@ -863,7 +913,7 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 .editor-empty-create-btn:hover {
@@ -882,7 +932,7 @@
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .editor-empty-secondary-btn:hover {
@@ -925,7 +975,12 @@
   color: var(--muted-foreground, #9e9e9a);
   font-size: 11.5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              opacity var(--dur-micro) var(--ease-out),
+              box-shadow var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
 }
 
 .editor-quick-file-chip:hover {
