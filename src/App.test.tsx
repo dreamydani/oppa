@@ -103,7 +103,6 @@ describe("App", () => {
       leftSidebarWidth: 240,
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
-      isWorkspaceLauncherOpen: false,
       activeAppMode: "terminal",
     });
   });
@@ -582,19 +581,16 @@ describe("App", () => {
     expect(useTerminalStore.getState().focusedPath).toEqual([0]);
   });
 
-  it("toggles workspace launcher modal on Ctrl+N or Cmd+N", () => {
-    useTerminalStore.setState({ isWorkspaceLauncherOpen: false });
+  it("opens a wizard workspace tab on Ctrl+N or Cmd+N", () => {
+    useTerminalStore.setState({ tabs: [], activeTabId: "" });
     render(<App />);
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "n", ctrlKey: true, bubbles: true }),
     );
-    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
-
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "n", ctrlKey: true, bubbles: true }),
-    );
-    expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
+    const state = useTerminalStore.getState();
+    expect(state.tabs.length).toBeGreaterThan(0);
+    expect(state.tabs[state.tabs.length - 1].isWizard).toBe(true);
   });
 
   it("renders WorkspaceSetupWizard when active tab is a wizard tab", () => {
@@ -877,9 +873,12 @@ describe("App", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-1");
   });
 
-  it("triggers workspace launcher modal on startup when startupBehavior is workspace_launcher", async () => {
+  it("opens a wizard tab on startup when startupBehavior is workspace_launcher", async () => {
     useTerminalStore.setState({
-      isWorkspaceLauncherOpen: false,
+      tabs: [],
+      activeTabId: "",
+      layout: { type: "leaf", id: "" },
+      focusedPath: [],
       settings: {
         ...useTerminalStore.getState().settings,
         general: {
@@ -892,7 +891,9 @@ describe("App", () => {
     render(<App />);
 
     await vi.waitFor(() => {
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
+      const tabs = useTerminalStore.getState().tabs;
+      expect(tabs.length).toBeGreaterThan(0);
+      expect(tabs[0].isWizard).toBe(true);
     });
   });
 

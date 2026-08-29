@@ -59,7 +59,7 @@ describe("GeneralSettingsPane", () => {
       render(<GeneralSettingsPane />);
 
       const restoreBtn = screen.getByRole("button", { name: /restore session/i });
-      const launcherBtn = screen.getByRole("button", { name: /workspace launcher/i });
+      const launcherBtn = screen.getByRole("button", { name: /setup wizard/i });
       const freshBtn = screen.getByRole("button", { name: /fresh terminal/i });
 
       expect(restoreBtn).toHaveClass("active");
@@ -94,7 +94,7 @@ describe("GeneralSettingsPane", () => {
     it("toggles safety confirmation switches", () => {
       render(<GeneralSettingsPane />);
 
-      const multiPaneSwitch = screen.getByRole("switch", { name: /confirm before closing multi-pane tabs/i });
+      const multiPaneSwitch = screen.getByRole("switch", { name: /confirm before closing multi-pane workspaces/i });
       const quitProcessSwitch = screen.getByRole("switch", { name: /confirm quit with running processes/i });
 
       expect(multiPaneSwitch).toBeChecked();

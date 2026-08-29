@@ -149,7 +149,7 @@ export function GeneralSettingsPane(): React.ReactElement {
                   className={`settings-segmented-btn ${general.startupBehavior === "workspace_launcher" ? "active" : ""}`}
                   onClick={() => setStartupBehavior("workspace_launcher")}
                 >
-                  Workspace Launcher
+                  Setup Wizard
                 </button>
                 <button
                   type="button"
@@ -171,13 +171,13 @@ export function GeneralSettingsPane(): React.ReactElement {
 
           <div className="settings-row">
             <div className="settings-row-info">
-              <span className="settings-row-label">Tab Switching Mode (Ctrl+Tab)</span>
+              <span className="settings-row-label">Workspace Switching Mode (Ctrl+Tab)</span>
               <span className="settings-row-desc">
-                Choose whether Ctrl+Tab cycles tabs sequentially by index or switches between most recently active tabs.
+                Choose whether Ctrl+Tab cycles workspaces sequentially by index or switches between most recently active ones.
               </span>
             </div>
             <div className="settings-row-control">
-              <div className="settings-segmented-group" role="group" aria-label="Tab Switching Mode">
+              <div className="settings-segmented-group" role="group" aria-label="Workspace Switching Mode">
                 <button
                   type="button"
                   className={`settings-segmented-btn ${general.tabSwitchMode === "sequential" ? "active" : ""}`}
@@ -198,9 +198,9 @@ export function GeneralSettingsPane(): React.ReactElement {
 
           <div className="settings-row">
             <div className="settings-row-info">
-              <span className="settings-row-label">Confirm before closing multi-pane tabs</span>
+              <span className="settings-row-label">Confirm before closing multi-pane workspaces</span>
               <span className="settings-row-desc">
-                Prompt for confirmation when closing a tab containing multiple split panes.
+                Prompt for confirmation when closing a workspace containing multiple split panes.
               </span>
             </div>
             <div className="settings-row-control">
@@ -208,7 +208,7 @@ export function GeneralSettingsPane(): React.ReactElement {
                 type="button"
                 role="switch"
                 aria-checked={general.confirmCloseTabWithMultiplePanes}
-                aria-label="Confirm before closing multi-pane tabs"
+                aria-label="Confirm before closing multi-pane workspaces"
                 className={`settings-switch ${general.confirmCloseTabWithMultiplePanes ? "checked" : ""}`}
                 onClick={toggleConfirmCloseTab}
               >

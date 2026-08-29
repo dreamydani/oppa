@@ -185,7 +185,6 @@ describe("terminalStore", () => {
       rightSidebarOpen: false,
       rightSidebarWidth: 280,
       rightSidebarTab: "explorer",
-      isWorkspaceLauncherOpen: false,
       maximizedSessionId: null,
       activeAppMode: "terminal",
       browserUrl: "",
@@ -2402,26 +2401,6 @@ describe("terminalStore", () => {
       });
 
       expect(useTerminalStore.getState().getActiveCwd()).toBeUndefined();
-    });
-  });
-
-  describe("workspace launcher modal state", () => {
-    it("defaults to isWorkspaceLauncherOpen = false", () => {
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
-    });
-
-    it("opens, closes, and toggles workspace launcher modal", () => {
-      useTerminalStore.getState().openWorkspaceLauncher();
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
-
-      useTerminalStore.getState().closeWorkspaceLauncher();
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
-
-      useTerminalStore.getState().toggleWorkspaceLauncher();
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(true);
-
-      useTerminalStore.getState().toggleWorkspaceLauncher();
-      expect(useTerminalStore.getState().isWorkspaceLauncherOpen).toBe(false);
     });
   });
 

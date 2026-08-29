@@ -34,7 +34,13 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
         geometry = { cols, rows };
       }
     }
-    spawnSession(undefined, undefined, undefined, geometry).then((realId) => {
+    // Placeholder leaves inherit the workspace's folder so an empty pane in a
+    // folder-bound workspace never lands in ~. Wizard/legacy tabs fall back
+    // to the settings default.
+    const state = useTerminalStore.getState();
+    const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+    const workspaceCwd = activeTab?.workspaceKey || undefined;
+    spawnSession(workspaceCwd, undefined, undefined, geometry).then((realId) => {
       // Only bind when this leaf is still on screen. A real unmount removes
       // the node (React also nulls the ref); StrictMode's dev-only effect
       // replay does not, so the swap survives the double-invoked mount.

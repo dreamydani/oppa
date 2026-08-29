@@ -8,7 +8,6 @@ import { LeftSidebar } from "./components/LeftSidebar";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar";
 import { PaneSplit } from "./components/PaneSplit";
 import { StatusBar } from "./components/layout/StatusBar";
-import { WorkspaceLauncherModal } from "./components/modal/WorkspaceLauncherModal";
 import { WorktreeCreateModal } from "./components/worktree/WorktreeCreateModal";
 import { WorkspaceSetupWizard } from "./components/wizard/WorkspaceSetupWizard";
 import { BrowserViewport } from "./components/browser/BrowserViewport";
@@ -43,8 +42,8 @@ export type ActiveMode = "terminal" | "editor" | "browser";
 //   Cmd/Ctrl+,        open settings (general)
 //   Cmd/Ctrl+/ / F1   open keyboard shortcuts reference
 //   Esc               close settings when open
-//   Cmd/Ctrl+N        open / toggle workspace launcher modal
-//   Cmd/Ctrl+T        create new tab
+//   Cmd/Ctrl+N        open the workspace setup wizard (new workspace tab)
+//   Cmd/Ctrl+T        new single-terminal workspace
 //   Cmd/Ctrl+W        close active tab / focused pane
 //   Ctrl+Tab          cycle active tab forward (sequential or MRU)
 //   Ctrl+Shift+Tab    cycle active tab backward (sequential or MRU)
@@ -146,7 +145,10 @@ function App() {
         useTerminalStore.setState({ leftSidebarOpen: true });
       }
       if (currentSettings.general.startupBehavior === "workspace_launcher") {
-        useTerminalStore.getState().openWorkspaceLauncher();
+        // The wizard is the launcher now; a launcher tab opens on boot.
+        if (useTerminalStore.getState().tabs.length === 0) {
+          useTerminalStore.getState().createWizardTab();
+        }
       } else if (currentSettings.general.startupBehavior === "fresh_terminal") {
         if (useTerminalStore.getState().tabs.length === 0) {
           void useTerminalStore.getState().createTab();
@@ -334,7 +336,8 @@ function App() {
         toggleLeftSidebar();
       } else if (key === "n" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
-        useTerminalStore.getState().toggleWorkspaceLauncher();
+        // The wizard is the launcher: Ctrl+N opens a setup workspace.
+        useTerminalStore.getState().createWizardTab();
       } else if (key === "t" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void createTab();
@@ -422,7 +425,7 @@ function App() {
                       </button>
                     </div>
                     <div className="empty-workspace-shortcut-hint">
-                      Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for Workspace Launcher
+                      Press <kbd>Ctrl+N</kbd> / <kbd>Cmd+N</kbd> for the Workspace Wizard
                     </div>
                   </div>
                 </div>
@@ -458,8 +461,7 @@ function App() {
           {activeAppMode !== "browser" && <RightSidebar />}
         </div>
       )}
-      {showStatusBar && <StatusBar />}
-      <WorkspaceLauncherModal />
+      {showStatusBar &&       <StatusBar />}
       <WorktreeCreateModal />
       {/* Extension consent + notification overlays are always mounted so they
           work from any mode/tab (the host pushes events app-wide). */}

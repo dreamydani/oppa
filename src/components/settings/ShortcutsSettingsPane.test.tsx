@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ShortcutsSettingsPane } from "./ShortcutsSettingsPane";
 
@@ -21,7 +21,7 @@ describe("ShortcutsSettingsPane", () => {
     render(<ShortcutsSettingsPane />);
 
     expect(
-      screen.getByRole("heading", { name: /tabs & workspaces/i, level: 3 })
+      screen.getByRole("heading", { name: /workspaces/i, level: 3 })
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /split panes/i, level: 3 })
@@ -34,12 +34,12 @@ describe("ShortcutsSettingsPane", () => {
     ).toBeInTheDocument();
 
     // Check specific shortcut labels
-    expect(screen.getByText("New Tab")).toBeInTheDocument();
-    expect(screen.getByText("Close Tab / Pane")).toBeInTheDocument();
-    expect(screen.getByText("Cycle Next Tab")).toBeInTheDocument();
-    expect(screen.getByText("Cycle Previous Tab")).toBeInTheDocument();
-    expect(screen.getByText("Direct Tab Jump")).toBeInTheDocument();
-    expect(screen.getByText("Workspace Launcher")).toBeInTheDocument();
+    expect(screen.getByText("New Terminal Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Close Workspace / Pane")).toBeInTheDocument();
+    expect(screen.getByText("Cycle Next Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Cycle Previous Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Direct Workspace Jump")).toBeInTheDocument();
+    expect(screen.getByText("Workspace Setup Wizard")).toBeInTheDocument();
 
     expect(screen.getByText("Split Horizontal")).toBeInTheDocument();
     expect(screen.getByText("Split Vertical")).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("ShortcutsSettingsPane", () => {
 
     expect(screen.getByText("Split Horizontal")).toBeInTheDocument();
     expect(screen.getByText("Split Vertical")).toBeInTheDocument();
-    expect(screen.queryByText("New Tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Terminal Workspace")).not.toBeInTheDocument();
     expect(screen.queryByText("Browser Mode")).not.toBeInTheDocument();
   });
 
@@ -76,7 +76,7 @@ describe("ShortcutsSettingsPane", () => {
     fireEvent.change(searchInput, { target: { value: "Esc" } });
 
     expect(screen.getByText("Close Modal / Back")).toBeInTheDocument();
-    expect(screen.queryByText("New Tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Terminal Workspace")).not.toBeInTheDocument();
     expect(screen.queryByText("Split Horizontal")).not.toBeInTheDocument();
   });
 
@@ -98,7 +98,7 @@ describe("ShortcutsSettingsPane", () => {
     fireEvent.change(searchInput, { target: { value: "xyznonexistentshortcut123" } });
 
     expect(screen.getByText(/no shortcuts found/i)).toBeInTheDocument();
-    expect(screen.queryByText("New Tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Terminal Workspace")).not.toBeInTheDocument();
     expect(screen.queryByText("Split Horizontal")).not.toBeInTheDocument();
   });
 
@@ -107,13 +107,13 @@ describe("ShortcutsSettingsPane", () => {
 
     const searchInput = screen.getByPlaceholderText(/search shortcuts\.\.\./i);
     fireEvent.change(searchInput, { target: { value: "split" } });
-    expect(screen.queryByText("New Tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Terminal Workspace")).not.toBeInTheDocument();
 
     const clearButton = screen.getByRole("button", { name: /clear search/i });
     fireEvent.click(clearButton);
 
     expect(searchInput).toHaveValue("");
-    expect(screen.getByText("New Tab")).toBeInTheDocument();
+    expect(screen.getByText("New Terminal Workspace")).toBeInTheDocument();
     expect(screen.getByText("Split Horizontal")).toBeInTheDocument();
   });
 });

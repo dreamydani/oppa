@@ -38,14 +38,10 @@ export interface WorkspaceConfig {
 }
 
 export interface WorkspaceLaunchSlice {
-  isWorkspaceLauncherOpen: boolean;
   isSetupWizardOpen: boolean;
   wizardStep: 1 | 2 | 3;
   recentWorkspaces: RecentWorkspace[];
   workspacePresets: WorkspacePreset[];
-  openWorkspaceLauncher: () => void;
-  closeWorkspaceLauncher: () => void;
-  toggleWorkspaceLauncher: () => void;
   openSetupWizard: () => void;
   closeSetupWizard: () => void;
   setWizardStep: (step: 1 | 2 | 3) => void;
@@ -84,16 +80,10 @@ export function createWorkspaceLaunchSlice(
   get: () => TerminalState,
 ): WorkspaceLaunchSlice {
   return {
-    isWorkspaceLauncherOpen: false,
     isSetupWizardOpen: false,
     wizardStep: 1,
     recentWorkspaces: [],
     workspacePresets: [],
-
-    openWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: true }),
-    closeWorkspaceLauncher: () => set({ isWorkspaceLauncherOpen: false }),
-    toggleWorkspaceLauncher: () =>
-      set((s) => ({ isWorkspaceLauncherOpen: !s.isWorkspaceLauncherOpen })),
 
     openSetupWizard: () => set({ isSetupWizardOpen: true, wizardStep: 1 }),
     closeSetupWizard: () => set({ isSetupWizardOpen: false }),
