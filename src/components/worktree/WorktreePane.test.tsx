@@ -1104,6 +1104,25 @@ describe("WorktreePane finished detection", () => {
     expect(card().querySelector(".worktree-finished-chip")).toBeNull();
   });
 
+  it("hook done transition flips the chip even when the quietness map is untouched", async () => {
+    // Regression: the memo once read statusBySessionId via getState() without
+    // depending on it, so a done event alone never recomputed the chip.
+    seedFinishedCard("in-progress", { s1: boundSession("s1") }, { s1: true });
+    render(<WorktreePane />);
+    const card = screen.getByText("Feat A").closest(".worktree-card")!;
+    expect(card.querySelector(".worktree-finished-chip")).toBeNull();
+
+    await act(async () => {
+      useTerminalStore.setState({
+        statusBySessionId: {
+          s1: { state: "done", state_started_at_ms: 1, updated_at_ms: 2, origin: "hook" },
+        },
+      } as unknown as Record<string, unknown>);
+    });
+    expect(card.querySelector(".worktree-finished-chip")).not.toBeNull();
+    await vi.waitFor(() => expect(worktreeSetMock).toHaveBeenCalledTimes(1));
+  });
+
   it("promotes in-progress to in-review exactly once per finish and not on rerenders", async () => {
     seedFinishedCard("in-progress", { s1: boundSession("s1") }, { s1: false });
     const { rerender } = render(<WorktreePane />);
