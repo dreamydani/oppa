@@ -16,7 +16,43 @@
   --radius-lg: 8px;
   --soft-edge-radius: 12px;
 
-  /* Motion (single home for durations/easing; consumed via var()) */
+  /* ==========================================================================
+     MOTION — one duration per interaction weight, one curve per intent.
+
+     Durations are a tier ladder, not a menu: pick the tier that matches how
+     far the element travels and how much the change matters, never a value
+     between tiers. Hierarchy is communicated BY the gap between tiers, so a
+     tooltip and a panel may not share a duration.
+
+     Curves encode physics:
+       --ease-out    entrances — leaves fast, settles slowly (the element ARRIVES)
+       --ease-in     exits     — lingers, then departs fast  (the element LEAVES)
+       --ease-in-out state     — symmetric travel between two settled poses
+       --ease-spring overshoot — passes the target and settles back (has weight)
+     The CSS default `ease` is deliberately unused: it ramps in slowly and has
+     a long dead tail, which reads as lag on entrances and as nothing on exits.
+     ========================================================================== */
+
+  /* Tiers */
+  --dur-micro: 90ms;  /* hover tint, icon colour, press feedback */
+  --dur-fast: 140ms;  /* toggles, chevrons, inline reveals, carets */
+  --dur-base: 200ms;  /* dropdowns, popovers, tooltips, travelling indicator */
+  --dur-mid: 260ms;   /* modals, cards, sheets */
+  --dur-slow: 420ms;  /* view swaps, pane maximize */
+
+  /* Curves */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);      /* expo-out: arrive and settle */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);        /* expo-in: linger then depart */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);   /* symmetric travel */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.52, 1); /* ~8% overshoot, no wobble */
+
+  /* Choreography — apply as `calc(var(--stagger-step) * min(var(--i), var(--stagger-cap)))`.
+     The cap matters: an unbounded index turns a 40-row list into 1.3s of waiting. */
+  --stagger-step: 32ms;
+  --stagger-cap: 6;
+
+  /* Legacy aliases retained for App.css pane-zoom + its JS mirrors (maximizeZoom,
+     sideDrawer) which reason about these as named motions, not tiers. */
   --dur-zoom-out: 220ms;
   --dur-zoom-in: 180ms;
   /* Panels (sidebars): slow enough that the full travel arc reads to the eye. */
@@ -62,6 +98,11 @@
   /* Functional Tokens */
   --accent-blue: #58a6ff;
   --accent-cyan: #38bdf8;
+
+  /* Focus ring — deliberately stronger than --ring (0.20 alpha is a hairline
+     border colour, not a keyboard-position indicator). */
+  --focus-ring: var(--accent-blue);
+  --focus-ring-width: 2px;
 
   /* Status Colors */
   --status-running: #22c55e;
@@ -194,14 +235,94 @@ body {
   background: rgba(0, 0, 0, 0.22);
 }
 
-/* Accessibility: collapse all motion to near-instant when the OS asks.
-   0.01ms keeps transition/animation events firing so JS listeners never hang. */
+/* ==========================================================================
+   Keyboard Focus Ring
+   23 component rules declare `outline: none` on buttons, inputs, tabs and menu
+   items with nothing behind them, leaving keyboard users no position indicator
+   (WCAG 2.4.7). Every one of those is a single-class selector — specificity
+   (0,1,0) — so element+pseudo selectors at (0,1,1) win without needing
+   !important, and a component can still opt out locally by going (0,2,0).
+   ========================================================================== */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a[href]:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="menuitemcheckbox"]:focus-visible,
+[role="option"]:focus-visible,
+[role="switch"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Thumb-sized widgets (switch tracks, slider bars) are 14-36px tall; pull the
+   ring in so it doesn't read as a box around a box. */
+.settings-switch:focus-visible,
+.ext-switch:focus-visible {
+  outline-offset: 3px;
+}
+
+/* ==========================================================================
+   Accessibility — reduced motion.
+
+   The hazard for vestibular disorders is DISPLACEMENT, not the clock. The
+   previous rule collapsed every duration to 0.01ms, which also destroyed
+   opacity crossfades and left the app cutting hard between states — motionless
+   but not pleasant. Instead we strip the moving properties and keep the fades
+   at their designed duration, so reduced-motion users get the same choreography
+   minus the travel.
+   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition-duration: 0.01ms !important;
+    /* Ambient loops (pulse, spin, shimmer) must not run; 0.01ms + one
+       iteration still fires animationend so JS listeners never hang. */
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    /* Nothing may translate, scale or rotate. Colour and opacity still ease. */
+    transition-property:
+      opacity,
+      color,
+      background-color,
+      border-color,
+      fill,
+      box-shadow,
+      visibility !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Reduced transparency: backdrop blur and translucent scrims become opaque. */
+@media (prefers-reduced-transparency: reduce) {
+  * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* Windows High Contrast / Forced Colors: the theme's alpha-based borders and
+   tints all vanish there, so hand control back to the OS palette. */
+@media (forced-colors: active) {
+  :where(button, [role="tab"], [role="menuitem"], input, select, textarea) {
+    border: 1px solid CanvasText;
+  }
+
+  :where(
+    button,
+    input,
+    select,
+    textarea,
+    a[href],
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"]
+  ):focus-visible {
+    outline: 2px solid Highlight;
   }
 }
