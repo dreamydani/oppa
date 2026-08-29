@@ -14,6 +14,8 @@ import {
   MaximizeIcon,
   RestoreIcon,
   HelpIcon,
+  SplitSquareIcon,
+  WorktreeForkIcon,
 } from "./MinimalIcons";
 
 describe("MinimalIcons", () => {
@@ -31,7 +33,10 @@ describe("MinimalIcons", () => {
     { name: "MaximizeIcon", Component: MaximizeIcon },
     { name: "RestoreIcon", Component: RestoreIcon },
     { name: "HelpIcon", Component: HelpIcon },
+    { name: "SplitSquareIcon", Component: SplitSquareIcon },
+    { name: "WorktreeForkIcon", Component: WorktreeForkIcon },
   ];
+
 
   it.each(iconComponents)("renders $name as an SVG element with custom props", ({ Component }) => {
     const { container } = render(

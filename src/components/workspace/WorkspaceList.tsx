@@ -2,14 +2,14 @@ import React, { useState, useMemo } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { TabState } from "../../store/slices/paneLayoutSlice";
 import { leafIds } from "../../store/slices/layoutQueries";
-import { findLeafPath } from "../../lib/pane-manager/layout";
+import { findLeafPath, focus } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
-import { AgentStatusPill } from "../agent/AgentStatusPill";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
-import { CloseIcon, PlusIcon } from "../icons/MinimalIcons";
-import { ChevronDown, ChevronRight, Folder, GitBranch, Sparkles, TerminalSquare } from "lucide-react";
+import { CloseIcon, PlusIcon, SplitSquareIcon, WorktreeForkIcon } from "../icons/MinimalIcons";
+import { ChevronDown, ChevronRight, Folder, Sparkles, TerminalSquare } from "lucide-react";
 import "./workspace-list.css";
+
 
 // Worst-state-first ordering for the aggregate severity chip.
 const SEVERITY_ORDER = ["blocked", "waiting", "working", "done"] as const;
@@ -55,21 +55,27 @@ interface WorkspaceCardData {
 const WorkspaceCard = React.memo(function WorkspaceCard({
   data,
   expanded,
+  activeSessionId,
   onToggleExpand,
   onSelect,
   onFocusRow,
   onClose,
   onAddAgent,
   onWorktreeAction,
+  onSplitRow,
+  onCloseRow,
 }: {
   data: WorkspaceCardData;
   expanded: boolean;
+  activeSessionId: string | null;
   onToggleExpand: (tabId: string) => void;
   onSelect: (tabId: string) => void;
   onFocusRow: (sessionId: string) => void;
   onClose: (tabId: string) => void;
   onAddAgent: () => void;
   onWorktreeAction: () => void;
+  onSplitRow: (sessionId: string) => void;
+  onCloseRow: (sessionId: string) => void;
 }) {
   const title = data.tab.isWizard
     ? data.tab.title || "New Workspace"
@@ -90,7 +96,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
           onKeyDown={(e) => e.key === "Enter" && onSelect(data.tab.id)}
         >
           <span className="ws-card-avatar wizard">
-            <Sparkles size={14} />
+            <Sparkles size={13} />
           </span>
           <span className="ws-card-title">{title}</span>
         </div>
@@ -140,32 +146,34 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
           <span className="ws-live-chip">{data.liveCount} live</span>
         )}
         <span className="ws-card-header-spacer" />
-        {data.tab.workspaceKey && (
+        <div className="ws-card-actions">
+          {data.tab.workspaceKey && (
+            <button
+              type="button"
+              className="ws-card-action-btn ws-card-add"
+              title="Add agent to this workspace"
+              aria-label={`Add agent to ${title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddAgent();
+              }}
+            >
+              <PlusIcon size={12} />
+            </button>
+          )}
           <button
             type="button"
-            className="ws-card-add"
-            title="Add agent to this workspace"
-            aria-label={`Add agent to ${title}`}
+            className="ws-card-action-btn ws-card-close"
+            title="Close Workspace"
+            aria-label={`Close ${title}`}
             onClick={(e) => {
               e.stopPropagation();
-              onAddAgent();
+              onClose(data.tab.id);
             }}
           >
-            <PlusIcon size={12} />
+            <CloseIcon size={12} />
           </button>
-        )}
-        <button
-          type="button"
-          className="ws-card-close"
-          title="Close Workspace"
-          aria-label={`Close ${title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(data.tab.id);
-          }}
-        >
-          <CloseIcon size={12} />
-        </button>
+        </div>
       </div>
 
       {expanded && (
@@ -177,11 +185,13 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
             const agentEntry = statusBySessionId[row.sessionId];
             const unread = unreadBySessionId[row.sessionId] ?? false;
             const isWorking = workingBySessionId[row.sessionId] ?? false;
+            const isFocusedLeaf = data.isActive && row.sessionId === activeSessionId;
+
             return (
               <div
                 key={row.sessionId}
                 role="listitem"
-                className={`ws-row${row.exited ? " exited" : ""}${isWorking && !agentEntry ? " working" : ""}`}
+                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isWorking && !agentEntry ? " working" : ""}`}
                 onClick={() => {
                   markAgentStatusSeen(row.sessionId);
                   onFocusRow(row.sessionId);
@@ -189,21 +199,65 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
                 <span className="ws-row-icon">
-                  {row.worktreeId ? <GitBranch size={12} /> : <TerminalSquare size={12} />}
+                  <TerminalSquare size={13} className="ws-icon-term" />
                 </span>
                 <span className="ws-row-title">{row.title}</span>
                 {row.worktreeId && (
-                  <span className="ws-row-branch" title={`Branch ${row.branch}`}>
-                    {row.branch}
+                  <span
+                    className="ws-row-worktree-logo"
+                    title={`Branch ${row.branch}`}
+                    aria-label={`Branch ${row.branch}`}
+                  >
+                    <WorktreeForkIcon size={13} className="ws-worktree-svg" />
                   </span>
                 )}
                 <span className="ws-row-status">
                   {agentEntry ? (
-                    <AgentStatusPill entry={agentEntry} unread={unread} />
+                    <span
+                      className={`ws-status-circle ${agentEntry.state}${unread ? " unread" : ""}`}
+                      title={`Status: ${agentEntry.state}`}
+                      aria-label={`Status: ${agentEntry.state}`}
+                    />
                   ) : isWorking ? (
-                    <span className="ws-row-dot working" aria-hidden="true" />
-                  ) : null}
+                    <span
+                      className="ws-status-circle working"
+                      title="Status: working"
+                      aria-label="Status: working"
+                    />
+                  ) : (
+                    <span
+                      className={`ws-status-circle ${row.exited ? "exited" : "idle"}`}
+                      title={row.exited ? "Status: exited" : "Status: idle"}
+                      aria-label={row.exited ? "Status: exited" : "Status: idle"}
+                    />
+                  )}
                 </span>
+                <div className="ws-row-actions">
+                  <button
+                    type="button"
+                    className="ws-row-action-btn"
+                    title="Split Pane Vertically"
+                    aria-label={`Split ${row.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSplitRow(row.sessionId);
+                    }}
+                  >
+                    <SplitSquareIcon size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className="ws-row-action-btn ws-row-close-btn"
+                    title="Close Terminal Pane"
+                    aria-label={`Close ${row.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseRow(row.sessionId);
+                    }}
+                  >
+                    <CloseIcon size={10} />
+                  </button>
+                </div>
                 {row.worktreeRecord && (
                   <WorktreeActionsMenu
                     record={row.worktreeRecord}
@@ -212,6 +266,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 )}
               </div>
             );
+
           })}
         </div>
       )}
@@ -233,8 +288,21 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
   const selectTab = useTerminalStore((s) => s.selectTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const focusPane = useTerminalStore((s) => s.focusPane);
+  const splitPane = useTerminalStore((s) => s.splitPane);
+  const closePane = useTerminalStore((s) => s.closePane);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
+
+  // Compute active focused leaf session ID in the active tab
+  const activeSessionId = useMemo(() => {
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    if (!activeTab || activeTab.isWizard) return null;
+    try {
+      return focus(activeTab.layout, activeTab.focusedPath);
+    } catch {
+      return null;
+    }
+  }, [tabs, activeTabId]);
 
   // Component-local collapse state; default: active expanded, others collapsed.
   const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
@@ -353,6 +421,7 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
             key={data.tab.id}
             data={data}
             expanded={expanded}
+            activeSessionId={activeSessionId}
             onToggleExpand={toggleExpand}
             onSelect={(tabId) => selectTab(tabId)}
             onFocusRow={(sessionId) => {
@@ -376,9 +445,31 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
             onWorktreeAction={() => {
               void useTerminalStore.getState().loadWorktrees().catch(() => {});
             }}
+            onSplitRow={(sessionId) => {
+              const state = useTerminalStore.getState();
+              const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
+              if (!tab) return;
+              if (tab.id !== state.activeTabId) selectTab(tab.id);
+              const path = findLeafPath(tab.layout, sessionId);
+              if (path) {
+                focusPane(path);
+                void splitPane("v");
+              }
+            }}
+            onCloseRow={(sessionId) => {
+              const state = useTerminalStore.getState();
+              const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
+              if (!tab) return;
+              const path = findLeafPath(tab.layout, sessionId);
+              if (path) {
+                if (tab.id !== state.activeTabId) selectTab(tab.id);
+                void closePane(path);
+              }
+            }}
           />
         );
       })}
     </div>
   );
 }
+

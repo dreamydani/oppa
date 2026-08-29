@@ -1,11 +1,10 @@
-﻿/* ==========================================================================
-   Left Sidebar â€” sole home for its styles (values are today's effective
-   cascade winners from App.css).
+/* ==========================================================================
+   Left Sidebar - Pro-grade Devtool Navigation & Workspace Tree
    ========================================================================== */
 
 .left-sidebar {
-  background-color: var(--bg-sidebar);
-  border: 1px solid var(--border-divider);
+  background-color: var(--bg-sidebar, #171717);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.07));
   border-radius: 10px;
   margin: 4px 0 4px 4px;
   height: calc(100% - 8px);
@@ -31,25 +30,26 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  height: 100%;
   min-width: 0;
   flex: 1;
   min-height: 0;
 }
 
 [data-theme="light"] .left-sidebar {
-  background-color: #ffffff;
+  background-color: #f8f8f7;
   border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
+
+/* --------------------------------------------------------------------------
+   Header / Search Area (Completely borderless, flat, no box)
+   -------------------------------------------------------------------------- */
 .left-sidebar-top {
-  padding: 10px 12px 4px 12px;
-  border-bottom: none;
+  padding: 10px 12px 6px 12px;
   background: transparent;
-}
-
-[data-theme="light"] .left-sidebar-top {
-  border-bottom: none;
+  flex-shrink: 0;
 }
 
 .sidebar-search-strip {
@@ -61,35 +61,19 @@
 .sidebar-search-box {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background-color: transparent;
+  gap: 8px;
+  background: transparent;
   border: none;
-  border-radius: 4px;
-  padding: 4px 2px;
+  border-radius: 0;
+  padding: 0;
   flex: 1;
   min-width: 0;
-  transition: color 0.15s ease;
-}
-
-.sidebar-search-box:focus-within {
-  border: none;
-  background-color: transparent;
-  box-shadow: none;
-}
-
-[data-theme="light"] .sidebar-search-box {
-  background-color: transparent;
-  border: none;
-}
-
-[data-theme="light"] .sidebar-search-box:focus-within {
-  background-color: transparent;
-  border: none;
+  height: 28px;
   box-shadow: none;
 }
 
 .sidebar-search-icon {
-  color: var(--text-muted);
+  color: var(--text-muted, #808080);
   flex-shrink: 0;
 }
 
@@ -97,63 +81,90 @@
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text-primary);
+  color: var(--text-primary, #e6e6e6);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 400;
   width: 100%;
   min-width: 0;
+  padding: 0;
 }
 
 .sidebar-search-input::placeholder {
+  color: var(--text-muted, #737373);
+}
+
+.sidebar-search-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
   color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: color 0.12s ease;
+}
+
+.sidebar-search-clear-btn:hover {
+  color: var(--text-primary);
 }
 
 .sidebar-icon-btn {
   background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted, #808080);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  padding: 0;
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
 
 .sidebar-icon-btn:hover {
-  background-color: var(--bg-card-hover);
-  color: var(--text-primary);
-  border-color: var(--border-divider);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #ffffff);
 }
 
+[data-theme="light"] .sidebar-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #18181b;
 }
 
+/* --------------------------------------------------------------------------
+   Body Area (Scrollable Workspaces Tree)
+   -------------------------------------------------------------------------- */
 .left-sidebar-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: 4px 8px 8px 8px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
-.left-sidebar-body::-webkit-scrollbar,
-.right-sidebar-content::-webkit-scrollbar {
-  width: 6px;
+.left-sidebar-body::-webkit-scrollbar {
+  width: 5px;
 }
 
-.left-sidebar-body::-webkit-scrollbar-thumb,
-.right-sidebar-content::-webkit-scrollbar-thumb {
+.left-sidebar-body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 9999px;
   transition: background 0.15s ease;
 }
 
-.left-sidebar-body::-webkit-scrollbar-thumb:hover,
-.right-sidebar-content::-webkit-scrollbar-thumb:hover {
+.left-sidebar-body::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.18);
 }
 
@@ -161,49 +172,83 @@
   background: rgba(0, 0, 0, 0.12);
 }
 
+/* --------------------------------------------------------------------------
+   Footer Area (Fixed Bottom Utility Bar)
+   -------------------------------------------------------------------------- */
 .left-sidebar-footer {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
   padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background-color: var(--bg-sidebar);
+  border-top: 1px solid var(--border-divider, rgba(255, 255, 255, 0.06));
+  background: transparent;
   flex-shrink: 0;
+  margin-top: auto;
 }
 
 [data-theme="light"] .left-sidebar-footer {
-  background-color: #ffffff;
   border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.sidebar-footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted, #808080);
+  user-select: none;
+}
+
+.sidebar-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.sidebar-status-text {
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+}
+
+.sidebar-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .sidebar-footer-btn {
   background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted, #808080);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  padding: 0;
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
 
 .sidebar-footer-btn:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #ffffff);
 }
 
 [data-theme="light"] .sidebar-footer-btn:hover {
   background: rgba(0, 0, 0, 0.05);
   color: #18181b;
-  border-color: rgba(0, 0, 0, 0.08);
 }
 
+/* --------------------------------------------------------------------------
+   Resize Handle
+   -------------------------------------------------------------------------- */
 .resize-handle-right {
   position: absolute;
   top: 0;
@@ -216,24 +261,25 @@
 
 .resize-handle-right:hover,
 .resize-handle-right:active {
-  background: rgba(88, 166, 255, 0.35);
-  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.4);
 }
 
-/* Empty states */
+/* --------------------------------------------------------------------------
+   Empty States
+   -------------------------------------------------------------------------- */
 .sidebar-empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 16px;
+  padding: 36px 16px;
   text-align: center;
   gap: 8px;
 }
 
 .sidebar-empty-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
@@ -248,17 +294,28 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: var(--bg-card-active);
-  border: 1px solid var(--border-divider);
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
   color: var(--text-primary);
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease;
 }
 
 .sidebar-empty-btn:hover {
-  background-color: var(--bg-card-hover);
-  border-color: var(--border-active);
+  background: rgba(255, 255, 255, 0.10);
 }
+
+[data-theme="light"] .sidebar-empty-btn {
+  background: #ffffff;
+  color: #18181b;
+}
+
+[data-theme="light"] .sidebar-empty-btn:hover {
+  background: #f4f4f2;
+}
+
+

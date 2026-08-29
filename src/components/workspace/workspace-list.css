@@ -1,42 +1,52 @@
 /* ==========================================================================
-   Workspace list — one card per workspace; terminal rows beneath each title.
-   Row anatomy per sketch: [>_] title [branch] (status)
+   Workspace List & Session Tree - Clean, Borderless Architecture
    ========================================================================== */
 
 .workspace-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 4px 0 8px 0;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
+/* --------------------------------------------------------------------------
+   Workspace Container (Seamless, Flat, No Box)
+   -------------------------------------------------------------------------- */
 .ws-card {
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: none;
   background: transparent;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  box-shadow: none;
+  border-radius: 0;
 }
 
 .ws-card.active {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: var(--border-divider, rgba(255, 255, 255, 0.08));
+  background: transparent;
+  border: none;
 }
 
+[data-theme="light"] .ws-card,
 [data-theme="light"] .ws-card.active {
-  background: rgba(0, 0, 0, 0.03);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
+/* --------------------------------------------------------------------------
+   Workspace Card Header
+   -------------------------------------------------------------------------- */
 .ws-card-header {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 8px;
-  border-radius: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
   cursor: pointer;
   user-select: none;
+  min-height: 26px;
+  transition: background-color 0.12s ease;
 }
 
 .ws-card-header:hover {
@@ -51,69 +61,62 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   border: none;
-  border-radius: 4px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-muted, #737373);
   cursor: pointer;
   flex-shrink: 0;
+  padding: 0;
+  transition: color 0.12s ease;
 }
 
 .ws-card-chevron:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
-[data-theme="light"] .ws-card-chevron:hover {
-  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-primary, #ffffff);
 }
 
 .ws-card-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-muted);
+  color: var(--text-primary, #e5e7eb);
   flex-shrink: 0;
 }
 
-[data-theme="light"] .ws-card-avatar {
-  background: rgba(0, 0, 0, 0.05);
-}
-
 .ws-card-avatar.wizard {
-  color: var(--accent, #3fb950);
+  color: var(--accent-blue, #58a6ff);
 }
 
 .ws-card-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-primary, #f3f4f6);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .ws-card-header-spacer {
   flex: 1;
 }
 
+/* --------------------------------------------------------------------------
+   Chips & Badges
+   -------------------------------------------------------------------------- */
 .ws-severity-chip {
-  font-size: 10.5px;
-  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font-mono, monospace);
+  padding: 1px 6px;
   border-radius: 99px;
   flex-shrink: 0;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-[data-theme="light"] .ws-severity-chip {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.05);
+  line-height: 1.2;
 }
 
 .ws-severity-chip.ws-severity-blocked {
@@ -132,91 +135,115 @@
 }
 
 .ws-live-chip {
-  font-size: 10.5px;
-  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font-mono, monospace);
+  padding: 1px 6px;
   border-radius: 99px;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
+  line-height: 1.2;
 }
 
 [data-theme="light"] .ws-live-chip {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.04);
 }
 
-.ws-card-add,
-.ws-card-close {
+.ws-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ws-card-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: none;
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.15s ease, color 0.15s ease;
+  padding: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 
-.ws-card-header:hover .ws-card-add,
-.ws-card-header:hover .ws-card-close {
+.ws-card-header:hover .ws-card-action-btn {
   opacity: 1;
 }
 
-.ws-card-add:hover {
-  background: rgba(255, 255, 255, 0.08);
+.ws-card-action-btn:hover {
   color: var(--text-primary);
 }
 
 .ws-card-close:hover {
-  background: rgba(248, 81, 73, 0.12);
   color: #f85149;
 }
 
-[data-theme="light"] .ws-card-add:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-/* ---- rows ---- */
-
+/* --------------------------------------------------------------------------
+   Terminal / Session Rows (Matching Reference Image)
+   [Terminal Icon] [Terminal Name] [Worktree SVG Logo] [Status Dot]
+   -------------------------------------------------------------------------- */
 .ws-card-rows {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0 8px 6px 30px;
+  padding: 2px 0 4px 14px;
 }
 
 .ws-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 6px;
-  border-radius: 5px;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 11.5px;
-  color: var(--text-secondary);
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+  border: none;
+  background: transparent;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .ws-row:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #f3f4f6);
 }
 
 [data-theme="light"] .ws-row:hover {
   background: rgba(0, 0, 0, 0.04);
+  color: #18181b;
+}
+
+/* Active session highlight */
+.ws-row.is-active {
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+[data-theme="light"] .ws-row.is-active {
+  background: rgba(0, 0, 0, 0.06);
+  color: #18181b;
 }
 
 .ws-row.exited {
-  opacity: 0.45;
+  opacity: 0.4;
   text-decoration: line-through;
 }
 
 .ws-row-icon {
   display: inline-flex;
-  color: var(--text-faint);
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #9ca3af);
   flex-shrink: 0;
 }
 
@@ -225,72 +252,144 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  color: inherit;
+  font-weight: inherit;
 }
 
-.ws-row-branch {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 1px 6px;
-  border-radius: 99px;
+.ws-row-worktree-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #9ca3af);
   flex-shrink: 0;
-  max-width: 90px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-left: auto;
+  padding: 0 2px;
+  transition: color 0.12s ease;
 }
 
-[data-theme="light"] .ws-row-branch {
-  background: rgba(0, 0, 0, 0.05);
+.ws-row-worktree-logo:hover {
+  color: var(--text-primary, #ffffff);
 }
 
+.ws-worktree-svg {
+  color: inherit;
+}
+
+/* Status Circle (Status: working, executing code, done, idle) */
 .ws-row-status {
   display: inline-flex;
   align-items: center;
-  margin-left: auto;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.ws-status-circle {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* Reference image status colors: soft periwinkle / indigo */
+.ws-status-circle.idle {
+  background: #6366f1;
+  box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
+}
+
+.ws-status-circle.working {
+  background: #818cf8;
+  box-shadow: 0 0 6px rgba(129, 140, 248, 0.6);
+  animation: wsCirclePulse 1.4s ease-in-out infinite;
+}
+
+.ws-status-circle.done {
+  background: #3fb950;
+  box-shadow: 0 0 4px rgba(63, 185, 80, 0.4);
+}
+
+.ws-status-circle.waiting {
+  background: #d29922;
+  box-shadow: 0 0 4px rgba(210, 153, 34, 0.4);
+}
+
+.ws-status-circle.blocked {
+  background: #f85149;
+  box-shadow: 0 0 4px rgba(248, 81, 73, 0.4);
+}
+
+.ws-status-circle.exited {
+  background: #4b5563;
+}
+
+@keyframes wsCirclePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.ws-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
   flex-shrink: 0;
 }
 
-.ws-row-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-faint);
+.ws-row:hover .ws-row-actions {
+  opacity: 1;
 }
 
-.ws-row-dot.working {
-  background: #3fb950;
-  animation: wsDotPulse 1.2s ease-in-out infinite;
+.ws-row-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.12s ease;
 }
 
-@keyframes wsDotPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.ws-row-action-btn:hover {
+  color: var(--text-primary);
+}
+
+.ws-row-close-btn:hover {
+  color: #f85149;
 }
 
 .ws-card-empty {
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--text-muted);
   padding: 4px 6px;
 }
 
-/* ---- row actions menu (worktree rows) ---- */
-
+/* --------------------------------------------------------------------------
+   Worktree Action Menu Positioning
+   -------------------------------------------------------------------------- */
 .ws-row-menu-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.15s ease;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 
 .ws-row:hover .ws-row-menu-btn {
@@ -298,16 +397,7 @@
 }
 
 .ws-row-menu-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
-}
-
-[data-theme="light"] .ws-row-menu-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.ws-row {
-  position: relative;
 }
 
 .ws-row .worktree-card-menu {
@@ -317,15 +407,16 @@
   z-index: 30;
 }
 
-/* ---- finish outcome row ---- */
-
+/* --------------------------------------------------------------------------
+   Finish Outcome Row
+   -------------------------------------------------------------------------- */
 .ws-finish-row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 3px 6px;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 
 .ws-finish-row.failed .ws-finish-text {
@@ -349,3 +440,5 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+

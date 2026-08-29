@@ -248,4 +248,82 @@ describe("WorkspaceList", () => {
     render(<WorkspaceList />);
     expect(screen.getByText("1 working")).toBeInTheDocument();
   });
+
+  it("applies is-active class to the currently focused session row in the active tab", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "active pane" }),
+        "s-2": session({ id: "s-2", title: "inactive pane" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const activeRow = container.querySelector(".ws-row.is-active");
+    expect(activeRow).toBeInTheDocument();
+    expect(activeRow?.textContent).toContain("active pane");
+  });
+
+  it("splits the pane when the split button on a row is clicked", () => {
+    const splitSpy = vi.spyOn(useTerminalStore.getState(), "splitPane").mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "main pane" }),
+      },
+    });
+
+    render(<WorkspaceList />);
+    const splitBtn = screen.getByRole("button", { name: /split main pane/i });
+    fireEvent.click(splitBtn);
+
+    expect(splitSpy).toHaveBeenCalledWith("v");
+  });
+
+  it("closes the pane when the close button on a row is clicked", () => {
+    const closeSpy = vi.spyOn(useTerminalStore.getState(), "closePane").mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "pane to close" }),
+      },
+    });
+
+    render(<WorkspaceList />);
+    const closeBtn = screen.getByRole("button", { name: /close pane to close/i });
+    fireEvent.click(closeBtn);
+
+    expect(closeSpy).toHaveBeenCalled();
+  });
 });
+

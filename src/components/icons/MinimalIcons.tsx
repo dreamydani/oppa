@@ -147,3 +147,26 @@ export function RestoreIcon(props: IconProps): ReactElement {
     </BaseSvg>
   );
 }
+
+export function SplitSquareIcon(props: IconProps): ReactElement {
+  return (
+    <BaseSvg {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <line x1="12" x2="12" y1="3" y2="21" />
+    </BaseSvg>
+  );
+}
+
+export function WorktreeForkIcon(props: IconProps): ReactElement {
+  return (
+    <BaseSvg size={13} strokeWidth={1.5} {...props}>
+      <circle cx="5" cy="12" r="2" />
+      <path d="M7 12h3.5l4.5-5h4" />
+      <path d="M10.5 12l4.5 5h4" />
+      <circle cx="19" cy="7" r="1.5" />
+      <circle cx="19" cy="17" r="1.5" />
+    </BaseSvg>
+  );
+}
+
+

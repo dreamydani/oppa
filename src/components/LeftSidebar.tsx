@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import {
   SIDEBAR_CLOSE_MS,
@@ -13,6 +13,7 @@ import {
   PlusIcon,
   SettingsIcon,
   HelpIcon,
+  CloseIcon,
 } from "./icons/MinimalIcons";
 import "./LeftSidebar.css";
 
@@ -25,6 +26,7 @@ export function LeftSidebar(): React.ReactElement {
   const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
   const openSettings = useTerminalStore((s) => s.openSettings);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
+  const sessions = useTerminalStore((s) => s.sessions);
 
   const [searchQuery, setSearchQuery] = useState("");
   // Disables width transitions while drag-resizing so the panel tracks the
@@ -32,6 +34,27 @@ export function LeftSidebar(): React.ReactElement {
   const [isResizing, setIsResizing] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Global Ctrl+K / Cmd+K search focus binding
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Compute live session count for footer status indicator
+  const liveCount = useMemo(() => {
+    return Object.values(sessions).filter((s) => s.status !== "exited").length;
+  }, [sessions]);
 
   // Compositor drawer: transform-only open/close (see sideDrawer.ts). Inline
   // motion styles are invisible to React's style diffing, so they survive
@@ -84,6 +107,7 @@ export function LeftSidebar(): React.ReactElement {
   };
 
   return (
+
     <aside
       ref={asideRef}
       className={`left-sidebar${isResizing ? " is-resizing" : ""}`}
@@ -95,6 +119,7 @@ export function LeftSidebar(): React.ReactElement {
             <div className="sidebar-search-box">
               <SearchIcon size={14} className="sidebar-search-icon" />
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder="Search workspaces..."
                 value={searchQuery}
@@ -102,10 +127,24 @@ export function LeftSidebar(): React.ReactElement {
                 aria-label="Search workspaces"
                 className="sidebar-search-input"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="sidebar-search-clear-btn"
+                  onClick={() => {
+                    setSearchQuery("");
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  <CloseIcon size={10} />
+                </button>
+              )}
             </div>
             <button
               type="button"
-              className="sidebar-icon-btn"
+              className="sidebar-icon-btn sidebar-new-workspace-btn"
               title="New Workspace"
               aria-label="New Workspace"
               onClick={() => createWizardTab()}
@@ -115,29 +154,38 @@ export function LeftSidebar(): React.ReactElement {
           </div>
         </div>
 
+
         <div className="left-sidebar-body">
           <WorkspaceList filter={searchQuery} />
         </div>
 
         <div className="left-sidebar-footer">
-          <button
-            type="button"
-            className="sidebar-footer-btn"
-            title="Settings (Ctrl+, / Cmd+,)"
-            aria-label="Settings"
-            onClick={() => openSettings("general")}
-          >
-            <SettingsIcon size={14} />
-          </button>
-          <button
-            type="button"
-            className="sidebar-footer-btn"
-            title="Keyboard Shortcuts (F1 / Ctrl+/)"
-            aria-label="Keyboard Shortcuts"
-            onClick={() => openSettings("shortcuts")}
-          >
-            <HelpIcon size={14} />
-          </button>
+          <div className="sidebar-footer-status" title="OPPA Daemon Connected">
+            <span className="sidebar-status-dot" aria-hidden="true" />
+            <span className="sidebar-status-text">
+              {liveCount > 0 ? `${liveCount} live` : "Daemon"}
+            </span>
+          </div>
+          <div className="sidebar-footer-actions">
+            <button
+              type="button"
+              className="sidebar-footer-btn"
+              title="Settings (Ctrl+, / Cmd+,)"
+              aria-label="Settings"
+              onClick={() => openSettings("general")}
+            >
+              <SettingsIcon size={14} />
+            </button>
+            <button
+              type="button"
+              className="sidebar-footer-btn"
+              title="Keyboard Shortcuts (F1 / Ctrl+/)"
+              aria-label="Keyboard Shortcuts"
+              onClick={() => openSettings("shortcuts")}
+            >
+              <HelpIcon size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -150,3 +198,4 @@ export function LeftSidebar(): React.ReactElement {
     </aside>
   );
 }
+

@@ -270,6 +270,34 @@ describe("LeftSidebar", () => {
     expect(state.activeSettingsTab).toBe("shortcuts");
   });
 
+  it("clears search query when clear button is clicked", () => {
+    render(<LeftSidebar />);
+
+    const searchInput = screen.getByPlaceholderText(/search workspaces/i) as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "test" } });
+    expect(searchInput.value).toBe("test");
+
+    const clearBtn = screen.getByRole("button", { name: /clear search/i });
+    expect(clearBtn).toBeDefined();
+
+    fireEvent.click(clearBtn);
+    expect(searchInput.value).toBe("");
+  });
+
+  it("displays live session count status in the footer", () => {
+    const { container } = render(<LeftSidebar />);
+    const statusText = container.querySelector(".sidebar-status-text");
+    expect(statusText?.textContent).toBe("2 live");
+  });
+
+  it("focuses search input when Ctrl+K is pressed", () => {
+    render(<LeftSidebar />);
+    const searchInput = screen.getByPlaceholderText(/search workspaces/i);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(document.activeElement).toBe(searchInput);
+  });
+
   it("keeps a closed sidebar mounted, hidden via the drawer instead of unmounting", () => {
     useTerminalStore.setState({ leftSidebarOpen: false });
     const { container } = render(<LeftSidebar />);
@@ -280,3 +308,4 @@ describe("LeftSidebar", () => {
     expect((aside as HTMLElement).style.position).toBe("absolute");
   });
 });
+
