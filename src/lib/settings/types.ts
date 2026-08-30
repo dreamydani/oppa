@@ -54,6 +54,10 @@ export interface GeneralSettings {
   browserHomePage: string;
   // Relaunch known agent CLIs after a cold boot via their native resume
   autoResumeAgents: boolean;
+  // Version the user dismissed in the "Update now / Not now" banner; the
+  // banner shows again only when a NEWER version becomes available. `null`
+  // (or absent, for old saves) means never dismissed.
+  dismissedUpdateVersion: string | null;
 }
 
 export interface AppSettings {
@@ -91,6 +95,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     browserSearchEngine: "duckduckgo",
     browserHomePage: "https://duckduckgo.com",
     autoResumeAgents: true,
+    dismissedUpdateVersion: null,
   },
   appearance: DEFAULT_APPEARANCE_SETTINGS,
 };
