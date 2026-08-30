@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useTerminalStore, markScrollbackDirty, selectProjectTree } from "./terminalStore";
-import * as transport from "../lib/pty/transport";
+import * as ptyTransport from "../lib/pty/transport";
+import * as worktreeTransport from "../lib/worktree/transport";
+import * as gitTransport from "../lib/git/transport";
+import * as layoutTransport from "../lib/layout/transport";
 import * as workspaceTransport from "../lib/workspace/transport";
 import * as fsTransport from "../lib/fs/transport";
 import * as settingsTransport from "../lib/settings/transport";
@@ -13,17 +16,14 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
-  saveLayout: vi.fn(),
-  loadLayout: vi.fn(),
-  saveScrollback: vi.fn().mockResolvedValue(undefined),
-  loadScrollback: vi.fn().mockResolvedValue(null),
-  deleteScrollback: vi.fn().mockResolvedValue(undefined),
-  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  ptyList: vi.fn().mockResolvedValue([]),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../lib/worktree/transport", () => ({
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -32,10 +32,13 @@ vi.mock("../lib/pty/transport", () => ({
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
-  ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
   worktreeCreateFleet: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../lib/git/transport", () => ({
   scStatus: vi.fn().mockResolvedValue({
     entries: [],
     conflict_state: "none",
@@ -74,6 +77,15 @@ vi.mock("../lib/pty/transport", () => ({
   requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
 }));
 
+vi.mock("../lib/layout/transport", () => ({
+  saveLayout: vi.fn(),
+  loadLayout: vi.fn(),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../lib/workspace/transport", () => ({
   saveRecents: vi.fn().mockResolvedValue(undefined),
   loadRecents: vi.fn().mockResolvedValue([]),
@@ -98,15 +110,15 @@ vi.mock("../lib/window/transport", () => ({
   applyWindowState: vi.fn().mockResolvedValue(undefined),
 }));
 
-const ptySpawnMock = vi.mocked(transport.ptySpawn);
-const ptyKillMock = vi.mocked(transport.ptyKill);
-const ptyWriteMock = vi.mocked(transport.ptyWrite);
-const saveLayoutMock = vi.mocked(transport.saveLayout);
-const loadLayoutMock = vi.mocked(transport.loadLayout);
-const saveScrollbackMock = vi.mocked(transport.saveScrollback);
-const loadScrollbackMock = vi.mocked(transport.loadScrollback);
-const deleteScrollbackMock = vi.mocked(transport.deleteScrollback);
-const cleanupStaleScrollbacksMock = vi.mocked(transport.cleanupStaleScrollbacks);
+const ptySpawnMock = vi.mocked(ptyTransport.ptySpawn);
+const ptyKillMock = vi.mocked(ptyTransport.ptyKill);
+const ptyWriteMock = vi.mocked(ptyTransport.ptyWrite);
+const saveLayoutMock = vi.mocked(layoutTransport.saveLayout);
+const loadLayoutMock = vi.mocked(layoutTransport.loadLayout);
+const saveScrollbackMock = vi.mocked(layoutTransport.saveScrollback);
+const loadScrollbackMock = vi.mocked(layoutTransport.loadScrollback);
+const deleteScrollbackMock = vi.mocked(layoutTransport.deleteScrollback);
+const cleanupStaleScrollbacksMock = vi.mocked(layoutTransport.cleanupStaleScrollbacks);
 const saveRecentsMock = vi.mocked(workspaceTransport.saveRecents);
 const loadRecentsMock = vi.mocked(workspaceTransport.loadRecents);
 const savePresetsMock = vi.mocked(workspaceTransport.savePresets);
@@ -117,19 +129,19 @@ const saveSettingsMock = vi.mocked(settingsTransport.saveSettings);
 const loadSettingsMock = vi.mocked(settingsTransport.loadSettings);
 const getSavedWindowStateMock = vi.mocked(windowTransport.getSavedWindowState);
 const applyWindowStateMock = vi.mocked(windowTransport.applyWindowState);
-const worktreeListMock = vi.mocked(transport.worktreeList);
-const worktreePsMock = vi.mocked(transport.worktreePs);
-const worktreeCreateMock = vi.mocked(transport.worktreeCreate);
-const worktreeSetMock = vi.mocked(transport.worktreeSet);
-const worktreeRemoveMock = vi.mocked(transport.worktreeRemove);
-const worktreePurgeMock = vi.mocked(transport.worktreePurge);
-const repoAddMock = vi.mocked(transport.repoAdd);
-const repoListMock = vi.mocked(transport.repoList);
-const ptyListMock = vi.mocked(transport.ptyList);
-const worktreeCreateAgentMock = vi.mocked(transport.worktreeCreateAgent);
-const worktreeCreateFleetMock = vi.mocked(transport.worktreeCreateFleet);
+const worktreeListMock = vi.mocked(worktreeTransport.worktreeList);
+const worktreePsMock = vi.mocked(worktreeTransport.worktreePs);
+const worktreeCreateMock = vi.mocked(worktreeTransport.worktreeCreate);
+const worktreeSetMock = vi.mocked(worktreeTransport.worktreeSet);
+const worktreeRemoveMock = vi.mocked(worktreeTransport.worktreeRemove);
+const worktreePurgeMock = vi.mocked(worktreeTransport.worktreePurge);
+const repoAddMock = vi.mocked(worktreeTransport.repoAdd);
+const repoListMock = vi.mocked(worktreeTransport.repoList);
+const ptyListMock = vi.mocked(ptyTransport.ptyList);
+const worktreeCreateAgentMock = vi.mocked(worktreeTransport.worktreeCreateAgent);
+const worktreeCreateFleetMock = vi.mocked(worktreeTransport.worktreeCreateFleet);
 
-function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): transport.WorktreeRecord {
+function worktreeRecord(overrides: Partial<worktreeTransport.WorktreeRecord> = {}): worktreeTransport.WorktreeRecord {
   return {
     id: "demo::C:/ws/feat-a",
     repo_id: "demo",
@@ -148,7 +160,7 @@ function worktreeRecord(overrides: Partial<transport.WorktreeRecord> = {}): tran
   };
 }
 
-function spawnRes(id: string, is_new = true, snapshot?: string | null): transport.PtySpawnResult {
+function spawnRes(id: string, is_new = true, snapshot?: string | null): ptyTransport.PtySpawnResult {
   return { id, is_new, snapshot, pid: 1234, cols: 80, rows: 24 };
 }
 
@@ -161,8 +173,8 @@ function leafIdList(node: unknown): string[] {
 }
 
 // Module-init subscriptions register during import; capture before clearAllMocks runs.
-const titleChangedHandler = vi.mocked(transport.onTitleChanged).mock.calls[0]?.[0];
-const focusRequestedHandler = vi.mocked(transport.onFocusRequested).mock.calls[0]?.[0];
+const titleChangedHandler = vi.mocked(ptyTransport.onTitleChanged).mock.calls[0]?.[0];
+const focusRequestedHandler = vi.mocked(ptyTransport.onFocusRequested).mock.calls[0]?.[0];
 
 describe("terminalStore", () => {
   beforeEach(() => {
@@ -413,7 +425,7 @@ describe("terminalStore", () => {
   });
 
   it("ackSession forwards the char count to the transport", () => {
-    const ptyAckMock = vi.mocked(transport.ptyAck);
+    const ptyAckMock = vi.mocked(ptyTransport.ptyAck);
     useTerminalStore.getState().ackSession("abc", 128);
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 128);
   });
@@ -3176,7 +3188,7 @@ describe("terminalStore", () => {
   });
 
   describe("view-only diff slice", () => {
-    const scFileDiffMock = vi.mocked(transport.scFileDiff);
+    const scFileDiffMock = vi.mocked(gitTransport.scFileDiff);
 
     beforeEach(() => {
       vi.clearAllMocks();

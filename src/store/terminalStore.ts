@@ -158,15 +158,14 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
 // ---- Global daemon-event subscriptions (module-level, installed once) ----
 
 import {
-  onWorktreeChanged,
   onTitleChanged,
   onFocusRequested,
   onSessionWorking,
   onAgentStatus,
-  onGitChanged,
-  onPrChanged,
 } from "../lib/pty/transport";
-import type { PrChangedPayload } from "../lib/pty/transport";
+import { onWorktreeChanged } from "../lib/worktree/transport";
+import { onGitChanged, onPrChanged } from "../lib/git/transport";
+import type { PrChangedPayload } from "../lib/git/transport";
 import { findLeafPath, focus as focusLeaf } from "../lib/pane-manager/layout";
 import { leafIds } from "./slices/layoutQueries";
 

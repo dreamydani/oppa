@@ -1,12 +1,10 @@
 // Worktree + repo registry state, loaded from the daemon and refreshed on
 // worktree-changed events. Mutations always re-list so cards stay truthful.
 
+import { ptyList } from "../../lib/pty/transport";
 import {
-  ptyList,
   repoAdd,
   repoList,
-  requestReviewEligibility,
-  scMergeToBase,
   worktreeCreate,
   worktreeCreateAgent,
   worktreeCreateFleet,
@@ -15,19 +13,25 @@ import {
   worktreeRemove,
   worktreePurge,
   worktreePs,
-} from "../../lib/pty/transport";
+} from "../../lib/worktree/transport";
 import type {
-  Eligibility,
   FleetSlotInput,
   FleetSpawnResult,
-  MergeModeInput,
-  MergeToBaseOutcome,
   RepoRecord,
   WorktreeAgentHandoff,
   WorktreeListEntry,
   WorktreeRecord,
   WorktreeStatus,
-} from "../../lib/pty/transport";
+} from "../../lib/worktree/transport";
+import {
+  requestReviewEligibility,
+  scMergeToBase,
+} from "../../lib/git/transport";
+import type {
+  Eligibility,
+  MergeModeInput,
+  MergeToBaseOutcome,
+} from "../../lib/git/transport";
 import type { TerminalSession } from "./terminalSessionsSlice";
 import type { TerminalState } from "../terminalStore";
 

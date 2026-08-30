@@ -20,7 +20,7 @@ import {
   loadScrollback,
   deleteScrollback,
   cleanupStaleScrollbacks,
-} from "../../lib/pty/transport";
+} from "../../lib/layout/transport";
 import { getSavedWindowState, applyWindowState } from "../../lib/window/transport";
 import type { WindowState } from "../../lib/window/transport";
 import type { EditorTab, EditorViewMode } from "./codeEditorSlice";

@@ -2,6 +2,7 @@
 // notes (daemon-persisted per worktree), and hosted-review eligibility /
 // status caches. All mutations refresh status so CLI-side changes converge.
 
+import { ptyWrite } from "../../lib/pty/transport";
 import {
   scStatus,
   scStage,
@@ -24,11 +25,12 @@ import {
   requestReviewEligibility,
   requestCreateReview,
   requestReviewStatus,
-  ptyWrite,
-} from "../../lib/pty/transport";
+} from "../../lib/git/transport";
 import type {
   BranchCompare,
+  CreatedReview,
   DiffComment,
+  Eligibility,
   HistoryResult,
   LocalBranches,
   NewDiffComment,
@@ -36,7 +38,7 @@ import type {
   PullOutcome,
   PushOutcome,
   SourceControlStatus,
-} from "../../lib/pty/transport";
+} from "../../lib/git/transport";
 import { focus } from "../../lib/pane-manager/layout";
 import type { TerminalState } from "../terminalStore";
 import { getActiveTab } from "./layoutQueries";
@@ -80,14 +82,14 @@ export interface SourceControlSlice {
   deleteComment: (id: string) => Promise<void>;
   markCommentsSent: (ids: string[]) => Promise<void>;
   // Hosted reviews: keyed by cwd; debounced refresh on PrChanged like git-changed
-  reviewByCwd: Record<string, { eligibility?: import("../../lib/pty/transport").Eligibility; prStatus?: PrStatus; loading: boolean }>;
+  reviewByCwd: Record<string, { eligibility?: Eligibility; prStatus?: PrStatus; loading: boolean }>;
   // Registry-level cache for worktree cards keyed by worktree id
   prStatusByWorktreeId: Record<string, PrStatus>;
-  setReviewEligibility: (cwd: string, eligibility: import("../../lib/pty/transport").Eligibility) => void;
+  setReviewEligibility: (cwd: string, eligibility: Eligibility) => void;
   setPrStatus: (cwd: string, prStatus: PrStatus) => void;
   setPrStatusByWorktreeId: (worktreeId: string, prStatus: PrStatus) => void;
   refreshReviewEligibility: (cwd?: string) => Promise<void>;
-  createReview: (cwd: string, input: { title: string; body: string; draft: boolean }) => Promise<import("../../lib/pty/transport").CreatedReview>;
+  createReview: (cwd: string, input: { title: string; body: string; draft: boolean }) => Promise<CreatedReview>;
   refreshReviewStatus: (cwd?: string) => Promise<void>;
   sendToSession: (sessionId: string, data: string) => Promise<void>;
 }

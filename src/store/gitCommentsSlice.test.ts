@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useTerminalStore } from "./terminalStore";
-import * as transport from "../lib/pty/transport";
-import type { DiffComment } from "../lib/pty/transport";
+import * as ptyTransport from "../lib/pty/transport";
+import * as gitTransport from "../lib/git/transport";
+import type { DiffComment } from "../lib/git/transport";
 
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -9,22 +10,58 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
-  saveLayout: vi.fn(),
-  loadLayout: vi.fn(),
-  saveScrollback: vi.fn().mockResolvedValue(undefined),
-  loadScrollback: vi.fn().mockResolvedValue(null),
-  deleteScrollback: vi.fn().mockResolvedValue(undefined),
-  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+  ptyList: vi.fn().mockResolvedValue([]),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../lib/git/transport", () => ({
+  diffCommentsList: vi.fn().mockResolvedValue([]),
+  diffCommentAdd: vi.fn(),
+  diffCommentUpdate: vi.fn(),
+  diffCommentDelete: vi.fn().mockResolvedValue(undefined),
+  diffCommentsMarkSent: vi.fn(),
+  scStatus: vi.fn().mockResolvedValue({
+    entries: [],
+    conflict_state: "none",
+    branch: "main",
+    upstream: { has_upstream: false, ahead: 0, behind: 0, remote_branch: null },
+    did_hit_limit: false,
+    status_length: 0,
+  }),
+  scStage: vi.fn().mockResolvedValue(undefined),
+  scUnstage: vi.fn().mockResolvedValue(undefined),
+  scDiscard: vi.fn().mockResolvedValue(undefined),
+  scCommit: vi.fn().mockResolvedValue("abc1234"),
+  scLocalBranches: vi.fn().mockResolvedValue({ branches: ["main"], current: "main" }),
+  scCheckout: vi.fn().mockResolvedValue(undefined),
+  scBranchCompare: vi.fn().mockResolvedValue({
+    base_ref: "main",
+    ahead: 0,
+    behind: 0,
+    changed_files: [],
+  }),
+  scFetch: vi.fn().mockResolvedValue(undefined),
+  scHistory: vi.fn().mockResolvedValue({ items: [], has_more: false }),
+  scFileDiff: vi.fn().mockResolvedValue({
+    kind: "text",
+    original_content: "",
+    modified_content: "",
+    truncated: false,
+  }),
+  scPull: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
+  scFastForward: vi.fn().mockResolvedValue({ status: "up-to-date", new_head: null }),
+  scPush: vi.fn().mockResolvedValue({ pushed_to: "origin/main", was_publish: false }),
   onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
   requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
   requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
   requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
+}));
+
+vi.mock("../lib/worktree/transport", () => ({
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -33,22 +70,27 @@ vi.mock("../lib/pty/transport", () => ({
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
-  ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
-  diffCommentsList: vi.fn().mockResolvedValue([]),
-  diffCommentAdd: vi.fn(),
-  diffCommentUpdate: vi.fn(),
-  diffCommentDelete: vi.fn().mockResolvedValue(undefined),
-  diffCommentsMarkSent: vi.fn(),
+  worktreeCreateFleet: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
-const diffCommentsListMock = vi.mocked(transport.diffCommentsList);
-const diffCommentAddMock = vi.mocked(transport.diffCommentAdd);
-const diffCommentUpdateMock = vi.mocked(transport.diffCommentUpdate);
-const diffCommentDeleteMock = vi.mocked(transport.diffCommentDelete);
-const diffCommentsMarkSentMock = vi.mocked(transport.diffCommentsMarkSent);
-const ptyWriteMock = vi.mocked(transport.ptyWrite);
+vi.mock("../lib/layout/transport", () => ({
+  saveLayout: vi.fn(),
+  loadLayout: vi.fn(),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
+}));
+
+const diffCommentsListMock = vi.mocked(gitTransport.diffCommentsList);
+const diffCommentAddMock = vi.mocked(gitTransport.diffCommentAdd);
+const diffCommentUpdateMock = vi.mocked(gitTransport.diffCommentUpdate);
+const diffCommentDeleteMock = vi.mocked(gitTransport.diffCommentDelete);
+const diffCommentsMarkSentMock = vi.mocked(gitTransport.diffCommentsMarkSent);
+const ptyWriteMock = vi.mocked(ptyTransport.ptyWrite);
 
 function makeComment(overrides: Partial<DiffComment> = {}): DiffComment {
   return {

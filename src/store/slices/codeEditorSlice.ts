@@ -2,8 +2,8 @@
 // review flow, and the read-only diff view.
 
 import { readFile, writeFile } from "../../lib/fs/transport";
-import { scFileDiff } from "../../lib/pty/transport";
-import type { GitArea } from "../../lib/pty/transport";
+import { scFileDiff } from "../../lib/git/transport";
+import type { GitArea } from "../../lib/git/transport";
 import type { TerminalState } from "../terminalStore";
 
 type Set = (
