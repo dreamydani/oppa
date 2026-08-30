@@ -10,6 +10,7 @@ pub mod git;
 pub mod layout;
 pub mod pty;
 pub mod settings;
+pub mod updater;
 mod workspace_presets;
 
 use pty::manager::PtyManager;
@@ -100,12 +101,21 @@ pub fn run() {
     // hung renderer cannot trap the app.
     let save_done = Arc::new(AtomicBool::new(false));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
-        .manage(browser::manager::BrowserManager::new())
+        .manage(browser::manager::BrowserManager::new());
+    // The updater is stable-only: a dev build NEVER checks for updates, so the
+    // plugin (which would add its own update-check commands) is not registered
+    // on dev. `Channel::current()` is compile-time, so the registration is
+    // baked into the binary.
+    if channel::Channel::current() == channel::Channel::Stable {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
         .invoke_handler(tauri::generate_handler![
             channel_commands::app_channel,
+            updater::check_for_update,
             pty::commands::pty_spawn,
             pty::commands::pty_write,
             pty::commands::pty_resize,

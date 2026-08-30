@@ -25,6 +25,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/dreamydani/oppa/releases/latest/download/oppa-update-manifest.json"
+      ],
+      "pubkey": null
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
