@@ -5,7 +5,7 @@ pub mod cli;
 pub mod extensions;
 mod fs;
 pub mod git;
-mod layout;
+pub mod layout;
 pub mod pty;
 pub mod settings;
 mod workspace_presets;
@@ -109,52 +109,53 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
-            pty::commands::save_scrollback,
-            pty::commands::load_scrollback,
-            pty::commands::delete_scrollback,
-            pty::commands::cleanup_stale_scrollbacks,
-            pty::commands::repo_add,
-            pty::commands::repo_list,
-            pty::commands::worktree_create,
-            pty::commands::worktree_create_agent,
-            pty::commands::worktree_create_fleet,
-            pty::commands::agent_profiles,
-            pty::commands::worktree_list,
-            pty::commands::worktree_show,
-            pty::commands::worktree_current,
-            pty::commands::worktree_set,
-            pty::commands::worktree_remove,
-            pty::commands::worktree_purge,
-            pty::commands::worktree_ps,
-            pty::commands::worktree_lineage,
-            pty::commands::sc_status,
-            pty::commands::sc_stage,
-            pty::commands::sc_unstage,
-            pty::commands::sc_discard,
-            pty::commands::sc_commit,
-            pty::commands::sc_local_branches,
-            pty::commands::sc_checkout,
-            pty::commands::sc_file_diff,
-            pty::commands::sc_history,
-            pty::commands::sc_branch_compare,
-            pty::commands::sc_fetch,
-            pty::commands::sc_pull,
-            pty::commands::sc_fast_forward,
-            pty::commands::sc_push,
-            pty::commands::sc_upstream_refresh,
-            pty::commands::sc_merge_to_base,
-            pty::commands::sc_generate_commit_message,
-            pty::commands::sc_generate_pr_message,
-            pty::commands::diff_comments_list,
-            pty::commands::diff_comment_add,
-            pty::commands::diff_comment_update,
-            pty::commands::diff_comment_delete,
-            pty::commands::diff_comments_mark_sent,
-            pty::commands::review_eligibility,
-            pty::commands::create_review,
-            pty::commands::review_status,
+            layout::save_scrollback,
+            layout::load_scrollback,
+            layout::delete_scrollback,
+            layout::cleanup_stale_scrollbacks,
+            git::worktree_commands::repo_add,
+            git::worktree_commands::repo_list,
+            git::worktree_commands::worktree_create,
+            git::worktree_commands::worktree_create_agent,
+            git::worktree_commands::worktree_create_fleet,
+            git::worktree_commands::agent_profiles,
+            git::worktree_commands::worktree_list,
+            git::worktree_commands::worktree_show,
+            git::worktree_commands::worktree_current,
+            git::worktree_commands::worktree_set,
+            git::worktree_commands::worktree_remove,
+            git::worktree_commands::worktree_purge,
+            git::worktree_commands::worktree_ps,
+            git::worktree_commands::worktree_lineage,
+            git::commands::sc_status,
+            git::commands::sc_stage,
+            git::commands::sc_unstage,
+            git::commands::sc_discard,
+            git::commands::sc_commit,
+            git::commands::sc_local_branches,
+            git::commands::sc_checkout,
+            git::commands::sc_file_diff,
+            git::commands::sc_history,
+            git::commands::sc_branch_compare,
+            git::commands::sc_fetch,
+            git::commands::sc_pull,
+            git::commands::sc_fast_forward,
+            git::commands::sc_push,
+            git::commands::sc_upstream_refresh,
+            git::commands::sc_merge_to_base,
+            git::commands::sc_generate_commit_message,
+            git::commands::sc_generate_pr_message,
+            git::commands::diff_comments_list,
+            git::commands::diff_comment_add,
+            git::commands::diff_comment_update,
+            git::commands::diff_comment_delete,
+            git::commands::diff_comments_mark_sent,
+            git::commands::review_eligibility,
+            git::commands::create_review,
+            git::commands::review_status,
             layout::save_layout,
             layout::load_layout,
+            layout::confirm_save_complete,
             settings::save_settings,
             settings::load_settings,
             fs::fs_read_dir,
@@ -183,7 +184,6 @@ pub fn run() {
             extensions::commands::get_contributions,
             extensions::commands::grant_extension_consent,
             extensions::commands::get_extension_fingerprint,
-            confirm_save_complete,
         ])
         .setup(move |app| {
             let save_done = Arc::clone(&save_done);
@@ -303,10 +303,10 @@ pub fn run() {
                     manager.set_focus_requested_callback(
                         pty::commands::session_focus_requested_forwarder(&app_handle),
                     );
-                    manager.set_git_changed_callback(pty::commands::git_changed_forwarder(
+                    manager.set_git_changed_callback(git::commands::git_changed_forwarder(
                         &app_handle,
                     ));
-                    manager.set_pr_changed_callback(pty::commands::pr_changed_forwarder(
+                    manager.set_pr_changed_callback(git::commands::pr_changed_forwarder(
                         &app_handle,
                     ));
                     manager.set_working_state_callback(
@@ -352,12 +352,4 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {});
-}
-
-/// The renderer calls this after it finishes flushing the layout save during
-/// the close handshake, so the exit wait loop can stop early.
-#[tauri::command(async)]
-fn confirm_save_complete(app: tauri::AppHandle) {
-    let flag = app.state::<Arc<AtomicBool>>();
-    flag.store(true, Ordering::SeqCst);
 }

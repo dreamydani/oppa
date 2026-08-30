@@ -4,6 +4,8 @@
 // test binary (0xc0000139 constraint, see Task 3).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 /// Persist layout.json to `path`, creating parent directories as needed.
@@ -32,6 +34,44 @@ pub fn save_layout(app: AppHandle, layout_json: String) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn load_layout(app: AppHandle) -> Result<Option<String>, String> {
     load_layout_at(&layout_path(&app)).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.save(&id, &data).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn load_scrollback(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.load(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn delete_scrollback(app: AppHandle, id: String) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage.delete(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
+    storage
+        .cleanup_stale(&active_ids)
+        .map_err(|e| e.to_string())
+}
+
+/// The renderer calls this after it finishes flushing the layout save during
+/// the close handshake, so the exit wait loop can stop early.
+#[tauri::command(async)]
+pub fn confirm_save_complete(app: AppHandle) {
+    let flag = app.state::<Arc<AtomicBool>>();
+    flag.store(true, Ordering::SeqCst);
 }
 
 #[cfg(test)]
