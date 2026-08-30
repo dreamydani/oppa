@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTabIndicator } from "../lib/motion/tabIndicator";
 import {
   PanelLeftIcon,
   PanelRightIcon,
@@ -18,6 +19,9 @@ export function TitleBar(): ReactElement {
   const setAppMode = useTerminalStore((s) => s.setAppMode);
   const isSettingsOpen = useTerminalStore((s) => s.isSettingsOpen);
   const showTitlebarLogo = useTerminalStore((s) => s.settings.appearance.showTitlebarLogo);
+
+  // Slides the active-mode pill between tabs instead of recolouring in place.
+  const modeIndicator = useTabIndicator(activeAppMode, ".mode-tab");
 
   const handleMinimize = () => {
     try {
@@ -69,10 +73,22 @@ export function TitleBar(): ReactElement {
             Settings
           </span>
         ) : (
-          <div className="mode-switcher-pill" data-tauri-drag-region="false">
+          <div
+            className="mode-switcher-pill"
+            data-tauri-drag-region="false"
+            ref={modeIndicator.stripRef}
+          >
+            <span
+              className="mode-switcher-indicator"
+              data-motion="indicator"
+              data-state="open"
+              style={modeIndicator.style}
+              aria-hidden="true"
+            />
             <button
               type="button"
               className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
+              data-active={activeAppMode === "browser" ? "true" : undefined}
               onClick={() => setAppMode("browser")}
               title="Browser"
               aria-label="Browser"
@@ -83,6 +99,7 @@ export function TitleBar(): ReactElement {
             <button
               type="button"
               className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
+              data-active={activeAppMode === "terminal" ? "true" : undefined}
               onClick={() => setAppMode("terminal")}
               title="Terminal"
               aria-label="Terminal"
@@ -93,6 +110,7 @@ export function TitleBar(): ReactElement {
             <button
               type="button"
               className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
+              data-active={activeAppMode === "editor" ? "true" : undefined}
               onClick={() => setAppMode("editor")}
               title="Editor"
               aria-label="Editor"

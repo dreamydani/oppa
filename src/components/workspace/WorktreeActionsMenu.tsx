@@ -221,6 +221,8 @@ export function WorktreeActionsMenu({
       {confirmMode && (
         <div
           className="wt-modal-backdrop"
+          data-motion="scrim"
+          data-state="open"
           onClick={(e) => {
             if (e.target === e.currentTarget) setConfirmMode(null);
           }}
@@ -229,6 +231,8 @@ export function WorktreeActionsMenu({
         >
           <div
             className="wt-confirm-card"
+            data-motion="modal"
+            data-state="open"
             role="alertdialog"
             aria-label={
               confirmMode === "purge"
