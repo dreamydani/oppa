@@ -26,6 +26,9 @@
    click coordinates rather than defaulting to the element's centre.
    -------------------------------------------------------------------------- */
 [data-motion="menu"] {
+  /* Overridden per surface where the anchor differs (a right-aligned kebab
+     menu sets `top right`). */
+  transform-origin: top left;
   animation: oppa-menu-in var(--dur-base) var(--ease-out) both;
 }
 
@@ -37,6 +40,27 @@
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Fade-only entrance.
+   For surfaces that already own an inline `transform` — a submenu offsets
+   itself with translateY, and an animation that scales transform would win
+   over the inline style for the duration and with `both` fill would keep
+   winning, silently destroying the positioning. Motion where it is safe to
+   take the property, opacity where it is not.
+   -------------------------------------------------------------------------- */
+[data-motion="fade"] {
+  animation: oppa-fade-in var(--dur-fast) var(--ease-out) both;
+}
+
+@keyframes oppa-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 

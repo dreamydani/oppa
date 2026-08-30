@@ -461,6 +461,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           <div
             ref={menuRef}
             className="terminal-pane-header-menu"
+            data-motion="menu"
             onPointerDown={(e) => e.stopPropagation()}
           >
             <button
@@ -632,6 +633,7 @@ function SplitChooserPopover({
       ref={panelRef}
       className="terminal-pane-header-menu terminal-pane-header-split-popover"
       role="menu"
+      data-motion="menu"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <button
@@ -677,6 +679,7 @@ function TerminalSwitcherMenu({
     <div
       ref={panelRef}
       className="terminal-pane-header-switcher-panel"
+      data-motion="menu"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="terminal-pane-header-switcher-list">

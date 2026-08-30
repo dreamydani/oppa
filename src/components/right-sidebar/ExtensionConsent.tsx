@@ -33,11 +33,13 @@ export function ExtensionConsentModal(): React.ReactElement | null {
   return (
     <div
       className="ext-consent-backdrop"
+      data-motion="scrim"
+      data-state="open"
       role="dialog"
       aria-modal="true"
       aria-label="Enable extension"
     >
-      <div className="ext-consent-modal">
+      <div className="ext-consent-modal" data-motion="modal" data-state="open">
         <div className="ext-consent-header">
           <ShieldAlert size={18} />
           <h3>Run &quot;{ext.name}&quot;?</h3>

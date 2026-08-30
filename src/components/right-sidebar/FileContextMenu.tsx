@@ -56,6 +56,25 @@ export interface MenuPosition {
   submenuOffsetY: number;
 }
 
+/**
+ * Where a menu should appear to grow *from*.
+ *
+ * The entrance scales up from a corner, and the corner has to be the one the
+ * click actually landed on or the animation implies a cursor position the user
+ * never had. computeMenuPosition clamps rather than flips, so "was it clamped"
+ * is exactly the signal: a menu pushed left hugs its right edge, one pushed up
+ * hugs its bottom.
+ */
+export function menuTransformOrigin(
+  clickX: number,
+  clickY: number,
+  pos: Pick<MenuPosition, "x" | "y">,
+): string {
+  const x = pos.x < clickX ? "right" : "left";
+  const y = pos.y < clickY ? "bottom" : "top";
+  return `${y} ${x}`;
+}
+
 // Pure viewport math so flipping/clamping stays unit-testable without layout
 export function computeMenuPosition(input: MenuBoundsInput): MenuPosition {
   const {
@@ -218,10 +237,16 @@ export function FileContextMenu({
       ref={menuRef}
       className="file-context-menu"
       role="menu"
+      // Gated on the measurement: the node first renders `visibility: hidden`
+      // while its size is measured, and an animation started there would be
+      // partly spent before the menu is ever on screen. Setting the attribute
+      // once the position lands is what kicks the entrance off.
+      data-motion={pos ? "menu" : undefined}
       style={{
         left: pos?.x ?? state.x,
         top: pos?.y ?? state.y,
         visibility: pos ? "visible" : "hidden",
+        transformOrigin: menuTransformOrigin(state.x, state.y, pos ?? state),
       }}
     >
       {items.map((item) =>
@@ -244,6 +269,10 @@ export function FileContextMenu({
               <div
                 className={`file-context-submenu${pos?.submenuSide === "left" ? " file-context-submenu--left" : ""}`}
                 role="menu"
+                // Fade, not scale: the inline translateY below is the
+                // submenu's vertical alignment, and a transform-based
+                // entrance would override it. See motion.css.
+                data-motion="fade"
                 style={{ transform: `translateY(${pos?.submenuOffsetY ?? 0}px)` }}
               >
                 <button

@@ -279,7 +279,14 @@ export function WorkspaceSetupWizard({
         </div>
 
         {/* Wizard Main Step Content */}
-        <div className="wizard-step-body">
+        <div
+          className="wizard-step-body"
+          // Keyed on the step so Next/Back remounts the body and the entrance
+          // plays; the step content is conditionally rendered either way.
+          key={step}
+          data-motion="view"
+          data-state="open"
+        >
           {step === 1 && (
             <>
               <div className="wizard-mode-toggle" role="radiogroup" aria-label="Workspace mode">

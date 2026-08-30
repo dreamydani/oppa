@@ -115,6 +115,7 @@ export function WizardStepStart({
                 className="wizard-dropdown-menu"
                 role="listbox"
                 aria-label="Preferred Shell Options"
+                data-motion="menu"
               >
                 {SHELL_OPTIONS.map((opt) => {
                   const isSelected = opt.value === shell;

@@ -168,11 +168,17 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
       </div>
 
       {expanded && (
-        <div className="ws-card-rows" role="list">
+        <div
+          className="ws-card-rows"
+          role="list"
+          // Cascades the rows in on expand (see motion.css [data-motion="stagger"]).
+          data-motion="stagger"
+          data-state="open"
+        >
           {data.rows.length === 0 && (
             <div className="ws-card-empty">No terminals in this workspace.</div>
           )}
-          {sortedRows.map((row) => {
+          {sortedRows.map((row, rowIndex) => {
             const agentEntry = statusBySessionId[row.sessionId];
             const unread = unreadBySessionId[row.sessionId] ?? false;
             const isWorking = workingBySessionId[row.sessionId] ?? false;
@@ -194,6 +200,9 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 key={row.sessionId}
                 role="listitem"
                 className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isPinned ? " pinned" : ""}`}
+                // Feeds the [data-motion="stagger"] cascade; motion.css caps it
+                // at --stagger-cap so a long list still finishes arriving fast.
+                style={{ "--row-index": rowIndex } as React.CSSProperties}
                 onClick={() => {
                   markAgentStatusSeen(row.sessionId);
                   onFocusRow(row.sessionId);

@@ -368,6 +368,9 @@
   right: 4px;
   top: 100%;
   z-index: 30;
+  /* Anchored to the kebab at the row's top-right, so the entrance must unfold
+     from that corner or it reads as arriving from nowhere. */
+  transform-origin: top right;
 }
 
 /* --------------------------------------------------------------------------

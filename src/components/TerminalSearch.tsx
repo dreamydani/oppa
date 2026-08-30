@@ -67,7 +67,12 @@ export function TerminalSearch({
   };
 
   return (
-    <div className="terminal-search-overlay" role="search">
+    <div
+      className="terminal-search-overlay"
+      role="search"
+      data-motion="pop"
+      data-state="open"
+    >
       <input
         ref={inputRef}
         type="text"

@@ -56,7 +56,15 @@ export function BrowserViewport(): ReactElement {
       <BrowserOmnibox />
       <DeviceToolbar />
 
-      <div className={`browser-content-container preset-${devicePreset}`}>
+      <div
+        className={`browser-content-container preset-${devicePreset}`}
+        // Keyed on whether a page is loaded, NOT on the URL itself — keying on
+        // browserUrl would remount the iframe on every navigation and reload
+        // the page the user is on. This only swaps hub <-> view once.
+        key={browserUrl ? "page" : "hub"}
+        data-motion="view"
+        data-state="open"
+      >
         {!browserUrl ? (
           <BrowserHub />
         ) : devicePreset === "responsive" ? (

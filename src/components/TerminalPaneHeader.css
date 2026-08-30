@@ -118,7 +118,9 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              /* Spring so the button recovers past rest and settles — a press
+                 that eases back out feels sticky at 26px. */
+              transform var(--dur-fast) var(--ease-spring);
   padding: 0;
 }
 
@@ -148,6 +150,10 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
+  /* Unfolds downward from the kebab that opened it (see motion.css
+     [data-motion="menu"]); a centre-origin scale reads as materialising from
+     no particular place. */
+  transform-origin: top right;
   background-color: var(--bg-overlay);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -208,6 +214,7 @@
   top: 100%;
   left: 10px;
   margin-top: 4px;
+  transform-origin: top left;
   min-width: 230px;
   max-width: 340px;
   background-color: var(--bg-overlay);

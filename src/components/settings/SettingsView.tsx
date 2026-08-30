@@ -12,7 +12,15 @@ export function SettingsView(): React.ReactElement {
   return (
     <div className="settings-view" role="main" aria-label="Settings" data-testid="settings-view">
       <SettingsSidebar />
-      <div className="settings-content-area" data-testid="settings-content-area">
+      <div
+        className="settings-content-area"
+        data-testid="settings-content-area"
+        // Keyed on the tab so switching unmounts and remounts the subtree —
+        // without a new node there is no mount for the entrance to play on.
+        key={activeSettingsTab}
+        data-motion="view"
+        data-state="open"
+      >
         {activeSettingsTab === "general" && <GeneralSettingsPane />}
         {activeSettingsTab === "appearance" && <AppearanceSettingsPane />}
         {activeSettingsTab === "shortcuts" && <ShortcutsSettingsPane />}

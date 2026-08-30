@@ -133,7 +133,7 @@ export function WorktreeActionsMenu({
       </button>
 
       {isOpen && (
-        <div className="worktree-card-menu" role="menu">
+        <div className="worktree-card-menu" role="menu" data-motion="menu">
           {!record.retired ? (
             <>
               <button

@@ -450,6 +450,9 @@
   left: 0;
   right: 0;
   z-index: 60;
+  /* Spans the trigger and hangs below it, so it unfolds from the top-left
+     corner at the trigger's edge. */
+  transform-origin: top left;
   background: var(--wizard-bg-surface);
   border: 1px solid var(--wizard-border-highlight);
   border-radius: 8px;

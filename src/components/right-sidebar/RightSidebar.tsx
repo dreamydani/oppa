@@ -91,7 +91,14 @@ export function RightSidebar(): React.ReactElement {
       <div ref={innerRef} className="sidebar-slide-inner">
         <div className="right-sidebar-inner-row">
           <ActivityBar onRefresh={handleRefresh} />
-          <div className="right-sidebar-content">
+          <div
+            className="right-sidebar-content"
+            // Re-mounts on tab change so the panel entrance replays; without a
+            // fresh node the ternary below only swaps children in place.
+            key={rightSidebarTab}
+            data-motion="view"
+            data-state="open"
+          >
             {rightSidebarTab === "explorer" ? (
               <FileExplorer refreshKey={refreshKey} />
             ) : rightSidebarTab === "extensions" ? (

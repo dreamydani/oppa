@@ -270,12 +270,17 @@
   font-family: inherit;
   line-height: normal;
   transition: color var(--dur-micro) var(--ease-out),
-              background-color var(--dur-micro) var(--ease-out);
+              background-color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .mode-tab:hover:not(.disabled):not(.active) {
   color: var(--text-primary, #ededec);
   background-color: rgba(255, 255, 255, 0.04);
+}
+
+.mode-tab:active:not(.disabled) {
+  transform: scale(0.97);
 }
 
 .mode-tab.disabled {
@@ -310,12 +315,17 @@
   justify-content: center;
   cursor: pointer;
   transition: background-color var(--dur-micro) var(--ease-out),
-              color var(--dur-micro) var(--ease-out);
+              color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .title-bar-icon-btn:hover {
   background-color: var(--bg-card-hover);
   color: var(--text-primary);
+}
+
+.title-bar-icon-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .title-bar-icon-btn.active {
@@ -342,12 +352,17 @@
   justify-content: center;
   cursor: pointer;
   transition: background-color var(--dur-micro) var(--ease-out),
-              color var(--dur-micro) var(--ease-out);
+              color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .window-control-btn:hover {
   background-color: var(--bg-card-hover);
   color: var(--text-primary);
+}
+
+.window-control-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .window-control-btn.window-close:hover {
@@ -632,6 +647,9 @@
   position: absolute;
   top: 8px;
   right: 16px;
+  /* Slides down from the pane header it is attached to, so the pop must
+     originate at its own top-right corner. */
+  transform-origin: top right;
   z-index: 10;
   display: flex;
   align-items: center;
