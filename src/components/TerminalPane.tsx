@@ -38,6 +38,13 @@ import {
   isResizeStreamActive,
 } from "../lib/terminal/resizeStreamOverlay";
 import {
+  setFocusedPane,
+  setHoveredPane,
+  getPanePriority,
+  getFocusedPane,
+} from "../lib/terminal/panePriority";
+import { createThrottledWriteQueue } from "../lib/terminal/writeQueue";
+import {
   isLayoutAnimating,
   runWhenLayoutIdle,
 } from "../lib/layout/layoutAnimationGate";
@@ -65,6 +72,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const parsedRef = useRef(0);
   // Set by the mount effect; focus changes upgrade the renderer via registry.
   const ensureWebglRef = useRef<(() => void) | null>(null);
+  // Per-pane write throttle: focused writes are immediate, background panes
+  // flush at the capped rate. Created in the mount effect.
+  const writeQueueRef = useRef<ReturnType<typeof createThrottledWriteQueue> | null>(null);
 
   const status = useTerminalStore((s) => s.sessions[id]?.status);
   const session = useTerminalStore((s) => s.sessions[id]);
@@ -491,6 +501,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     // Routed through the shared multiplexer: one global listener dispatches
     // per session id (O(1)) instead of every pane filtering every event.
+    const writeQueue = createThrottledWriteQueue(getPanePriority(id), (data) => {
+      if (!disposed) term.write(data);
+    });
+    writeQueueRef.current = writeQueue;
     unsubs.push(
       subscribePtyData(id, (p) => {
         if (disposed) return;
@@ -498,7 +512,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
         // Cheap Set.add: the next layout save re-serializes this buffer only.
         markScrollbackDirty(id);
-        term.write(p.data);
+        writeQueue.push(p.data);
       }),
     );
 
@@ -622,6 +636,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       commitFitRef.current = null;
       flushScrollback();
       ackCoalescer.dispose();
+      writeQueue.dispose();
+      writeQueueRef.current = null;
       releaseGlSlot(idRef.current);
       ensureWebglRef.current = null;
       unregisterSerializer(idRef.current);
@@ -653,12 +669,37 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   // LRU victim while active, upgrade back to WebGL if it was downgraded, and
   // revalidate stretch+grid — a cheap no-op chain when healthy, a self-heal
   // when any input (renderer, geometry, font) went stale since the last fit.
+  // It also drives the render-priority registry: the focused pane owns the
+  // full frame budget, background panes render at the capped rate.
   useEffect(() => {
+    setFocusedPane(isFocused ? id : getFocusedPane() === id ? null : getFocusedPane());
+    writeQueueRef.current?.setPriority(getPanePriority(id));
     if (!isFocused) return;
     touchGlSlot(id);
     ensureWebglRef.current?.();
     runWhenLayoutIdle(() => commitFitRef.current?.());
   }, [isFocused, id]);
+
+  // Hover bump: pointerenter/leave on the pane surface raises a background
+  // pane to full rate while the cursor is over it.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onEnter = () => {
+      setHoveredPane(id);
+      writeQueueRef.current?.setPriority(getPanePriority(id));
+    };
+    const onLeave = () => {
+      setHoveredPane(null);
+      writeQueueRef.current?.setPriority(getPanePriority(id));
+    };
+    el.addEventListener("pointerenter", onEnter);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("pointerenter", onEnter);
+      el.removeEventListener("pointerleave", onLeave);
+    };
+  }, [id]);
 
   useEffect(() => {
     const term = termRef.current;

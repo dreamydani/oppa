@@ -6,15 +6,21 @@ import {
   setMaxActiveContextsForTests,
   resetWebglRegistryForTests,
 } from "./webglRegistry";
+import {
+  setFocusedPane,
+  resetPanePriorityForTests,
+} from "./panePriority";
 
 describe("webglRegistry", () => {
   beforeEach(() => {
     resetWebglRegistryForTests();
+    resetPanePriorityForTests();
     setMaxActiveContextsForTests(3);
   });
 
   afterEach(() => {
     resetWebglRegistryForTests();
+    resetPanePriorityForTests();
   });
 
   it("admits panes up to the cap", () => {
@@ -77,6 +83,26 @@ describe("webglRegistry", () => {
 
   it("release of an unknown id is a no-op", () => {
     expect(() => releaseGlSlot("ghost")).not.toThrow();
+  });
+
+  it("never evicts the focused pane even when it is the LRU", () => {
+    const downA = vi.fn();
+    const downB = vi.fn();
+    const downC = vi.fn();
+    acquireGlSlot("a", downA);
+    acquireGlSlot("b", downB);
+    acquireGlSlot("c", downC);
+    // a is oldest and unfocused; b and c are touched (fresher).
+    touchGlSlot("b");
+    touchGlSlot("c");
+    // Make the OLDEST pane the focused one.
+    setFocusedPane("a");
+
+    acquireGlSlot("d", vi.fn());
+    // Focused "a" survives; the oldest *background* pane (b) is evicted.
+    expect(downA).not.toHaveBeenCalled();
+    expect(downB).toHaveBeenCalledTimes(1);
+    expect(downC).not.toHaveBeenCalled();
   });
 
   it("downgrading via the callback then releasing keeps state consistent", () => {

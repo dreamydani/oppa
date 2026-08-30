@@ -592,6 +592,9 @@ describe("TerminalPane", () => {
       seq: number;
     }) => void;
     dataHandler({ id: "def", data: "hi", seq: 1 });
+    // "def" is a background pane (no focusedPath): its write is deferred by
+    // the render-budget queue and lands on the next frame.
+    pumpRaf();
     expect(xtermState.instances[1]!.write).toHaveBeenCalledWith("hi");
   });
 

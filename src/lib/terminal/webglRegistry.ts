@@ -2,6 +2,8 @@
 // context past ~16; this registry caps active WebglAddons well below that and
 // downgrades the least-recently-focused pane to the Canvas renderer instead.
 
+import { getPanePriority } from "./panePriority";
+
 type DowngradeFn = () => void;
 
 interface GlEntry {
@@ -39,8 +41,13 @@ function evictOldest(): void {
   let oldestId: string | null = null;
   let oldestAt = Infinity;
   for (const [id, entry] of entries) {
-    if (entry.lastFocusedAt < oldestAt) {
-      oldestAt = entry.lastFocusedAt;
+    // The focused pane's GL slot is never evicted; hovered is second, so
+    // background panes are the LRU pool even if they were focused recently.
+    const priority = getPanePriority(id);
+    if (priority === "focused") continue;
+    const key = priority === "hovered" ? entry.lastFocusedAt + 1 : entry.lastFocusedAt;
+    if (key < oldestAt) {
+      oldestAt = key;
       oldestId = id;
     }
   }
