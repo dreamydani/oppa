@@ -7,7 +7,7 @@ use crate::git::source_control::{
 use crate::git::worktree_registry::WorktreeStatus;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonRequest, DaemonResponse, WaitCondition,
-    DAEMON_PROTOCOL_VERSION,
+    DAEMON_PROTOCOL_VERSION, MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION,
 };
 use output::{CliRepoRecord, CliWorktreeListEntry, CliWorktreePsEntry, CliWorktreeRecord};
 
@@ -131,9 +131,13 @@ impl RuntimeConnection {
         };
         match conn.request(hello)? {
             DaemonResponse::HelloOk { protocol_version } => {
-                if protocol_version != DAEMON_PROTOCOL_VERSION {
+                // Minimum-supported policy, symmetric with the GUI client: a
+                // daemon speaking at least the floor is attachable even when
+                // its version differs; only a below-minimum daemon is too old.
+                if protocol_version < MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION {
                     return Err(CliError::Protocol(format!(
-                        "version mismatch: client={DAEMON_PROTOCOL_VERSION}, server={protocol_version}"
+                        "daemon protocol version {protocol_version} is too old to serve this \
+                         build (minimum supported: {MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION})"
                     )));
                 }
                 conn.protocol_version = protocol_version;
@@ -699,6 +703,7 @@ fn response_kind(resp: &DaemonResponse) -> String {
         DaemonResponse::SessionAttached(_) => "SessionAttached".into(),
         DaemonResponse::SessionList(_) => "SessionList".into(),
         DaemonResponse::Ok => "Ok".into(),
+        DaemonResponse::Busy(count) => format!("Busy({count})"),
         DaemonResponse::Error(e) => format!("Error({e})"),
         DaemonResponse::RepoRecords(_) => "RepoRecords".into(),
         DaemonResponse::WorktreeRecords(_) => "WorktreeRecords".into(),

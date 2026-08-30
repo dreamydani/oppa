@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecentWorkspace {
@@ -101,17 +101,15 @@ pub fn load_presets_at(path: &Path) -> std::io::Result<Vec<WorkspacePreset>> {
 }
 
 fn recents_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
+    crate::pty::snapshot::resolve_gui_data_dir(app)
         .map(|d| d.join("recents.json"))
-        .map_err(|e| e.to_string())
+        .ok_or_else(|| "app data dir unavailable".to_string())
 }
 
 fn presets_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
+    crate::pty::snapshot::resolve_gui_data_dir(app)
         .map(|d| d.join("presets.json"))
-        .map_err(|e| e.to_string())
+        .ok_or_else(|| "app data dir unavailable".to_string())
 }
 
 #[tauri::command(async)]

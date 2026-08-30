@@ -11,6 +11,7 @@ use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::ipc_protocol::{
     get_daemon_socket_path, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
     FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION,
 };
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -314,9 +315,17 @@ impl DaemonClient {
         };
         match client.send_request(hello)? {
             DaemonResponse::HelloOk { protocol_version } => {
-                if protocol_version != DAEMON_PROTOCOL_VERSION {
+                // Minimum-supported policy: a daemon speaking at least the
+                // floor is attachable even when its version differs from ours
+                // (a NEW GUI attaching to an OLD but compatible daemon). Only
+                // a genuinely too-old daemon — below the floor — is rejected,
+                // and the message says so explicitly so the caller can fall
+                // back to restart_stale_daemon instead of treating this as a
+                // normal attach.
+                if protocol_version < MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION {
                     return Err(format!(
-                        "protocol version mismatch: client={DAEMON_PROTOCOL_VERSION}, server={protocol_version}"
+                        "daemon protocol version {protocol_version} is too old to serve this \
+                         build (minimum supported: {MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION})"
                     ));
                 }
             }
@@ -563,6 +572,30 @@ impl DaemonClient {
             DaemonResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response for ListSessions: {other:?}")),
         }
+    }
+
+    /// True when the daemon is safe to upgrade: it holds zero live sessions.
+    ///
+    /// The daemon answers `UpgradeIfIdle` with `Ok` only when its session
+    /// registry is empty; with any session live it replies `Busy(n)`, which
+    /// maps to `Ok(false)` (the raw request still carries the count via
+    /// `DaemonResponse::Busy` for callers that need it).
+    pub fn daemon_can_upgrade(&self) -> Result<bool, String> {
+        match self.send_request(DaemonRequest::UpgradeIfIdle)? {
+            DaemonResponse::Ok => Ok(true),
+            DaemonResponse::Busy(_) => Ok(false),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for UpgradeIfIdle: {other:?}")),
+        }
+    }
+
+    /// Full `UpgradeIfIdle` verdict: idle (safe, zero sessions), busy (live
+    /// session count), or an error when the daemon could not answer (a build
+    /// predating `UpgradeIfIdle` keeps serving but errors the unknown request,
+    /// or a transport failure). Callers treat the error arm as "can't verify",
+    /// never as safe.
+    pub fn raw_upgrade_if_idle(&self) -> Result<DaemonResponse, String> {
+        self.send_request(DaemonRequest::UpgradeIfIdle)
     }
 
     /// Gracefully disconnect from the daemon without stopping sessions.
@@ -1570,5 +1603,188 @@ mod tests {
         assert!(result.is_ok(), "queued write must succeed: {result:?}");
 
         client.disconnect().ok();
+    }
+
+    // ---- task 6: backward-compatible protocol attach (min-version policy) ----
+
+    /// Answers the Hello handshake with a caller-chosen daemon protocol
+    /// version, then leaves the connection open so `create_or_attach` and
+    /// friends round-trip like they would against a real (possibly older)
+    /// daemon build.
+    fn spawn_server_replying_hello_version(
+        socket_path: &str,
+        daemon_protocol_version: u32,
+    ) -> std::thread::JoinHandle<()> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let path = socket_path.to_string();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                #[cfg(target_os = "windows")]
+                {
+                    use tokio::net::windows::named_pipe::ServerOptions;
+                    let mut server = ServerOptions::new()
+                        .first_pipe_instance(true)
+                        .create(&path)
+                        .unwrap();
+                    server.connect().await.unwrap();
+                    let (reader, mut writer) = tokio::io::split(server);
+                    let mut line = String::new();
+                    BufReader::new(reader).read_line(&mut line).await.unwrap();
+                    let hello_ok = serde_json::to_string(&DaemonResponse::HelloOk {
+                        protocol_version: daemon_protocol_version,
+                    })
+                    .unwrap();
+                    writer
+                        .write_all(format!("{hello_ok}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    // Stay open: the client may run more requests (create/attach).
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let (reader, mut writer) = tokio::io::split(stream);
+                    let mut line = String::new();
+                    BufReader::new(&mut reader).read_line(&mut line).await.unwrap();
+                    let hello_ok = serde_json::to_string(&DaemonResponse::HelloOk {
+                        protocol_version: daemon_protocol_version,
+                    })
+                    .unwrap();
+                    writer
+                        .write_all(format!("{hello_ok}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    }
+                }
+            });
+        })
+    }
+
+    fn test_socket_path(label: &str) -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        #[cfg(target_os = "windows")]
+        {
+            format!(r"\\.\pipe\oppa-test-{label}-{nanos}")
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            format!("/tmp/oppa-test-{label}-{nanos}.sock")
+        }
+    }
+
+    #[test]
+    fn new_gui_client_attaches_to_old_but_compatible_daemon() {
+        // An "old daemon" still speaking MIN_SUPPORTED (>= the floor) must be
+        // attachable by a new GUI build: the Hello handshake succeeds and a
+        // session can be created over the same connection.
+        let socket_path = test_socket_path("compat-min");
+        let _server = spawn_server_replying_hello_version(
+            &socket_path,
+            MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION,
+        );
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path)
+            .expect("connect must succeed against a min-version daemon");
+
+        // The connection is fully usable after the relaxed handshake: a
+        // session creation round-trips through the pipe. The silent server
+        // never answers non-Hello requests, so exercise the transport the
+        // same way the existing lifecycle test does — queue a write (fire and
+        // forget) and confirm the request lock is not stuck.
+        let write = client.write("compat-session", "echo ok\n");
+        assert!(
+            write.is_ok(),
+            "write after relaxed handshake must queue: {write:?}"
+        );
+        client.disconnect().ok();
+    }
+
+    #[test]
+    fn new_gui_client_rejects_below_minimum_daemon() {
+        // A daemon speaking a genuinely old protocol (below the floor) cannot
+        // serve the new GUI; the handshake must fail with a clear
+        // "too old" error so the caller can fall back to the stale-daemon
+        // restart path.
+        let socket_path = test_socket_path("too-old");
+        let _server = spawn_server_replying_hello_version(&socket_path, 5);
+        std::thread::sleep(Duration::from_millis(150));
+
+        let err = match DaemonClient::connect(&socket_path) {
+            Err(e) => e,
+            Ok(_) => panic!("below-minimum daemon must be rejected"),
+        };
+        assert!(
+            err.contains("too old") && err.contains("minimum"),
+            "below-minimum error must say the daemon is too old, got: {err}"
+        );
+        assert!(
+            err.contains("5"),
+            "error must carry the offending server version, got: {err}"
+        );
+    }
+
+    #[test]
+    fn daemon_can_upgrade_reports_idle_true_and_busy_false() {
+        let socket_path = test_socket_path("upgrade");
+        let server = Arc::new(DaemonServer::new());
+        let cancel_token = CancellationToken::new();
+
+        let srv_clone = Arc::clone(&server);
+        let cancel_clone = cancel_token.clone();
+        let path_clone = socket_path.clone();
+        let server_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+            });
+        });
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client = DaemonClient::connect(&socket_path).expect("connect client");
+
+        // No sessions yet: idle and safe to upgrade.
+        assert_eq!(
+            client.daemon_can_upgrade().expect("idle upgrade probe"),
+            true
+        );
+
+        // One live session: the daemon reports busy and the probe reads false.
+        let sh = test_sh_path();
+        client
+            .create_or_attach("upgrade-busy-session", 80, 24, None, Some(sh), false, None)
+            .expect("create session");
+        let verdict = client.daemon_can_upgrade().expect("busy upgrade probe");
+        assert_eq!(verdict, false, "a live session must make the daemon busy");
+        // The busy message names the blocking session count.
+        let msg = client
+            .send_request(DaemonRequest::UpgradeIfIdle)
+            .expect("raw upgrade probe");
+        match msg {
+            DaemonResponse::Busy(count) => assert!(count >= 1, "busy count: {count}"),
+            other => panic!("expected Busy response, got {other:?}"),
+        }
+
+        client.kill("upgrade-busy-session").expect("kill session");
+        client.disconnect().expect("disconnect");
+        cancel_token.cancel();
+        let _ = server_thread.join();
     }
 }

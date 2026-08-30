@@ -1,6 +1,8 @@
 pub mod agents;
 pub mod atomic_file;
 mod browser;
+pub mod channel;
+pub mod channel_commands;
 pub mod cli;
 pub mod extensions;
 mod fs;
@@ -8,6 +10,7 @@ pub mod git;
 pub mod layout;
 pub mod pty;
 pub mod settings;
+pub mod updater;
 mod workspace_presets;
 
 use pty::manager::PtyManager;
@@ -98,17 +101,35 @@ pub fn run() {
     // hung renderer cannot trap the app.
     let save_done = Arc::new(AtomicBool::new(false));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PtyManager::new())
-        .manage(browser::manager::BrowserManager::new())
+        .manage(browser::manager::BrowserManager::new());
+    // The updater is stable-only: a dev build NEVER checks for updates, so the
+    // plugin (which would add its own update-check commands) is not registered
+    // on dev. `Channel::current()` is compile-time, so the registration is
+    // baked into the binary.
+    //
+    // NOTE: the plugin's NATIVE check() is NOT used — our update manifest is a
+    // custom {version, download} shape the plugin cannot parse, and there is no
+    // signing pubkey yet. The real update check runs through `updater.rs`
+    // (check_for_update) and the banner opens the download URL. This
+    // registration exists so the plugin's other surface is available and the
+    // installer-side follow-up (signed manifest + native format) can adopt it.
+    if channel::Channel::current() == channel::Channel::Stable {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
         .invoke_handler(tauri::generate_handler![
+            channel_commands::app_channel,
+            updater::check_for_update,
             pty::commands::pty_spawn,
             pty::commands::pty_write,
             pty::commands::pty_resize,
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
+            pty::commands::can_upgrade_daemon,
             layout::save_scrollback,
             layout::load_scrollback,
             layout::delete_scrollback,
@@ -195,12 +216,11 @@ pub fn run() {
             // persisted disabled set. A missing data dir just skips managing
             // state; commands then fail loudly instead of half-working.
             if let (Some(user_dir), Some(state_path), Some(data_root)) = (
-                app.path().app_data_dir().ok().map(|d| d.join("extensions")),
-                app.path()
-                    .app_data_dir()
-                    .ok()
+                pty::snapshot::resolve_gui_data_dir(app.handle())
+                    .map(|d| d.join("extensions")),
+                pty::snapshot::resolve_gui_data_dir(app.handle())
                     .map(|d| d.join(extensions::registry::STATE_FILE_NAME)),
-                app.path().app_data_dir().ok(),
+                pty::snapshot::resolve_gui_data_dir(app.handle()),
             ) {
                 let registry = extensions::commands::init_registry_at(&user_dir, &state_path);
 
@@ -224,11 +244,9 @@ pub fn run() {
                                 if let Ok(mut reg) = state.0.lock() {
                                     reg.record_error(&ext_id, reason.clone());
                                     let _ = reg.set_enabled(&ext_id, false);
-                                    if let Some(p) = report_app
-                                        .path()
-                                        .app_data_dir()
-                                        .ok()
-                                        .map(|d| d.join(extensions::registry::STATE_FILE_NAME))
+                                    if let Some(p) =
+                                        pty::snapshot::resolve_gui_data_dir(&report_app)
+                                            .map(|d| d.join(extensions::registry::STATE_FILE_NAME))
                                     {
                                         let _ = extensions::registry::save_state_at(
                                             &p,

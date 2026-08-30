@@ -3,7 +3,9 @@ use crate::pty::daemon_client::{
     OnSessionWorking, OnTitleChanged, OnWorktreeChanged,
     OnAgentStatus,
 };
-use crate::pty::ipc_protocol::{get_daemon_socket_path, CreateOrAttachResult};
+use crate::pty::ipc_protocol::{
+    get_daemon_socket_path, CreateOrAttachResult, MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION,
+};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
@@ -145,10 +147,15 @@ impl PtyManager {
         let client = Arc::new(match DaemonClient::connect(&socket_path) {
             Ok(c) => c,
             Err(e) => {
-                // A daemon left running by an older build speaks an old protocol.
+                // A daemon left running by an old build that predates the
+                // minimum supported protocol cannot serve this GUI at all.
                 // Restart it (its shutdown handler flushes session checkpoints)
                 // and reconnect once; sessions restore via warm/cold paths.
-                if e.contains("protocol version mismatch") {
+                // A daemon speaking >= MIN_SUPPORTED is attachable as-is, so
+                // this fallback is now the rare last resort, not the norm.
+                if e.contains("too old")
+                    && e.contains(&MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION.to_string())
+                {
                     crate::pty::daemon_spawner::restart_stale_daemon(&socket_path)?;
                     DaemonClient::connect(&socket_path)?
                 } else {

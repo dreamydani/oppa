@@ -89,6 +89,31 @@ pnpm dev
 
 ---
 
+## Release & Updates
+
+### Build channels
+
+OPPA is one codebase with two build channels, baked in at compile time via `OPPA_CHANNEL` (unset = `stable`):
+
+- **Stable** (`oppa`) — the app you use daily. Uses `com.pc.oppa` data dir, the base daemon pipe, the "oppa" title, and checks for updates on startup.
+- **Developer OPPA** (`OPPA_CHANNEL=dev pnpm tauri dev`) — a one-to-one copy for dogfooding. Isolated data dir (`com.pc.oppa-dev`) and daemon pipe, "Developer OPPA" window title, and **never checks for updates**.
+
+### Releasing a new stable version
+
+```bash
+pnpm release
+```
+
+Prompts for the version (manual), bumps `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`, builds the installer, and publishes it plus an update manifest (`{ "version": "...", "download": "..." }`) to GitHub Releases (`dreamydani/oppa`).
+
+### How stable updates work (v1)
+
+On startup, stable OPPA checks the release manifest. If a newer version exists, it shows **"Update now / Not now"**. If terminal sessions are running, "Update now" first warns "N sessions are still running" — the interruption is always your informed choice.
+
+**v1 behavior:** "Update now" opens the installer in your browser (the seamless in-app install + versioned-folder installer layout is the next milestone — the daemon-side seams — min-version protocol attach, lazy daemon upgrade, daemon-path resolver — are already in place).
+
+---
+
 ## Testing & Verification
 
 Run all test suites:

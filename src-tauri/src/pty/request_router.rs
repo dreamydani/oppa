@@ -24,6 +24,7 @@ use crate::pty::daemon_session::DaemonSession;
 use crate::pty::ipc_protocol::{
     sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
     FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
+    MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION,
 };
 use crate::pty::runtime_metadata;
 use crate::pty::snapshot::SnapshotStorage;
@@ -40,7 +41,11 @@ impl DaemonServer {
     /// Dispatch a single DaemonRequest to the session registry.
     pub fn handle_request(&self, req: DaemonRequest) -> DaemonResponse {
         match req {
-            DaemonRequest::Hello { auth_token, .. } => {
+            DaemonRequest::Hello {
+                protocol_version,
+                auth_token,
+                ..
+            } => {
                 let supplied = auth_token.unwrap_or_default();
                 // M1: only a mismatching non-empty token rejects — pre-v3
                 // renderers (task 6 wires token sending) must keep connecting.
@@ -50,6 +55,14 @@ impl DaemonServer {
                     .is_some_and(|expected| !supplied.is_empty() && supplied != expected);
                 if rejected {
                     DaemonResponse::Error("unauthorized".into())
+                } else if protocol_version < MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION {
+                    // Genuinely too old to serve this build: the client must
+                    // treat this as the restart-stale-daemon fallback, not as a
+                    // normal attach. Symmetric with the client-side check.
+                    DaemonResponse::Error(format!(
+                        "protocol version {protocol_version} is too old (minimum supported: \
+                         {MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION})"
+                    ))
                 } else {
                     DaemonResponse::HelloOk {
                         protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -253,6 +266,21 @@ impl DaemonServer {
                 DaemonResponse::SessionList(keys)
             }
             DaemonRequest::Disconnect => DaemonResponse::Ok,
+            DaemonRequest::UpgradeIfIdle => {
+                // Lazy-upgrade gate: only an empty session registry is safe to
+                // replace. Any live session reports Busy so the GUI defers.
+                let live = self
+                    .sessions
+                    .lock()
+                    .values()
+                    .filter(|session| session.is_alive())
+                    .count() as u32;
+                if live == 0 {
+                    DaemonResponse::Ok
+                } else {
+                    DaemonResponse::Busy(live)
+                }
+            }
             DaemonRequest::Shutdown => {
                 // Flush final checkpoints before killing: after drain the mirror is gone
                 if let Some(dir) = &self.snapshot_dir {
@@ -814,6 +842,81 @@ mod tests {
     use super::*;
     use crate::git::test_support;
     use std::time::{Duration, Instant};
+
+    // ---- task 6: symmetric min-version Hello policy ----
+
+    fn hello_with(protocol_version: u32) -> DaemonRequest {
+        DaemonRequest::Hello {
+            client_version: "test".into(),
+            protocol_version,
+            auth_token: None,
+        }
+    }
+
+    #[test]
+    fn hello_accepts_clients_at_or_above_minimum_supported() {
+        let server = DaemonServer::new();
+        // Today's exact version and any newer (but compatible) client attach.
+        for version in [DAEMON_PROTOCOL_VERSION, MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION] {
+            assert!(
+                matches!(
+                    server.handle_request(hello_with(version)),
+                    DaemonResponse::HelloOk { .. }
+                ),
+                "client protocol {version} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn hello_rejects_clients_below_minimum_supported() {
+        let server = DaemonServer::new();
+        match server.handle_request(hello_with(MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION - 1)) {
+            DaemonResponse::Error(e) => {
+                assert!(e.contains("too old"), "got: {e}");
+                assert!(e.contains("minimum"), "got: {e}");
+            }
+            other => panic!("expected too-old error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn upgrade_if_idle_reports_idle_and_busy_from_live_sessions() {
+        let server = DaemonServer::new();
+        // Zero sessions: idle and safe to upgrade.
+        assert_eq!(
+            server.handle_request(DaemonRequest::UpgradeIfIdle),
+            DaemonResponse::Ok
+        );
+
+        // One live session: busy with a count.
+        server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "upgrade-srv-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        });
+        match server.handle_request(DaemonRequest::UpgradeIfIdle) {
+            DaemonResponse::Busy(count) => assert_eq!(count, 1, "one live session"),
+            other => panic!("expected Busy(1), got {other:?}"),
+        }
+
+        // Killing the session frees the daemon for upgrade again.
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "upgrade-srv-test".into()
+            }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::UpgradeIfIdle),
+            DaemonResponse::Ok
+        );
+    }
 
     fn fleet_request(
         repo: &Path,

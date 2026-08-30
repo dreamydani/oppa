@@ -13,6 +13,17 @@ use std::path::PathBuf;
 
 pub const DAEMON_PROTOCOL_VERSION: u32 = 6;
 
+/// Floor for backward-compatible attach: a client/daemon speaking at least
+/// this protocol version may talk to a peer built from newer code, even when
+/// the versions differ. Versions below this floor are genuinely too old to
+/// serve the current build and are rejected at the Hello handshake.
+///
+/// Today MIN_SUPPORTED == DAEMON_PROTOCOL_VERSION == 6, so the current
+/// single-build world still accepts each other exactly as before; the
+/// constant only widens the window once a future build bumps
+/// DAEMON_PROTOCOL_VERSION without breaking the wire.
+pub const MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION: u32 = 6;
+
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -153,6 +164,10 @@ pub enum DaemonRequest {
     ListSessions,
     Disconnect,
     Shutdown,
+    // Lazy-upgrade probe: Ok when the daemon holds zero live sessions, else a
+    // busy response naming how many sessions still run. The GUI calls this
+    // before restarting the daemon for an update; a busy daemon defers.
+    UpgradeIfIdle,
     RepoAdd { path: String },
     RepoList,
     WorktreeCreate {
@@ -268,6 +283,9 @@ pub enum DaemonResponse {
     SessionAttached(CreateOrAttachResult),
     SessionList(Vec<String>),
     Ok,
+    // UpgradeIfIdle verdict: count of sessions still holding the daemon open
+    // (0 means the daemon is idle and safe to upgrade).
+    Busy(u32),
     Error(String),
     // Viewport-only plain text (no scrollback, no ANSI); truncated is
     // reserved for a future raw byte-stream replay mode.
@@ -373,13 +391,24 @@ pub fn sanitize_session_title(raw: &str) -> String {
 }
 
 pub fn get_daemon_socket_path() -> String {
+    get_daemon_socket_path_for(crate::channel::Channel::current())
+}
+
+/// Channel-aware variant used by tests and by callers that already know the
+/// channel: dev daemons listen on their own pipe/socket so they can never
+/// collide with (or be killed by) the stable daemon.
+pub fn get_daemon_socket_path_for(channel: crate::channel::Channel) -> String {
+    let suffix = match channel {
+        crate::channel::Channel::Dev => "-dev",
+        crate::channel::Channel::Stable => "",
+    };
     if cfg!(windows) {
         let username = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
-        format!(r"\\.\pipe\oppa-daemon-{}", username)
+        format!(r"\\.\pipe\oppa-daemon-{username}{suffix}")
     } else {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(runtime_dir)
-            .join("oppa-daemon.sock")
+            .join(format!("oppa-daemon{suffix}.sock"))
             .to_string_lossy()
             .into_owned()
     }
@@ -496,6 +525,7 @@ mod tests {
             DaemonRequest::ListSessions,
             DaemonRequest::Disconnect,
             DaemonRequest::Shutdown,
+            DaemonRequest::UpgradeIfIdle,
         ];
 
         for req in requests {
@@ -560,6 +590,7 @@ mod tests {
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
+            DaemonResponse::Busy(2),
             DaemonResponse::Error("session not found".into()),
             DaemonResponse::ScreenText {
                 text: "hello\nworld".into(),
@@ -1060,6 +1091,20 @@ mod tests {
             assert!(path.starts_with(r"\\.\pipe\oppa-daemon-"));
         } else {
             assert!(path.ends_with("oppa-daemon.sock"));
+        }
+    }
+
+    #[test]
+    fn test_daemon_socket_path_dev_differs_from_stable() {
+        let dev = get_daemon_socket_path_for(crate::channel::Channel::Dev);
+        let stable = get_daemon_socket_path_for(crate::channel::Channel::Stable);
+        assert_ne!(dev, stable, "dev and stable must never share a daemon pipe");
+        // Dev must carry the channel marker so it is unmistakably a dev pipe
+        // (and so a stale dev daemon never shadows the stable one or vice versa).
+        if cfg!(windows) {
+            assert!(dev.contains("-dev"), "dev pipe must be suffixed: {dev}");
+        } else {
+            assert!(dev.contains("oppa-daemon-dev"), "dev socket must be suffixed: {dev}");
         }
     }
 

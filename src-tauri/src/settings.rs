@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -19,6 +19,10 @@ pub struct GeneralSettings {
     pub browser_search_engine: String,
     pub browser_home_page: String,
     pub auto_resume_agents: bool,
+    /// Version the user dismissed in the "Update now / Not now" banner;
+    /// `None` (or absent in old saves) means never dismissed.
+    #[serde(default)]
+    pub dismissed_update_version: Option<String>,
 }
 
 impl Default for GeneralSettings {
@@ -35,6 +39,7 @@ impl Default for GeneralSettings {
             browser_search_engine: "duckduckgo".into(),
             browser_home_page: "https://duckduckgo.com".into(),
             auto_resume_agents: true,
+            dismissed_update_version: None,
         }
     }
 }
@@ -99,7 +104,9 @@ pub fn load_settings_at(path: &Path) -> std::io::Result<Option<String>> {
 }
 
 fn settings_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap().join("settings.json")
+    crate::pty::snapshot::resolve_gui_data_dir(app)
+        .expect("app data dir resolves")
+        .join("settings.json")
 }
 
 #[tauri::command(async)]
@@ -178,6 +185,26 @@ mod tests {
         let json_without_appearance = r#"{"general":{"default_cwd_mode":"home","custom_default_cwd":"","startup_behavior":"restore_previous","tab_switch_mode":"sequential","confirm_close_tab_with_multiple_panes":true,"confirm_quit_with_running_processes":true,"editor_word_wrap":true,"editor_auto_save_delay":1000,"browser_search_engine":"duckduckgo","browser_home_page":"https://duckduckgo.com"}}"#;
         let deserialized: AppSettings = serde_json::from_str(json_without_appearance).unwrap();
         assert_eq!(deserialized.appearance, AppearanceSettings::default());
+    }
+
+    #[test]
+    fn dismissed_update_version_defaults_to_none_and_is_backward_compatible() {
+        // New field: defaults to null when absent (old saves keep loading).
+        let settings = AppSettings::default();
+        assert_eq!(settings.general.dismissed_update_version, None);
+
+        // A legacy save without the field must deserialize to the default.
+        let legacy_json = r#"{"general":{"default_cwd_mode":"home","custom_default_cwd":"","startup_behavior":"restore_previous","tab_switch_mode":"sequential","confirm_close_tab_with_multiple_panes":true,"confirm_quit_with_running_processes":true,"editor_word_wrap":true,"editor_auto_save_delay":1000,"browser_search_engine":"duckduckgo","browser_home_page":"https://duckduckgo.com","auto_resume_agents":true}}"#;
+        let deserialized: AppSettings = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(deserialized.general.dismissed_update_version, None);
+
+        // A persisted dismissal round-trips.
+        let json_with_dismissal = r#"{"general":{"default_cwd_mode":"home","dismissed_update_version":"0.2.0"}}"#;
+        let deserialized: AppSettings = serde_json::from_str(json_with_dismissal).unwrap();
+        assert_eq!(
+            deserialized.general.dismissed_update_version.as_deref(),
+            Some("0.2.0")
+        );
     }
 
     #[test]

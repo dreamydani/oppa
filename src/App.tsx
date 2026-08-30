@@ -19,6 +19,7 @@ const EditorViewport = lazy(() =>
   })),
 );
 import { SettingsView } from "./components/settings/SettingsView";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { useTerminalStore } from "./store/terminalStore";
 import {
   handleExtensionCrash,
@@ -473,6 +474,9 @@ function App() {
           work from any mode/tab (the host pushes events app-wide). */}
       <ExtensionConsentModal />
       <ExtensionToasts />
+      {/* Stable-startup update banner (checkForUpdate gates on channel; dev
+          builds and offline runs render nothing). */}
+      <UpdateBanner />
       </div>
     </ErrorBoundary>
   );

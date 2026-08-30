@@ -1,7 +1,7 @@
 [package]
 name = "oppa"
 default-run = "oppa"
-version = "0.1.0"
+version = "0.2.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -36,6 +36,14 @@ uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive"] }
 rquickjs = "0.12"
 sha2 = "0.10"
+tauri-plugin-updater = "2"
+# HTTP client for the update-manifest check. 0.13 (not 0.12): it is what
+# tauri-plugin-updater itself depends on, so we reuse the exact crate version
+# already in the lockfile instead of duplicating a second reqwest major.
+# rustls-no-provider matches the plugin's TLS stack (rustls + ring, provider
+# installed at request time) and keeps HTTPS working on GitHub.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

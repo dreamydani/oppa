@@ -44,7 +44,46 @@ const APP_IDENTIFIER: &str = "com.pc.oppa";
 /// Resolve app data dir without a Tauri context (the headless daemon process).
 /// Mirrors tauri's `app_data_dir`: platform data dir + identifier.
 pub fn resolve_app_data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join(APP_IDENTIFIER))
+    resolve_app_data_dir_for(crate::channel::Channel::current())
+}
+
+/// Channel-aware variant used by tests and by callers that already know the
+/// channel. Stable keeps the historic `com.pc.oppa`; dev isolates under
+/// `com.pc.oppa-dev` so the two builds can never share layout/settings/snapshots.
+pub fn resolve_app_data_dir_for(channel: crate::channel::Channel) -> Option<PathBuf> {
+    let mut identifier = APP_IDENTIFIER.to_string();
+    if let Some(suffix) = channel.data_dir_suffix() {
+        identifier.push_str(suffix);
+    }
+    dirs::data_dir().map(|dir| dir.join(identifier))
+}
+
+/// Channel-aware GUI data dir. Stable resolves exactly like Tauri's
+/// `app_data_dir` (com.pc.oppa); dev appends the channel suffix (com.pc.oppa-dev)
+/// so a dev build can never share settings/layout/extension state with stable.
+pub fn resolve_gui_data_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let base = tauri::Manager::path(app).app_data_dir().ok()?;
+    Some(resolve_gui_data_dir_for(crate::channel::Channel::current(), base))
+}
+
+/// Channel-aware variant taking the Tauri base dir (its `app_data_dir` result)
+/// so tests can exercise both channels without a Tauri runtime or process-env
+/// mutation. Stable is the base untouched; dev appends the channel suffix.
+pub fn resolve_gui_data_dir_for(channel: crate::channel::Channel, base: PathBuf) -> PathBuf {
+    match channel.data_dir_suffix() {
+        Some(suffix) => {
+            let mut identifier = base
+                .file_name()
+                .map(|s| s.to_os_string())
+                .unwrap_or_default();
+            identifier.push(suffix);
+            match base.parent() {
+                Some(parent) => parent.join(identifier),
+                None => PathBuf::from(identifier),
+            }
+        }
+        None => base,
+    }
 }
 
 pub struct SnapshotStorage {
@@ -235,6 +274,66 @@ impl SnapshotStorage {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn resolve_app_data_dir_stable_keeps_base_identifier() {
+        let dir = resolve_app_data_dir_for(crate::channel::Channel::Stable)
+            .expect("data dir resolves on dev machines");
+        let name = dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("data dir has a file name");
+        assert_eq!(name, APP_IDENTIFIER);
+        assert!(!name.ends_with("-dev"));
+    }
+
+    #[test]
+    fn resolve_app_data_dir_dev_appends_dev_suffix() {
+        let dev = resolve_app_data_dir_for(crate::channel::Channel::Dev)
+            .expect("data dir resolves on dev machines");
+        let name = dev
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("data dir has a file name");
+        assert_eq!(name, format!("{APP_IDENTIFIER}-dev"));
+    }
+
+    #[test]
+    fn resolve_app_data_dir_dev_and_stable_are_distinct() {
+        let dev = resolve_app_data_dir_for(crate::channel::Channel::Dev).expect("dev data dir");
+        let stable =
+            resolve_app_data_dir_for(crate::channel::Channel::Stable).expect("stable data dir");
+        assert_ne!(dev, stable);
+    }
+
+    #[test]
+    fn resolve_gui_data_dir_stable_keeps_tauri_base_unchanged() {
+        // Stable must resolve to exactly what Tauri's app_data_dir returns
+        // (the base passed in), so today's stable build keeps its state.
+        let base = std::env::temp_dir().join(APP_IDENTIFIER);
+        let stable = resolve_gui_data_dir_for(crate::channel::Channel::Stable, base.clone());
+        assert_eq!(stable, base);
+    }
+
+    #[test]
+    fn resolve_gui_data_dir_dev_appends_dev_suffix_to_tauri_base() {
+        let base = std::env::temp_dir().join(APP_IDENTIFIER);
+        let dev = resolve_gui_data_dir_for(crate::channel::Channel::Dev, base.clone());
+        let name = dev
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("data dir has a file name");
+        assert_eq!(name, format!("{APP_IDENTIFIER}-dev"));
+        assert_eq!(dev.parent(), base.parent());
+    }
+
+    #[test]
+    fn resolve_gui_data_dir_dev_and_stable_are_distinct() {
+        let base = std::env::temp_dir().join(APP_IDENTIFIER);
+        let dev = resolve_gui_data_dir_for(crate::channel::Channel::Dev, base.clone());
+        let stable = resolve_gui_data_dir_for(crate::channel::Channel::Stable, base);
+        assert_ne!(dev, stable);
+    }
 
     #[test]
     fn test_save_and_load_scrollback_roundtrip() {

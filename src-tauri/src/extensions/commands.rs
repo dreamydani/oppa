@@ -9,7 +9,7 @@ use super::registry::{
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 /// Tauri-managed singleton holding the loaded registry.
 pub struct ExtensionsState(pub Mutex<ExtensionRegistry>);
@@ -55,7 +55,7 @@ pub struct ContributionPayload {
 }
 
 fn state_file_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|dir| dir.join(STATE_FILE_NAME))
+    crate::pty::snapshot::resolve_gui_data_dir(app).map(|dir| dir.join(STATE_FILE_NAME))
 }
 
 /// Discovery + persisted disabled-set/consents -> ready registry.

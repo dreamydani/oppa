@@ -594,16 +594,37 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_hook_payload_binds_authoritative_session_id() {        // Same resolution logic as daemon_session's test helper
-        let sh = std::env::var_os("PATH")
-            .and_then(|path| {
+    fn test_shell_for_hook() -> String {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(found) = std::env::var_os("PATH").and_then(|path| {
                 std::env::split_paths(&path)
                     .map(|dir| dir.join("sh.exe"))
                     .find(|candidate| candidate.exists())
-            })
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "sh".to_string());
+            }) {
+                return found.to_string_lossy().into_owned();
+            }
+            let program_files =
+                std::env::var_os("ProgramFiles").unwrap_or_else(|| "C:\\Program Files".into());
+            for candidate in [
+                std::path::Path::new(&program_files).join("Git\\bin\\sh.exe"),
+                std::path::Path::new(&program_files).join("Git\\usr\\bin\\sh.exe"),
+            ] {
+                if candidate.exists() {
+                    return candidate.to_string_lossy().into_owned();
+                }
+            }
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            "sh".to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hook_payload_binds_authoritative_session_id() {
+        let sh = test_shell_for_hook();
         let sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let session = DaemonSession::spawn_with_args(
@@ -681,14 +702,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_antigravity_route_binds_camelcase_conversation_id() {
-        let sh = std::env::var_os("PATH")
-            .and_then(|path| {
-                std::env::split_paths(&path)
-                    .map(|dir| dir.join("sh.exe"))
-                    .find(|candidate| candidate.exists())
-            })
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "sh".to_string());
+        let sh = test_shell_for_hook();
         let sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let session = DaemonSession::spawn_with_args(
