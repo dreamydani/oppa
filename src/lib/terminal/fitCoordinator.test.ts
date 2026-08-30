@@ -3,6 +3,7 @@ import {
   notifyResizeActivity,
   requestFit,
   isResizeStreaming,
+  onResizeStreamEnd,
   resetFitCoordinatorForTests,
   setFitSchedulerForTests,
 } from "./fitCoordinator";
@@ -120,5 +121,31 @@ describe("fitCoordinator", () => {
     cancel();
     pumpFrame();
     expect(a).not.toHaveBeenCalled();
+  });
+
+  it("fires onResizeStreamEnd once when the stream settles", () => {
+    const onEnd = vi.fn();
+    onResizeStreamEnd(onEnd);
+
+    notifyResizeActivity();
+    expect(isResizeStreaming()).toBe(true);
+    // Still streaming: no end callback yet.
+    vi.advanceTimersByTime(100);
+    expect(onEnd).not.toHaveBeenCalled();
+
+    // Settle flush: stream ends, callback fires once.
+    vi.advanceTimersByTime(100);
+    expect(isResizeStreaming()).toBe(false);
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("onResizeStreamEnd returns an unsubscribe", () => {
+    const onEnd = vi.fn();
+    const unsubscribe = onResizeStreamEnd(onEnd);
+    unsubscribe();
+
+    notifyResizeActivity();
+    vi.advanceTimersByTime(200);
+    expect(onEnd).not.toHaveBeenCalled();
   });
 });

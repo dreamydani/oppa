@@ -22,6 +22,9 @@ let streaming = false;
 let quietTimer: ReturnType<typeof setTimeout> | null = null;
 // Test hook: swap rAF for a deterministic pump without touching globals.
 let schedulerOverride: FrameScheduler | null = null;
+// Fired once when a continuous resize stream settles — consumers remove
+// freeze+stretch overlays here.
+const streamEndCallbacks = new Set<() => void>();
 
 function schedulePass(): void {
   if (rafScheduled) return;
@@ -48,11 +51,12 @@ export function requestFit(id: string, fit: FitFn): () => void {
   };
 }
 
-export function notifyResizeActivity(): void {
+export function notifyResizeActivity(): boolean {
   // Gate-active resizes are drawer-driven; the gate release commits once.
-  if (isLayoutAnimating()) return;
+  if (isLayoutAnimating()) return false;
 
-  if (!streaming) {
+  const fresh = !streaming;
+  if (fresh) {
     streaming = true;
     // Leading edge: discrete transitions (drawer end, first drag frame)
     // commit immediately; everything after coalesces until quiet.
@@ -60,13 +64,24 @@ export function notifyResizeActivity(): void {
   }
   if (quietTimer !== null) clearTimeout(quietTimer);
   quietTimer = setTimeout(endStream, STREAM_QUIET_MS);
+  return fresh;
 }
 
 function endStream(): void {
   quietTimer = null;
   if (!streaming) return;
   streaming = false;
+  // Overlays must come off before the settle fits run, or the crisp
+  // new-size content would render under the stale stretch transform.
+  for (const cb of streamEndCallbacks) cb();
   flushAll();
+}
+
+export function onResizeStreamEnd(cb: () => void): () => void {
+  streamEndCallbacks.add(cb);
+  return () => {
+    streamEndCallbacks.delete(cb);
+  };
 }
 
 export function isResizeStreaming(): boolean {
@@ -80,6 +95,7 @@ export function resetFitCoordinatorForTests(): void {
   streaming = false;
   quietTimer = null;
   schedulerOverride = null;
+  streamEndCallbacks.clear();
 }
 
 export function setFitSchedulerForTests(scheduler: FrameScheduler | null): void {

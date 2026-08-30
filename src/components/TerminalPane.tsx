@@ -29,7 +29,14 @@ import { planFullBleed } from "../lib/terminal/fullBleedFit";
 import {
   notifyResizeActivity,
   requestFit,
+  onResizeStreamEnd,
 } from "../lib/terminal/fitCoordinator";
+import {
+  beginResizeStream,
+  updateResizeStream,
+  endResizeStream,
+  isResizeStreamActive,
+} from "../lib/terminal/resizeStreamOverlay";
 import {
   isLayoutAnimating,
   runWhenLayoutIdle,
@@ -557,14 +564,32 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // leading-edge/settle semantics for continuous resizes (drags).
     let fitDeferredWhileAnimating = false;
     let pendingFitCancel: (() => void) | null = null;
-    const scheduleStableFit = () => {
-      notifyResizeActivity();
+    // Freeze+stretch: while a resize stream is CONTINUING (a drag in
+    // progress), pin the last-rendered frame and stretch it to fill rather
+    // than reflow the grid every frame — the "flash" on resize. Discrete
+    // resizes (fresh stream) commit normally; the settle fit is the crisp
+    // swap, applied after the overlay comes off.
+    const stretchOverlay = () => {
+      const el = term.element;
+      if (!el) return;
+      const parentEl = el.parentElement;
+      if (!parentEl) return;
+      const rect = parentEl.getBoundingClientRect();
+      if (!isResizeStreamActive(idRef.current)) {
+        beginResizeStream(idRef.current, el);
+      }
+      updateResizeStream(idRef.current, { width: rect.width, height: rect.height });
+    };
+    const scheduleStableFit = (): boolean => {
+      const fresh = notifyResizeActivity();
       pendingFitCancel?.();
       pendingFitCancel = requestFit(id, runStableFit);
+      return fresh;
     };
     const ro = new ResizeObserver(() => {
       if (!isLayoutAnimating()) {
-        scheduleStableFit();
+        const fresh = scheduleStableFit();
+        if (!fresh) stretchOverlay();
         return;
       }
       if (fitDeferredWhileAnimating) return;
@@ -576,6 +601,14 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     });
     ro.observe(containerRef.current!);
     commitFitRef.current = commitFit;
+
+    // Stream settle removes the freeze+stretch overlay and commits the real
+    // fit exactly once — the crisp swap that follows the stretch.
+    const streamEndUnsub = onResizeStreamEnd(() => {
+      if (disposed) return;
+      endResizeStream(idRef.current);
+      runWhenLayoutIdle(commitFit);
+    });
 
     return () => {
       cancelAnimationFrame(stableRaf);
@@ -592,6 +625,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       releaseGlSlot(idRef.current);
       ensureWebglRef.current = null;
       unregisterSerializer(idRef.current);
+      streamEndUnsub();
+      endResizeStream(idRef.current);
       disposed = true;
       ro.disconnect();
       unsubs.forEach((u) => u());
