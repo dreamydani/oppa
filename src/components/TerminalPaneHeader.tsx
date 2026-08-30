@@ -3,12 +3,14 @@ import { ChevronDown, X, GitBranch, Maximize2, Minimize2 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
+import type { DropZone } from "../lib/pane-manager/layout";
 import type { RepoRecord } from "../lib/worktree/transport";
 import { focus as focusLeaf } from "../lib/pane-manager/layout";
 import { AgentStatusPill } from "./agent/AgentStatusPill";
 import {
   usePaneDragStore,
   findDropTargetUnderPointer,
+  createDropTargetCoalescer,
 } from "../lib/pane-manager/dragState";
 import "./TerminalPaneHeader.css";
 
@@ -208,6 +210,16 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         dragZoneEl.setPointerCapture(pointerId);
       } catch {}
 
+      // Drop-target detection is rAF-throttled: pointermove can fire many
+      // times per frame, and each detection queries every leaf's rect.
+      const updateDropTarget = (target: { targetId: string; zone: DropZone } | null) => {
+        usePaneDragStore.getState().updateDropTarget(target?.targetId ?? null, target?.zone ?? null);
+      };
+      const targetCoalescer = createDropTargetCoalescer(
+        (clientX, clientY) => findDropTargetUnderPointer(clientX, clientY, id),
+        updateDropTarget,
+      );
+
       const onMove = (ev: PointerEvent) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
@@ -216,20 +228,10 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             hasExceededThreshold = true;
             setIsDraggingLocal(true);
             usePaneDragStore.getState().startDrag(id);
-            const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
-            if (target) {
-              usePaneDragStore.getState().updateDropTarget(target.targetId, target.zone);
-            } else {
-              usePaneDragStore.getState().updateDropTarget(null, null);
-            }
+            targetCoalescer.flushNow();
           }
         } else {
-          const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
-          if (target) {
-            usePaneDragStore.getState().updateDropTarget(target.targetId, target.zone);
-          } else {
-            usePaneDragStore.getState().updateDropTarget(null, null);
-          }
+          targetCoalescer.push(ev.clientX, ev.clientY);
         }
       };
 
@@ -246,6 +248,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       const onUp = (ev: PointerEvent) => {
         cleanup();
         if (hasExceededThreshold) {
+          targetCoalescer.flushNow();
           const target = findDropTargetUnderPointer(ev.clientX, ev.clientY, id);
           if (target) {
             movePane(id, target.targetId, target.zone);

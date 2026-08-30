@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { DropZone } from "./layout";
+import { onNextFrame } from "../layout/frameScheduler";
 
 export interface PaneDragState {
   isDragging: boolean;
@@ -87,4 +88,68 @@ export function findDropTargetUnderPointer(
   }
 
   return null;
+}
+
+export interface DropTarget {
+  targetId: string;
+  zone: DropZone;
+}
+
+export interface DropTargetCoalescer {
+  push(clientX: number, clientY: number): void;
+  /** Run detection immediately with the latest pointer position; the queued frame becomes a no-op. */
+  flushNow(): void;
+}
+
+// Collapses pointermove flood into one drop-target detection per animation
+// frame (latest coordinates win), and skips store writes when the target is
+// unchanged — pane drags query every leaf's rect otherwise.
+export function createDropTargetCoalescer(
+  detect: (clientX: number, clientY: number) => DropTarget | null,
+  onTarget: (target: DropTarget | null) => void,
+): DropTargetCoalescer {
+  let pendingX = 0;
+  let pendingY = 0;
+  let hasPending = false;
+  let scheduled = false;
+  let lastTargetKey: string | null = null;
+
+  const run = () => {
+    scheduled = false;
+    if (!hasPending) return;
+    const x = pendingX;
+    const y = pendingY;
+    hasPending = false;
+    const target = detect(x, y);
+    const key = target ? `${target.targetId}:${target.zone}` : "";
+    if (key !== lastTargetKey) {
+      lastTargetKey = key;
+      onTarget(target);
+    }
+  };
+
+  return {
+    push(clientX, clientY) {
+      pendingX = clientX;
+      pendingY = clientY;
+      hasPending = true;
+      if (!scheduled) {
+        scheduled = true;
+        onNextFrame(run);
+      }
+    },
+    flushNow() {
+      scheduled = false;
+      if (!hasPending) return;
+      const x = pendingX;
+      const y = pendingY;
+      hasPending = false;
+      const target = detect(x, y);
+      const key = target ? `${target.targetId}:${target.zone}` : "";
+      if (key !== lastTargetKey) {
+        lastTargetKey = key;
+        onTarget(target);
+      }
+    },
+  };
 }
