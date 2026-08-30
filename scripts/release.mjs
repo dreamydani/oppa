@@ -6,8 +6,9 @@
 //   3. Bump the version in the three version files (package.json,
 //      src-tauri/Cargo.toml, src-tauri/tauri.conf.json).
 //   4. Build the installer (`pnpm tauri build`).
-//      On build failure the three files are restored to their pre-bump
-//      content so the repo is never left half-bumped.
+//      On failure the version files — plus src-tauri/Cargo.lock, which cargo
+//      rewrites during a build — are restored to their pre-bump content so
+//      the repo is never left half-bumped.
 //   5. Upload the installer + update manifest to GitHub Releases via `gh`.
 //   6. Print a concise summary.
 //
@@ -41,6 +42,15 @@ export const VERSION_FILES = {
   packageJson: "package.json",
   cargoToml: "src-tauri/Cargo.toml",
   tauriConf: "src-tauri/tauri.conf.json",
+};
+
+// Files snapshotted before the bump so a failed build leaves no partial
+// state. `cargoLock` is not a version file (cargo regenerates it), but cargo
+// rewrites it during a build, so it must be restored too — when present
+// (some checkouts have no Cargo.lock yet).
+export const SNAPSHOT_FILES = {
+  ...VERSION_FILES,
+  cargoLock: "src-tauri/Cargo.lock",
 };
 
 // ---------------------------------------------------------------------------
@@ -110,6 +120,9 @@ export function readVersions(projectRoot = PROJECT_ROOT, files = VERSION_FILES) 
   };
 }
 
+// Writes `version` into a JSON file that has a top-level "version" field
+// (package.json, src-tauri/tauri.conf.json), preserving the file's existing
+// line endings and trailing newline.
 function writeJsonVersion(file, version) {
   const raw = readFileSync(file, "utf8");
   const json = JSON.parse(raw);
@@ -145,16 +158,6 @@ function writeCargoVersion(file, version) {
   atomicWrite(file, out.join(eol));
 }
 
-function writePackageVersion(file, version) {
-  const raw = readFileSync(file, "utf8");
-  const json = JSON.parse(raw);
-  json.version = version;
-  const eol = detectEol(raw);
-  let out = JSON.stringify(json, null, 2).replace(/\n/g, eol);
-  if (raw.endsWith("\n")) out += eol;
-  atomicWrite(file, out);
-}
-
 /**
  * Rewrites the three version files with `nextVersion` (atomically per file)
  * and returns the versions written. Validates `nextVersion` as X.Y.Z semver
@@ -170,7 +173,7 @@ export function bumpVersion(
       `Invalid version "${nextVersion}". Expected X.Y.Z semver (e.g. 0.2.0).`
     );
   }
-  writePackageVersion(join(projectRoot, files.packageJson), nextVersion);
+  writeJsonVersion(join(projectRoot, files.packageJson), nextVersion);
   writeCargoVersion(join(projectRoot, files.cargoToml), nextVersion);
   writeJsonVersion(join(projectRoot, files.tauriConf), nextVersion);
   return {
@@ -181,31 +184,37 @@ export function bumpVersion(
 }
 
 /**
- * Snapshots the current content of the three version files so they can be
- * restored if the build fails.
+ * Snapshots the current content of the version files — plus src-tauri/Cargo.lock
+ * when it exists — so they can be restored if the build fails. Files that do
+ * not exist (e.g. Cargo.lock in a fresh checkout) are skipped: they carry no
+ * pre-bump content to restore.
  */
 export function createVersionFiles(
   projectRoot = PROJECT_ROOT,
-  files = VERSION_FILES
+  files = SNAPSHOT_FILES
 ) {
   const snapshot = {};
   for (const key of Object.keys(files)) {
-    snapshot[key] = readFileSync(join(projectRoot, files[key]), "utf8");
+    const file = join(projectRoot, files[key]);
+    if (existsSync(file)) {
+      snapshot[key] = readFileSync(file, "utf8");
+    }
   }
   return snapshot;
 }
 
 /**
- * Restores the three version files from a snapshot taken by createVersionFiles.
+ * Restores the snapshotted files (those present when the snapshot was taken)
+ * from a snapshot created by createVersionFiles.
  */
 export function restoreVersionFiles(
   projectRoot = PROJECT_ROOT,
-  files = VERSION_FILES,
+  files = SNAPSHOT_FILES,
   snapshot
 ) {
   for (const key of Object.keys(files)) {
-    if (typeof snapshot[key] !== "string") {
-      throw new Error(`Cannot restore ${key}: no snapshot content`);
+    if (!(key in snapshot)) {
+      continue; // file was absent before the bump — nothing to restore
     }
     atomicWrite(join(projectRoot, files[key]), snapshot[key]);
   }
@@ -213,25 +222,26 @@ export function restoreVersionFiles(
 
 /**
  * bump → build → restore-on-failure.
- * Snapshot the files, bump to `nextVersion`, run `build()`; if it throws,
+ * Snapshot the files, bump to `nextVersion`, run `build()`; if *anything*
+ * throws — a mid-bump write failure (permissions/disk) or the build itself —
  * restore the original content and rethrow. `build` is an async function so
  * tests can stub it (no real `pnpm tauri build`, no network).
  */
 export async function restoreOnBuildFailure(
   projectRoot = PROJECT_ROOT,
-  files = VERSION_FILES,
+  files = SNAPSHOT_FILES,
   nextVersion,
   build
 ) {
   const snapshot = createVersionFiles(projectRoot, files);
-  bumpVersion(projectRoot, files, nextVersion);
   try {
+    bumpVersion(projectRoot, files, nextVersion);
     await build();
   } catch (err) {
     try {
       restoreVersionFiles(projectRoot, files, snapshot);
       console.error(
-        "Build failed — the version files were restored to their previous state."
+        "Build failed — the version files (and Cargo.lock, if present) were restored to their previous state."
       );
     } catch (restoreErr) {
       err.message +=
@@ -324,7 +334,7 @@ function runBuild() {
   });
 }
 
-const INSTALLER_EXTS = [".msi", ".exe", ".dmg", ".deb", ".rpm", ".AppImage", ".app"];
+const INSTALLER_EXTS = [".msi", ".exe", ".dmg", ".deb", ".rpm", ".AppImage"];
 
 function collectInstallers(dir) {
   const found = [];
@@ -383,15 +393,39 @@ function writeManifest(version, installerFilename) {
   return { manifestPath, manifest };
 }
 
-function spawnChecked(command, args, errorPrefix) {
+/**
+ * Builds the `gh release create` argument array for a release of `version`
+ * with `installer` and `manifestPath` as assets. Pure — exported so tests can
+ * assert the args are an array (spaced --title/--notes values stay single
+ * elements; a shell string-join would split them into phantom asset paths).
+ */
+export function buildGhReleaseArgs(version, installer, manifestPath) {
+  const tag = `v${version}`;
+  return [
+    "release",
+    "create",
+    tag,
+    installer,
+    manifestPath,
+    "--repo",
+    GITHUB_REPO,
+    "--title",
+    `oppa ${version}`,
+    "--notes",
+    `Release ${version} of oppa.`,
+  ];
+}
+
+/**
+ * Spawns `command` with an args ARRAY and no shell, resolving on exit 0 and
+ * rejecting otherwise. No shell means spaced values are never split by the
+ * shell; `gh` is a real executable and resolves via PATH on Windows too, so
+ * no shell is needed. `spawnFn` is injectable so tests can capture the call
+ * without spawning anything.
+ */
+export function spawnChecked(command, args, errorPrefix, spawnFn = spawn) {
   return new Promise((resolve, reject) => {
-    // `shell: true` with a single command string (no args array): passing
-    // both a shell and an args array is deprecated (DEP0190) and unsafe.
-    const full = [command, ...args].join(" ");
-    const child = spawn(full, {
-      stdio: "inherit",
-      shell: true,
-    });
+    const child = spawnFn(command, args, { stdio: "inherit" });
     child.on("error", (err) =>
       reject(new Error(`${errorPrefix}: ${err.message}`))
     );
@@ -408,23 +442,10 @@ function spawnChecked(command, args, errorPrefix) {
 }
 
 function createGitHubRelease(version, installer, manifestPath) {
-  const tag = `v${version}`;
   return spawnChecked(
     "gh",
-    [
-      "release",
-      "create",
-      tag,
-      installer,
-      manifestPath,
-      "--repo",
-      GITHUB_REPO,
-      "--title",
-      `oppa ${version}`,
-      "--notes",
-      `Release ${version} of oppa.`,
-    ],
-    `failed to create GitHub release ${tag}`
+    buildGhReleaseArgs(version, installer, manifestPath),
+    `failed to create GitHub release v${version}`
   );
 }
 
@@ -436,7 +457,7 @@ async function main() {
     const nextVersion = await promptVersion(currentVersion);
 
     console.log(`\nBumping to ${nextVersion} and building the installer...`);
-    await restoreOnBuildFailure(PROJECT_ROOT, VERSION_FILES, nextVersion, runBuild);
+    await restoreOnBuildFailure(PROJECT_ROOT, SNAPSHOT_FILES, nextVersion, runBuild);
     console.log("Build succeeded.");
 
     const installer = findInstaller(PROJECT_ROOT, nextVersion);

@@ -18,6 +18,11 @@ import {
   createVersionFiles,
   restoreVersionFiles,
   restoreOnBuildFailure,
+  GITHUB_REPO,
+  VERSION_FILES,
+  SNAPSHOT_FILES,
+  buildGhReleaseArgs,
+  spawnChecked,
 } from "./release.mjs";
 
 function makeTempDir(prefix) {
@@ -44,11 +49,19 @@ const FILES = {
   tauriConf: "tauri.conf.json",
 };
 
+const FILES_WITH_LOCK = {
+  ...FILES,
+  cargoLock: "Cargo.lock",
+};
+
 const ORIGINAL = {
   packageJson: '{\n  "name": "oppa",\n  "version": "0.1.0"\n}\n',
   cargoToml: '[package]\nname = "oppa"\nversion = "0.1.0"\n\n[dependencies]\nserde = "1"\n',
   tauriConf: '{\n  "productName": "oppa",\n  "version": "0.1.0"\n}\n',
 };
+
+const ORIGINAL_LOCK =
+  'version = 4\n\n[[package]]\nname = "oppa"\nversion = "0.1.0"\n';
 
 describe("version regex", () => {
   it("matches the real 0.1.0", () => {
@@ -197,6 +210,41 @@ describe("createVersionFiles / restoreVersionFiles", () => {
       fs.readFileSync(path.join(tmp.dir, "tauri.conf.json"), "utf8")
     ).toBe(ORIGINAL.tauriConf);
   });
+
+  it("snapshots and restores Cargo.lock alongside the version files", async () => {
+    const tmp = await makeTempDir("oppa-restore-lock-");
+    await writeVersionFiles(tmp, ORIGINAL);
+    const { fs, path } = tmp;
+    fs.writeFileSync(path.join(tmp.dir, "Cargo.lock"), ORIGINAL_LOCK);
+
+    const snapshot = createVersionFiles(tmp.dir, FILES_WITH_LOCK);
+    // Simulate cargo rewriting the lock to the new version during a build:
+    bumpVersion(tmp.dir, FILES_WITH_LOCK, "0.2.0");
+    fs.writeFileSync(
+      path.join(tmp.dir, "Cargo.lock"),
+      ORIGINAL_LOCK.replace("0.1.0", "0.2.0")
+    );
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "Cargo.lock"), "utf8")
+    ).toContain('name = "oppa"\nversion = "0.2.0"');
+
+    restoreVersionFiles(tmp.dir, FILES_WITH_LOCK, snapshot);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "Cargo.lock"), "utf8")
+    ).toBe(ORIGINAL_LOCK);
+  });
+
+  it("skips an absent Cargo.lock without error", async () => {
+    const tmp = await makeTempDir("oppa-restore-nolock-");
+    await writeVersionFiles(tmp, ORIGINAL);
+
+    const snapshot = createVersionFiles(tmp.dir, FILES_WITH_LOCK);
+    expect(snapshot.cargoLock).toBeUndefined();
+
+    bumpVersion(tmp.dir, FILES_WITH_LOCK, "0.2.0");
+    // No Cargo.lock file was created by the bump; restoring must succeed.
+    expect(() => restoreVersionFiles(tmp.dir, FILES_WITH_LOCK, snapshot)).not.toThrow();
+  });
 });
 
 describe("restoreOnBuildFailure", () => {
@@ -224,6 +272,64 @@ describe("restoreOnBuildFailure", () => {
     ).toBe(ORIGINAL.tauriConf);
   });
 
+  it("restores Cargo.lock too when a fake build fails", async () => {
+    const tmp = await makeTempDir("oppa-fail-lock-");
+    await writeVersionFiles(tmp, ORIGINAL);
+    const { fs, path } = tmp;
+    fs.writeFileSync(path.join(tmp.dir, "Cargo.lock"), ORIGINAL_LOCK);
+
+    const failingBuild = async () => {
+      throw new Error("pnpm tauri build exited with code 1");
+    };
+
+    await expect(
+      restoreOnBuildFailure(tmp.dir, FILES_WITH_LOCK, "0.4.0", failingBuild)
+    ).rejects.toThrow(/build/i);
+
+    // Cargo.lock was rewritten (as cargo would) and must be back to original.
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "Cargo.lock"), "utf8")
+    ).toBe(ORIGINAL_LOCK);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "package.json"), "utf8")
+    ).toBe(ORIGINAL.packageJson);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "tauri.conf.json"), "utf8")
+    ).toBe(ORIGINAL.tauriConf);
+  });
+
+  it("restores everything when the bump itself fails mid-way", async () => {
+    const tmp = await makeTempDir("oppa-fail-bump-");
+    await writeVersionFiles(tmp, ORIGINAL);
+    const { fs, path } = tmp;
+
+    // After the first file is written, make the second write fail
+    // (unwritable parent directory). build() must never run.
+    let buildRan = false;
+    const build = async () => {
+      buildRan = true;
+    };
+    fs.chmodSync(path.join(tmp.dir, "Cargo.toml"), 0o444); // read-only
+    try {
+      await expect(
+        restoreOnBuildFailure(tmp.dir, FILES, "0.6.0", build)
+      ).rejects.toThrow();
+    } finally {
+      fs.chmodSync(path.join(tmp.dir, "Cargo.toml"), 0o644);
+    }
+
+    expect(buildRan).toBe(false);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "package.json"), "utf8")
+    ).toBe(ORIGINAL.packageJson);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "Cargo.toml"), "utf8")
+    ).toBe(ORIGINAL.cargoToml);
+    expect(
+      fs.readFileSync(path.join(tmp.dir, "tauri.conf.json"), "utf8")
+    ).toBe(ORIGINAL.tauriConf);
+  });
+
   it("keeps the bumped versions when a fake build succeeds", async () => {
     const tmp = await makeTempDir("oppa-ok-");
     await writeVersionFiles(tmp, ORIGINAL);
@@ -242,5 +348,106 @@ describe("restoreOnBuildFailure", () => {
     expect(
       fs.readFileSync(path.join(tmp.dir, "tauri.conf.json"), "utf8")
     ).toContain("0.5.0");
+  });
+});
+
+describe("snapshot file set", () => {
+  it("includes Cargo.lock in addition to the three version files", () => {
+    expect(VERSION_FILES).toEqual({
+      packageJson: "package.json",
+      cargoToml: "src-tauri/Cargo.toml",
+      tauriConf: "src-tauri/tauri.conf.json",
+    });
+    expect(SNAPSHOT_FILES.cargoLock).toBe("src-tauri/Cargo.lock");
+    // The snapshot set extends the version files rather than replacing them.
+    expect(Object.keys(SNAPSHOT_FILES)).toEqual([
+      "packageJson",
+      "cargoToml",
+      "tauriConf",
+      "cargoLock",
+    ]);
+  });
+});
+
+describe("gh release invocation", () => {
+  // The gh command must be spawned with an args ARRAY and NO shell: the
+  // --title / --notes values contain spaces, and joining them into a shell
+  // string would split them into extra positional args that `gh release
+  // create` treats as asset files to upload (breaking every real run).
+  it("builds the gh args as a single array with spaced values intact", () => {
+    const args = buildGhReleaseArgs(
+      "0.2.0",
+      "C:\\build\\oppa 0.2.0 Setup 0.2.0.exe",
+      "C:\\temp\\oppa-update-manifest.json"
+    );
+    expect(Array.isArray(args)).toBe(true);
+    expect(args).toEqual([
+      "release",
+      "create",
+      "v0.2.0",
+      "C:\\build\\oppa 0.2.0 Setup 0.2.0.exe",
+      "C:\\temp\\oppa-update-manifest.json",
+      "--repo",
+      GITHUB_REPO,
+      "--title",
+      "oppa 0.2.0",
+      "--notes",
+      "Release 0.2.0 of oppa.",
+    ]);
+    // The spaced values must be single array elements, not split by a shell.
+    expect(args.filter((a) => a.includes(" "))).toEqual([
+      "C:\\build\\oppa 0.2.0 Setup 0.2.0.exe",
+      "oppa 0.2.0",
+      "Release 0.2.0 of oppa.",
+    ]);
+  });
+
+  it("spawns gh with the args array and no shell option", async () => {
+    const captured = [];
+    const fakeSpawn = (command, args, options) => {
+      captured.push({ command, args, options });
+      return {
+        on(evt, handler) {
+          if (evt === "exit") queueMicrotask(() => handler(0, null));
+          return this;
+        },
+      };
+    };
+
+    await spawnChecked(
+      "gh",
+      buildGhReleaseArgs(
+        "0.2.0",
+        "C:\\build\\oppa 0.2.0 Setup 0.2.0.exe",
+        "C:\\temp\\oppa-update-manifest.json"
+      ),
+      "failed to create GitHub release v0.2.0",
+      fakeSpawn
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].command).toBe("gh");
+    expect(captured[0].args).toEqual(
+      buildGhReleaseArgs(
+        "0.2.0",
+        "C:\\build\\oppa 0.2.0 Setup 0.2.0.exe",
+        "C:\\temp\\oppa-update-manifest.json"
+      )
+    );
+    expect(captured[0].options).not.toHaveProperty("shell");
+    expect(captured[0].options.shell).toBeUndefined();
+  });
+
+  it("rejects with the error prefix when the gh child exits non-zero", async () => {
+    const fakeSpawn = () => ({
+      on(evt, handler) {
+        if (evt === "exit") queueMicrotask(() => handler(1, null));
+        return this;
+      },
+    });
+
+    await expect(
+      spawnChecked("gh", ["release", "create"], "failed to create GitHub release", fakeSpawn)
+    ).rejects.toThrow("failed to create GitHub release (exit code 1)");
   });
 });
