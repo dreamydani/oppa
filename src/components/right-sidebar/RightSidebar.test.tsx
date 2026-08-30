@@ -7,8 +7,8 @@ import {
   resetFrameSchedulerForTests,
 } from "../../lib/layout/frameScheduler";
 import * as fsTransport from "../../lib/fs/transport";
-import * as ptyTransport from "../../lib/pty/transport";
-import type { SourceControlStatus } from "../../lib/pty/transport";
+import * as gitTransport from "../../lib/git/transport";
+import type { SourceControlStatus } from "../../lib/git/transport";
 
 vi.mock("../../lib/fs/transport", () => ({
   readDir: vi.fn(),
@@ -20,8 +20,8 @@ vi.mock("../../lib/fs/transport", () => ({
   openWith: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../../lib/pty/transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   scStatus: vi.fn(),
   scLocalBranches: vi
     .fn()
@@ -29,7 +29,7 @@ vi.mock("../../lib/pty/transport", async (importOriginal) => ({
 }));
 
 const readDirMock = vi.mocked(fsTransport.readDir);
-const scStatusMock = vi.mocked(ptyTransport.scStatus);
+const scStatusMock = vi.mocked(gitTransport.scStatus);
 
 function makeGitStatus(): SourceControlStatus {
   return {

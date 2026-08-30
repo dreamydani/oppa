@@ -2,14 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { WorktreeRecord } from "../../lib/pty/transport";
+import type { WorktreeRecord } from "../../lib/worktree/transport";
 
 vi.mock("../../lib/pty/transport", () => ({
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../../lib/worktree/transport", () => ({
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../../lib/git/transport", () => ({
   onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));

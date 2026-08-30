@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ReviewComposer } from "./ReviewComposer";
 import { useTerminalStore } from "../../store/terminalStore";
-import * as ptyTransport from "../../lib/pty/transport";
+import * as gitTransport from "../../lib/git/transport";
 
-vi.mock("../../lib/pty/transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   scStatus: vi.fn(),
   scStage: vi.fn().mockResolvedValue(undefined),
   scUnstage: vi.fn().mockResolvedValue(undefined),
@@ -54,10 +54,10 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
-const generatePrMessageMock = vi.mocked(ptyTransport.generatePrMessage);
-const requestReviewEligibilityMock = vi.mocked(ptyTransport.requestReviewEligibility);
-const requestCreateReviewMock = vi.mocked(ptyTransport.requestCreateReview);
-const onGitChangedMock = vi.mocked(ptyTransport.onGitChanged);
+const generatePrMessageMock = vi.mocked(gitTransport.generatePrMessage);
+const requestReviewEligibilityMock = vi.mocked(gitTransport.requestReviewEligibility);
+const requestCreateReviewMock = vi.mocked(gitTransport.requestCreateReview);
+const onGitChangedMock = vi.mocked(gitTransport.onGitChanged);
 
 function seedStore(reviewByCwd: Record<string, unknown>) {
   useTerminalStore.setState({

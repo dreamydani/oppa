@@ -2,8 +2,8 @@ import React, { useEffect } from "react";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
-import { onGitChanged, onPrChanged } from "../../lib/pty/transport";
-import type { CheckState } from "../../lib/pty/transport";
+import { onGitChanged, onPrChanged } from "../../lib/git/transport";
+import type { CheckState } from "../../lib/git/transport";
 
 function stateBadgeClass(state: string): string {
   const s = state.toLowerCase();

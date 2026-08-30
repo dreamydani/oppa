@@ -32,7 +32,8 @@ import {
   onExtensionCrashed,
   onExtensionNotify,
 } from "./lib/extensions/extensionTransport";
-import { confirmSaveComplete, onPtyCwd } from "./lib/pty/transport";
+import { onPtyCwd } from "./lib/pty/transport";
+import { confirmSaveComplete } from "./lib/layout/transport";
 import "./App.css";
 
 export type ActiveMode = "terminal" | "editor" | "browser";

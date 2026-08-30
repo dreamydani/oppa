@@ -12,8 +12,8 @@ import "@xterm/xterm/css/xterm.css";
 import {
   ptyWrite,
   onPtyExit,
-  saveScrollback,
 } from "../lib/pty/transport";
+import { saveScrollback } from "../lib/layout/transport";
 import { subscribePtyData } from "../lib/pty/dataMultiplexer";
 import { AckCoalescer } from "../lib/pty/ackCoalescer";
 import { onNextFrame } from "../lib/layout/frameScheduler";

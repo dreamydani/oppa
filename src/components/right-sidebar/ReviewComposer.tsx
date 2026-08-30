@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { ExternalLink, Loader2, Sparkles, AlertCircle, GitPullRequest } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
-import { generatePrMessage, onGitChanged } from "../../lib/pty/transport";
-import type { BlockedReason } from "../../lib/pty/transport";
+import { generatePrMessage, onGitChanged } from "../../lib/git/transport";
+import type { BlockedReason } from "../../lib/git/transport";
 
 // Shared with the worktree Finish action so blocked reasons speak identically
 // on every surface that can trigger a review.

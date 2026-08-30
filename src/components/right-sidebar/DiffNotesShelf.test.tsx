@@ -3,20 +3,26 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { DiffNotesShelf } from "./DiffNotesShelf";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as ptyTransport from "../../lib/pty/transport";
-import type { DiffComment, WorktreeListEntry } from "../../lib/pty/transport";
+import * as gitTransport from "../../lib/git/transport";
+import type { DiffComment } from "../../lib/git/transport";
+import type { WorktreeListEntry } from "../../lib/worktree/transport";
 
 vi.mock("../../lib/pty/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   diffCommentsList: vi.fn().mockResolvedValue([]),
   diffCommentUpdate: vi.fn(),
   diffCommentDelete: vi.fn().mockResolvedValue(undefined),
   diffCommentsMarkSent: vi.fn(),
 }));
 
-const diffCommentUpdateMock = vi.mocked(ptyTransport.diffCommentUpdate);
-const diffCommentDeleteMock = vi.mocked(ptyTransport.diffCommentDelete);
-const diffCommentsMarkSentMock = vi.mocked(ptyTransport.diffCommentsMarkSent);
+const diffCommentUpdateMock = vi.mocked(gitTransport.diffCommentUpdate);
+const diffCommentDeleteMock = vi.mocked(gitTransport.diffCommentDelete);
+const diffCommentsMarkSentMock = vi.mocked(gitTransport.diffCommentsMarkSent);
 const ptyWriteMock = vi.mocked(ptyTransport.ptyWrite);
 
 function makeWorktreeEntry(id: string, name: string): WorktreeListEntry {
@@ -101,7 +107,7 @@ function seedStore(opts: {
     },
   });
   // The shelf reloads on mount; the daemon mock must agree with the seed.
-  vi.mocked(ptyTransport.diffCommentsList).mockResolvedValue(opts.comments ?? []);
+  vi.mocked(gitTransport.diffCommentsList).mockResolvedValue(opts.comments ?? []);
 }
 
 describe("DiffNotesShelf", () => {
@@ -247,7 +253,7 @@ describe("DiffNotesShelf", () => {
     render(<DiffNotesShelf />);
 
     await waitFor(() =>
-      expect(vi.mocked(ptyTransport.diffCommentsList)).toHaveBeenCalledWith("wt-1"),
+      expect(vi.mocked(gitTransport.diffCommentsList)).toHaveBeenCalledWith("wt-1"),
     );
   });
 });

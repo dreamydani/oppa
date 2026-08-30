@@ -1,10 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-// Re-export domain transports as a backward-compatible facade
-export * from "../worktree/transport";
-export * from "../git/transport";
-export * from "../layout/transport";
 
 // Core PTY payloads & types
 export interface PtyDataPayload {

@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/react";
 import { WorktreeCreateModal } from "./WorktreeCreateModal";
 import { useTerminalStore } from "../../store/terminalStore";
-import * as transport from "../../lib/pty/transport";
-import type { WorktreeRecord, RepoRecord } from "../../lib/pty/transport";
+import * as ptyTransport from "../../lib/pty/transport";
+import * as worktreeTransport from "../../lib/worktree/transport";
+import type { WorktreeRecord, RepoRecord, AgentProfile } from "../../lib/worktree/transport";
 
 vi.mock("../../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
@@ -11,25 +12,17 @@ vi.mock("../../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn(),
-  saveLayout: vi.fn().mockResolvedValue(undefined),
-  loadLayout: vi.fn().mockResolvedValue(null),
-  saveScrollback: vi.fn().mockResolvedValue(undefined),
-  loadScrollback: vi.fn().mockResolvedValue(null),
-  deleteScrollback: vi.fn().mockResolvedValue(undefined),
-  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
   onPtyData: vi.fn(),
   onPtyExit: vi.fn(),
   onPtyCwd: vi.fn(),
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
-onGitChanged: vi.fn().mockResolvedValue(() => {}),
-  onPrChanged: vi.fn().mockResolvedValue(() => {}),
-  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
-  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
-  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+  ptyList: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../../lib/worktree/transport", () => ({
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -38,19 +31,37 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
-  ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
+  worktreeCreateFleet: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
-const worktreeCreateMock = vi.mocked(transport.worktreeCreate);
-const worktreeCreateAgentMock = vi.mocked(transport.worktreeCreateAgent);
-const agentProfilesMock = vi.mocked(transport.agentProfiles);
-const ptyListMock = vi.mocked(transport.ptyList);
-const repoListMock = vi.mocked(transport.repoList);
-const repoAddMock = vi.mocked(transport.repoAdd);
+vi.mock("../../lib/git/transport", () => ({
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onPrChanged: vi.fn().mockResolvedValue(() => {}),
+  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
+  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
+  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
+}));
 
-const demoProfiles: transport.AgentProfile[] = [
+vi.mock("../../lib/layout/transport", () => ({
+  saveLayout: vi.fn().mockResolvedValue(undefined),
+  loadLayout: vi.fn().mockResolvedValue(null),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
+}));
+
+const worktreeCreateMock = vi.mocked(worktreeTransport.worktreeCreate);
+const worktreeCreateAgentMock = vi.mocked(worktreeTransport.worktreeCreateAgent);
+const agentProfilesMock = vi.mocked(worktreeTransport.agentProfiles);
+const ptyListMock = vi.mocked(ptyTransport.ptyList);
+const repoListMock = vi.mocked(worktreeTransport.repoList);
+const repoAddMock = vi.mocked(worktreeTransport.repoAdd);
+
+const demoProfiles: AgentProfile[] = [
   { id: "claude", displayName: "Claude Code", promptDelivery: "arg" },
   { id: "qwen", displayName: "Qwen Code", promptDelivery: "stdin" },
   { id: "generic", displayName: "Custom command", promptDelivery: "arg" },
@@ -156,7 +167,7 @@ describe("WorktreeCreateModal", () => {
     });
     // Terminal must be bound to the new worktree id, not just its cwd
     await vi.waitFor(() => {
-      const spawnCalls = vi.mocked(transport.ptySpawn).mock.calls;
+      const spawnCalls = vi.mocked(ptyTransport.ptySpawn).mock.calls;
       expect(spawnCalls.length).toBeGreaterThan(0);
       const args = spawnCalls[0][0];
       expect(args?.cwd).toBe(createdRecord().path);
@@ -227,7 +238,7 @@ describe("WorktreeCreateModal", () => {
     const record = createdRecord();
     worktreeCreateAgentMock.mockResolvedValue({ record, session_id: "agent-1" });
     ptyListMock.mockResolvedValue(["agent-1"]);
-    vi.mocked(transport.ptySpawn).mockResolvedValue({
+    vi.mocked(ptyTransport.ptySpawn).mockResolvedValue({
       id: "agent-1",
       is_new: false,
       snapshot: null,
@@ -264,7 +275,7 @@ describe("WorktreeCreateModal", () => {
       expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(false);
     });
     // Terminal must bind the daemon's session id directly
-    const spawnCalls = vi.mocked(transport.ptySpawn).mock.calls;
+    const spawnCalls = vi.mocked(ptyTransport.ptySpawn).mock.calls;
     expect(spawnCalls[0][0]?.id).toBe("agent-1");
     expect(spawnCalls[0][0]?.cwd).toBe(record.path);
     expect(spawnCalls[0][0]?.worktreeId).toBe(record.id);

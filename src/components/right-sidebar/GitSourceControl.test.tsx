@@ -2,15 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { GitSourceControl } from "./GitSourceControl";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { PullOutcome, SourceControlStatus } from "../../lib/pty/transport";
-import * as ptyTransport from "../../lib/pty/transport";
+import type { PullOutcome, SourceControlStatus } from "../../lib/git/transport";
+import * as gitTransport from "../../lib/git/transport";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../../lib/pty/transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   scStatus: vi.fn(),
   scStage: vi.fn().mockResolvedValue(undefined),
   scUnstage: vi.fn().mockResolvedValue(undefined),
@@ -60,16 +60,16 @@ vi.mock("../../lib/pty/transport", async (importOriginal) => ({
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
-const scStatusMock = vi.mocked(ptyTransport.scStatus);
-const scStageMock = vi.mocked(ptyTransport.scStage);
-const scUnstageMock = vi.mocked(ptyTransport.scUnstage);
-const scDiscardMock = vi.mocked(ptyTransport.scDiscard);
-const scCommitMock = vi.mocked(ptyTransport.scCommit);
-const scCheckoutMock = vi.mocked(ptyTransport.scCheckout);
-const scFileDiffMock = vi.mocked(ptyTransport.scFileDiff);
-const scPullMock = vi.mocked(ptyTransport.scPull);
-const scPushMock = vi.mocked(ptyTransport.scPush);
-const generateCommitMessageMock = vi.mocked(ptyTransport.generateCommitMessage);
+const scStatusMock = vi.mocked(gitTransport.scStatus);
+const scStageMock = vi.mocked(gitTransport.scStage);
+const scUnstageMock = vi.mocked(gitTransport.scUnstage);
+const scDiscardMock = vi.mocked(gitTransport.scDiscard);
+const scCommitMock = vi.mocked(gitTransport.scCommit);
+const scCheckoutMock = vi.mocked(gitTransport.scCheckout);
+const scFileDiffMock = vi.mocked(gitTransport.scFileDiff);
+const scPullMock = vi.mocked(gitTransport.scPull);
+const scPushMock = vi.mocked(gitTransport.scPush);
+const generateCommitMessageMock = vi.mocked(gitTransport.generateCommitMessage);
 
 function makeStatus(): SourceControlStatus {
   return {
@@ -447,7 +447,7 @@ describe("GitSourceControl", () => {
 
   it("expanding history loads 30 commits and renders short-sha subject stats rows", async () => {
     await seedStore();
-    vi.mocked(ptyTransport.scHistory).mockResolvedValue({
+    vi.mocked(gitTransport.scHistory).mockResolvedValue({
       items: [
         {
           id: "0123456789abcdef",
@@ -465,7 +465,7 @@ describe("GitSourceControl", () => {
     render(<GitSourceControl />);
 
     fireEvent.click(screen.getByRole("button", { name: /History/ }));
-    await waitFor(() => expect(vi.mocked(ptyTransport.scHistory)).toHaveBeenCalledWith("/mock/repo", 30));
+    await waitFor(() => expect(vi.mocked(gitTransport.scHistory)).toHaveBeenCalledWith("/mock/repo", 30));
 
     expect(screen.getByText("0123456789".slice(0, 7))).toBeInTheDocument();
     expect(screen.getByText("feat: add thing")).toBeInTheDocument();

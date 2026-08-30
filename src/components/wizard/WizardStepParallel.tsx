@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Check, ChevronDown, Loader2, X } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
-import { agentProfiles } from "../../lib/pty/transport";
-import type { AgentProfile } from "../../lib/pty/transport";
+import { agentProfiles } from "../../lib/worktree/transport";
+import type { AgentProfile } from "../../lib/worktree/transport";
 import "./WorkspaceSetupWizard.css";
 
 // Catalog id of the raw-command pseudo profile (same convention as the old

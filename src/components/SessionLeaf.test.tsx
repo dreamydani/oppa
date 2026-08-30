@@ -17,23 +17,17 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn(),
-  saveLayout: vi.fn().mockResolvedValue(undefined),
-  loadLayout: vi.fn().mockResolvedValue(null),
-  saveScrollback: vi.fn().mockResolvedValue(undefined),
-  loadScrollback: vi.fn().mockResolvedValue(null),
-  deleteScrollback: vi.fn().mockResolvedValue(undefined),
-  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
+  onPtyData: vi.fn(),
+  onPtyExit: vi.fn(),
   onPtyCwd: vi.fn(),
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
-onGitChanged: vi.fn().mockResolvedValue(() => {}),
-  onPrChanged: vi.fn().mockResolvedValue(() => {}),
-  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
-  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
-  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+  ptyList: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../lib/worktree/transport", () => ({
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -42,11 +36,27 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
-  ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
-  onPtyData: vi.fn(),
-  onPtyExit: vi.fn(),
+  worktreeCreateFleet: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../lib/git/transport", () => ({
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onPrChanged: vi.fn().mockResolvedValue(() => {}),
+  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
+  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
+  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
+}));
+
+vi.mock("../lib/layout/transport", () => ({
+  saveLayout: vi.fn().mockResolvedValue(undefined),
+  loadLayout: vi.fn().mockResolvedValue(null),
+  saveScrollback: vi.fn().mockResolvedValue(undefined),
+  loadScrollback: vi.fn().mockResolvedValue(null),
+  deleteScrollback: vi.fn().mockResolvedValue(undefined),
+  cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
 }));
 
 const ptySpawnMock = vi.mocked(transport.ptySpawn);

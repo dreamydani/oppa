@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { MessageSquarePlus, X } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { readDiffSelection } from "./diffSelectionBridge";
-import type { DiffCommentScope } from "../../lib/pty/transport";
+import type { DiffCommentScope } from "../../lib/git/transport";
 
 interface NoteDraft {
   body: string;

@@ -1,4 +1,4 @@
-import type { DiffComment } from "../pty/transport";
+import type { DiffComment } from "./transport";
 
 // Deterministic prompt blocks ported from Orca's diff-comments format; joined
 // by blank lines so agents receive one stable shape per note.

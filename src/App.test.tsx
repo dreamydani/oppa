@@ -5,7 +5,6 @@ import { useTerminalStore } from "./store/terminalStore";
 import * as transport from "./lib/pty/transport";
 
 vi.mock("./lib/pty/transport", () => ({
-  confirmSaveComplete: vi.fn().mockResolvedValue(undefined),
   onPtyCwd: vi.fn(),
   ptySpawn: vi.fn().mockResolvedValue("s1"),
   ptyKill: vi.fn().mockResolvedValue(undefined),
@@ -14,22 +13,24 @@ vi.mock("./lib/pty/transport", () => ({
   ptyWrite: vi.fn(),
   onPtyData: vi.fn().mockResolvedValue(vi.fn()),
   onPtyExit: vi.fn().mockResolvedValue(vi.fn()),
+  onTitleChanged: vi.fn().mockResolvedValue(() => {}),
+  onFocusRequested: vi.fn().mockResolvedValue(() => {}),
+  onSessionWorking: vi.fn().mockResolvedValue(() => {}),
+  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+  ptyList: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("./lib/layout/transport", () => ({
+  confirmSaveComplete: vi.fn().mockResolvedValue(undefined),
   saveLayout: vi.fn().mockResolvedValue(undefined),
   loadLayout: vi.fn().mockResolvedValue(null),
   saveScrollback: vi.fn().mockResolvedValue(undefined),
   loadScrollback: vi.fn().mockResolvedValue(null),
   deleteScrollback: vi.fn().mockResolvedValue(undefined),
   cleanupStaleScrollbacks: vi.fn().mockResolvedValue(undefined),
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
-onGitChanged: vi.fn().mockResolvedValue(() => {}),
-  onPrChanged: vi.fn().mockResolvedValue(() => {}),
-  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
-  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
-  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
-  onTitleChanged: vi.fn().mockResolvedValue(() => {}),
-  onFocusRequested: vi.fn().mockResolvedValue(() => {}),
-  onSessionWorking: vi.fn().mockResolvedValue(() => {}),
-  onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("./lib/worktree/transport", () => ({
   worktreeList: vi.fn().mockResolvedValue([]),
   worktreePs: vi.fn().mockResolvedValue([]),
   worktreeCreate: vi.fn(),
@@ -38,9 +39,25 @@ onGitChanged: vi.fn().mockResolvedValue(() => {}),
   worktreePurge: vi.fn().mockResolvedValue(undefined),
   repoAdd: vi.fn().mockResolvedValue([]),
   repoList: vi.fn().mockResolvedValue([]),
-  ptyList: vi.fn().mockResolvedValue([]),
   agentProfiles: vi.fn().mockResolvedValue([]),
   worktreeCreateAgent: vi.fn(),
+  worktreeCreateFleet: vi.fn(),
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("./lib/git/transport", () => ({
+  getGitStatus: vi.fn().mockResolvedValue({
+    is_git: false,
+    branch: "",
+    files: [],
+    ahead: 0,
+    behind: 0,
+  }),
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onPrChanged: vi.fn().mockResolvedValue(() => {}),
+  requestReviewEligibility: vi.fn().mockResolvedValue({ eligible: true, blocked_reason: null, base_ref: 'main', owner_repo: 'owner/repo', existing_pr_url: null }),
+  requestCreateReview: vi.fn().mockResolvedValue({ pr_url: 'https://example.com/pr/1', pr_number: 1, base_ref: 'main', owner_repo: 'owner/repo' }),
+  requestReviewStatus: vi.fn().mockResolvedValue({ number: 1, title: 't', url: 'https://example.com/pr/1', state: 'open', draft: false, mergeable: 'unknown', base_ref_name: 'main', head_ref_name: 'feat', checks: [], fetched_at_ms: 0 }),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -63,16 +80,6 @@ vi.mock("./lib/fs/transport", () => ({
   createDir: vi.fn().mockResolvedValue(true),
   detectEditors: vi.fn().mockResolvedValue([]),
   openWith: vi.fn().mockResolvedValue(true),
-}));
-
-vi.mock("./lib/git/transport", () => ({
-  getGitStatus: vi.fn().mockResolvedValue({
-    is_git: false,
-    branch: "",
-    files: [],
-    ahead: 0,
-    behind: 0,
-  }),
 }));
 
 vi.mock("./components/TerminalPane", () => ({

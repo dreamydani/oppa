@@ -5104,7 +5104,7 @@ describe("terminalStore", () => {
           { agent: null, command: "my-agent --yolo", prompt: null, name: null },
         ],
         ...overrides,
-      }) as unknown as import("../lib/pty/transport").FleetSpawnOptions;
+      }) as unknown as import("../lib/worktree/transport").FleetSpawnOptions;
 
     it("spawns fleet slots and merges them into one workspace tab", async () => {
       worktreeCreateFleetMock.mockResolvedValue({

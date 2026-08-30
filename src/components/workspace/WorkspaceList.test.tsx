@@ -7,11 +7,17 @@ import type { SessionInfo } from "../../store/slices/terminalSessionsSlice";
 // transport is mocked at the store level in sibling tests; mirror the minimal
 // surface WorkspaceList touches (event subscriptions run at module import).
 vi.mock("../../lib/pty/transport", () => ({
-  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
   onAgentStatus: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../../lib/worktree/transport", () => ({
+  onWorktreeChanged: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("../../lib/git/transport", () => ({
   onGitChanged: vi.fn().mockResolvedValue(() => {}),
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));

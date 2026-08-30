@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import { agentProfiles } from "../../lib/pty/transport";
+import { agentProfiles } from "../../lib/worktree/transport";
 import type {
   AgentProfile,
   RepoRecord,
   WorktreeListEntry,
-} from "../../lib/pty/transport";
+} from "../../lib/worktree/transport";
 import { useExitPresence } from "../../lib/motion/useExitPresence";
 import "./worktree.css";
 

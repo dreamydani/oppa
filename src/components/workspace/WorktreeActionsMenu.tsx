@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ExternalLink, GitMerge, GitPullRequest, MoreHorizontal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { WorktreeRecord } from "../../lib/pty/transport";
+import type { WorktreeRecord } from "../../lib/worktree/transport";
 import { BLOCKED_COPY } from "../right-sidebar/ReviewComposer";
 import "./workspace-list.css";
 

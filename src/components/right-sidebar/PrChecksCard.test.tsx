@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PrChecksCard } from "./PrChecksCard";
 import { useTerminalStore } from "../../store/terminalStore";
-import * as ptyTransport from "../../lib/pty/transport";
+import * as gitTransport from "../../lib/git/transport";
 
-vi.mock("../../lib/pty/transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   scStatus: vi.fn(),
   scStage: vi.fn().mockResolvedValue(undefined),
   scUnstage: vi.fn().mockResolvedValue(undefined),
@@ -54,9 +54,9 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
-const requestReviewStatusMock = vi.mocked(ptyTransport.requestReviewStatus);
-const onPrChangedMock = vi.mocked(ptyTransport.onPrChanged);
-const onGitChangedMock = vi.mocked(ptyTransport.onGitChanged);
+const requestReviewStatusMock = vi.mocked(gitTransport.requestReviewStatus);
+const onPrChangedMock = vi.mocked(gitTransport.onPrChanged);
+const onGitChangedMock = vi.mocked(gitTransport.onGitChanged);
 
 function seed(cwd: string, entry: Record<string, unknown>) {
   useTerminalStore.setState({

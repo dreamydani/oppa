@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, GitBranch, Loader2, Minus, Plus, RefreshCw, Sparkles, Undo2 } from "lucide-react";
 import { useTerminalStore, setGitChangedListening } from "../../store/terminalStore";
-import type { GitArea, StatusEntry } from "../../lib/pty/transport";
-import { generateCommitMessage } from "../../lib/pty/transport";
+import type { GitArea, StatusEntry } from "../../lib/git/transport";
+import { generateCommitMessage } from "../../lib/git/transport";
 import { DiffNotesShelf } from "./DiffNotesShelf";
 import { ReviewComposer } from "./ReviewComposer";
 import { PrChecksCard } from "./PrChecksCard";

@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ViewOnlyDiffBar } from "./ViewOnlyDiffBar";
 import { useTerminalStore } from "../../store/terminalStore";
-import * as ptyTransport from "../../lib/pty/transport";
+import * as gitTransport from "../../lib/git/transport";
 import * as bridge from "./diffSelectionBridge";
-import type { WorktreeListEntry } from "../../lib/pty/transport";
+import type { WorktreeListEntry } from "../../lib/worktree/transport";
 
-vi.mock("../../lib/pty/transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/pty/transport")>()),
+vi.mock("../../lib/git/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/git/transport")>()),
   diffCommentsList: vi.fn().mockResolvedValue([]),
   diffCommentAdd: vi.fn(),
 }));
@@ -17,7 +17,7 @@ vi.mock("./diffSelectionBridge", async (importOriginal) => ({
   readDiffSelection: vi.fn(),
 }));
 
-const diffCommentAddMock = vi.mocked(ptyTransport.diffCommentAdd);
+const diffCommentAddMock = vi.mocked(gitTransport.diffCommentAdd);
 const readDiffSelectionMock = vi.mocked(bridge.readDiffSelection);
 
 function makeWorktreeEntry(id: string, path: string): WorktreeListEntry {

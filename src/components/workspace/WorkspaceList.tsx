@@ -27,7 +27,7 @@ interface WorkspaceRow {
   worktreeId?: string;
   branch?: string;
   worktreeName?: string;
-  worktreeRecord?: import("../../lib/pty/transport").WorktreeRecord;
+  worktreeRecord?: import("../../lib/worktree/transport").WorktreeRecord;
   exited: boolean;
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { formatDiffComments } from "./diffCommentFormat";
-import type { DiffComment } from "../pty/transport";
+import type { DiffComment } from "./transport";
 
 function makeComment(overrides: Partial<DiffComment> = {}): DiffComment {
   return {
