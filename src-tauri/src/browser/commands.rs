@@ -147,17 +147,17 @@ pub fn browser_reload(app: AppHandle) -> Result<(), String> {
 /// Open webview developer tools if supported.
 ///
 /// `WebviewWindow::open_devtools` only exists on debug builds or with tauri's
-/// `devtools` feature, so this is a no-op on plain release builds (the dev
-/// tools are a dev-time surface anyway).
+/// `devtools` feature (which we never enable), so this is a no-op on plain
+/// release builds — the dev tools are a dev-time surface anyway.
 #[tauri::command(async)]
 pub fn browser_open_devtools(app: AppHandle) -> Result<(), String> {
-    #[cfg(any(debug_assertions, feature = "devtools"))]
+    #[cfg(debug_assertions)]
     if let Some(webview_window) = app.get_webview_window("browser") {
         webview_window.open_devtools();
     }
     // Release builds compile the body out entirely; silence the unused-arg
     // warning by naming the param for the debug surface only.
-    #[cfg(not(any(debug_assertions, feature = "devtools")))]
+    #[cfg(not(debug_assertions))]
     let _ = &app;
     Ok(())
 }
