@@ -71,6 +71,9 @@ impl DaemonServer {
                     if cols > 0 && rows > 0 && (session.cols() != cols || session.rows() != rows) {
                         let _ = session.resize(cols, rows);
                     }
+                    // A previous client may have disconnected without ACKing;
+                    // clear the balance so the reader is never parked forever.
+                    let _ = session.reset_pending();
                     let snapshot = session.get_snapshot();
                     DaemonResponse::SessionAttached(CreateOrAttachResult {
                         is_new: false,

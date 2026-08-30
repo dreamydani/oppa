@@ -495,6 +495,16 @@ impl DaemonSession {
         Ok(())
     }
 
+    /// Clear the ack balance on reattach. A client that disconnects without
+    /// ACKing leaves `pending_bytes` above the low watermark with no one to
+    /// release it — without this, the reader parks forever and the child
+    /// blocks on write once the pipe fills.
+    pub fn reset_pending(&self) -> Result<(), String> {
+        self.pending_bytes.store(0, Ordering::SeqCst);
+        self.paused.unpause();
+        Ok(())
+    }
+
     /// Kill the child process and its process tree.
     pub fn kill(&self) -> std::io::Result<()> {
         let res = self.child.lock().kill();
@@ -813,6 +823,38 @@ mod tests {
 
         session.ack(512).expect("ack session");
         assert_eq!(session.pending_bytes.load(Ordering::SeqCst), 0);
+        let _ = session.kill();
+    }
+
+    #[test]
+    fn test_daemon_session_reset_pending_unpauses_reader() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "s3".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn interactive shell");
+
+        // Simulate a wedged state: bytes pending above the low watermark with
+        // no client left to ack them (disconnect without ack).
+        session
+            .pending_bytes
+            .store(LOW_WATERMARK_BYTES + 1024, Ordering::SeqCst);
+        session.paused.pause();
+
+        session.reset_pending().expect("reset pending");
+
+        assert_eq!(session.pending_bytes.load(Ordering::SeqCst), 0);
+        assert!(
+            !session.paused.is_paused(),
+            "reset_pending must release the reader gate"
+        );
         let _ = session.kill();
     }
 
