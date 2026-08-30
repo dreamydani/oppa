@@ -2,6 +2,7 @@ pub mod agents;
 pub mod atomic_file;
 mod browser;
 pub mod channel;
+pub mod channel_commands;
 pub mod cli;
 pub mod extensions;
 mod fs;
@@ -104,6 +105,7 @@ pub fn run() {
         .manage(PtyManager::new())
         .manage(browser::manager::BrowserManager::new())
         .invoke_handler(tauri::generate_handler![
+            channel_commands::app_channel,
             pty::commands::pty_spawn,
             pty::commands::pty_write,
             pty::commands::pty_resize,
@@ -196,12 +198,11 @@ pub fn run() {
             // persisted disabled set. A missing data dir just skips managing
             // state; commands then fail loudly instead of half-working.
             if let (Some(user_dir), Some(state_path), Some(data_root)) = (
-                app.path().app_data_dir().ok().map(|d| d.join("extensions")),
-                app.path()
-                    .app_data_dir()
-                    .ok()
+                pty::snapshot::resolve_gui_data_dir(app.handle())
+                    .map(|d| d.join("extensions")),
+                pty::snapshot::resolve_gui_data_dir(app.handle())
                     .map(|d| d.join(extensions::registry::STATE_FILE_NAME)),
-                app.path().app_data_dir().ok(),
+                pty::snapshot::resolve_gui_data_dir(app.handle()),
             ) {
                 let registry = extensions::commands::init_registry_at(&user_dir, &state_path);
 
@@ -225,11 +226,9 @@ pub fn run() {
                                 if let Ok(mut reg) = state.0.lock() {
                                     reg.record_error(&ext_id, reason.clone());
                                     let _ = reg.set_enabled(&ext_id, false);
-                                    if let Some(p) = report_app
-                                        .path()
-                                        .app_data_dir()
-                                        .ok()
-                                        .map(|d| d.join(extensions::registry::STATE_FILE_NAME))
+                                    if let Some(p) =
+                                        pty::snapshot::resolve_gui_data_dir(&report_app)
+                                            .map(|d| d.join(extensions::registry::STATE_FILE_NAME))
                                     {
                                         let _ = extensions::registry::save_state_at(
                                             &p,

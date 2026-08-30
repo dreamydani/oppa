@@ -231,8 +231,7 @@ pub fn pty_spawn(
     let (is_warm, cold_scrollback) = if !attach_res.is_new {
         (true, None)
     } else {
-        use tauri::Manager;
-        let scrollback = app.path().app_data_dir().ok().and_then(|dir| {
+        let scrollback = crate::pty::snapshot::resolve_gui_data_dir(&app).and_then(|dir| {
             let storage = crate::pty::snapshot::SnapshotStorage::new(dir);
             storage
                 .load_snapshot(&session_id)

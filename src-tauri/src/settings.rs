@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -99,7 +99,9 @@ pub fn load_settings_at(path: &Path) -> std::io::Result<Option<String>> {
 }
 
 fn settings_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap().join("settings.json")
+    crate::pty::snapshot::resolve_gui_data_dir(app)
+        .expect("app data dir resolves")
+        .join("settings.json")
 }
 
 #[tauri::command(async)]

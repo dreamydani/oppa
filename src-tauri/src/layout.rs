@@ -23,7 +23,9 @@ pub fn load_layout_at(path: &Path) -> std::io::Result<Option<String>> {
 }
 
 fn layout_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap().join("layout.json")
+    crate::pty::snapshot::resolve_gui_data_dir(app)
+        .expect("app data dir resolves")
+        .join("layout.json")
 }
 
 #[tauri::command(async)]
@@ -38,28 +40,32 @@ pub fn load_layout(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command(async)]
 pub fn save_scrollback(app: AppHandle, id: String, data: String) -> Result<(), String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = crate::pty::snapshot::resolve_gui_data_dir(&app)
+        .ok_or_else(|| "app data dir unavailable".to_string())?;
     let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
     storage.save(&id, &data).map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
 pub fn load_scrollback(app: AppHandle, id: String) -> Result<Option<String>, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = crate::pty::snapshot::resolve_gui_data_dir(&app)
+        .ok_or_else(|| "app data dir unavailable".to_string())?;
     let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
     storage.load(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
 pub fn delete_scrollback(app: AppHandle, id: String) -> Result<(), String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = crate::pty::snapshot::resolve_gui_data_dir(&app)
+        .ok_or_else(|| "app data dir unavailable".to_string())?;
     let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
     storage.delete(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
 pub fn cleanup_stale_scrollbacks(app: AppHandle, active_ids: Vec<String>) -> Result<(), String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = crate::pty::snapshot::resolve_gui_data_dir(&app)
+        .ok_or_else(|| "app data dir unavailable".to_string())?;
     let storage = crate::pty::snapshot::SnapshotStorage::new(app_data_dir);
     storage
         .cleanup_stale(&active_ids)
