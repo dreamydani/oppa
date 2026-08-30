@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,60 @@ pub fn probe_daemon(socket_path: &str) -> bool {
     #[cfg(not(target_os = "windows"))]
     {
         std::os::unix::net::UnixStream::connect(socket_path).is_ok()
+    }
+}
+
+/// File name the decoupled daemon is placed under `<app_data_dir>/daemon/`.
+///
+/// A future installer that decouples the daemon from the GUI install (see the
+/// note on [`daemon_executable_path`]) drops the daemon binary here so every
+/// build resolves it from this stable location instead of `current_exe`.
+#[cfg(target_os = "windows")]
+pub const DAEMON_FILE_NAME: &str = "oppa-daemon.exe";
+#[cfg(not(target_os = "windows"))]
+pub const DAEMON_FILE_NAME: &str = "oppa-daemon";
+
+/// Resolves where the daemon binary lives, preferring a stable location.
+///
+/// 1. If `<app_data_dir>/daemon/<DAEMON_FILE_NAME>` EXISTS, that file wins —
+///    the decoupled daemon a future installer places in the data dir.
+/// 2. Otherwise fall back to `current_exe` (today's behavior: the daemon is
+///    the GUI binary itself, spawned as `current_exe --daemon`).
+///
+/// ## Installer-side follow-up (out of scope here; bundler/installer work)
+///
+/// Making the daemon independent of the GUI install completes with versioned
+/// install folders and a daemon in the data dir:
+///
+/// - Install each release into a versioned folder (`app-<version>/`) and keep
+///   a `current` pointer that flips to the newest version after a successful
+///   install — so an in-flight update never replaces files a running daemon
+///   has open (the file-lock problem that kills sessions today).
+/// - The installers place the daemon binary at
+///   `<app_data_dir>/daemon/oppa-daemon` (or `.exe`), which this resolver
+///   already prefers. `spawn_detached_daemon` then launches the decoupled
+///   daemon and the old daemon upgrades lazily: the GUI attaches to it across
+///   the update (Task 6's min-version handshake) and it self-replaces only
+///   when idle (zero sessions) or on the next machine reboot, where the new
+///   daemon simply comes up from the data dir.
+///
+/// That layout is a `tauri.conf.json` bundler + per-platform installer concern
+/// and is not code-testable in this repo today; this function is the code seam
+/// that makes it a pure file-placement change with no code changes later.
+pub fn daemon_executable_path() -> PathBuf {
+    daemon_executable_path_for(crate::pty::snapshot::resolve_app_data_dir())
+}
+
+/// Testable core of [`daemon_executable_path`]: same preference order, with
+/// the app data dir supplied by the caller (tests use temp dirs).
+pub fn daemon_executable_path_for(app_data_dir: Option<PathBuf>) -> PathBuf {
+    let decoupled = app_data_dir
+        .as_deref()
+        .map(|dir| dir.join("daemon").join(DAEMON_FILE_NAME))
+        .filter(|candidate| candidate.exists());
+    match decoupled {
+        Some(path) => path,
+        None => std::env::current_exe().unwrap_or_else(|_| PathBuf::from("oppa")),
     }
 }
 
@@ -63,8 +117,7 @@ pub fn spawn_detached_daemon(executable_path: &Path) -> Result<(), String> {
 /// and awaits readiness up to 5 seconds.
 pub fn ensure_daemon_running() -> Result<(), String> {
     let socket_path = crate::pty::ipc_protocol::get_daemon_socket_path();
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("failed to determine current executable path: {e}"))?;
+    let exe_path = daemon_executable_path();
     ensure_daemon_running_at(&socket_path, &exe_path)
 }
 
@@ -101,6 +154,9 @@ fn request_shutdown(socket_path: &str) {
 /// Recovers from a daemon built by an older binary (protocol mismatch): asks it
 /// to shut down gracefully (flushing checkpoints), waits for the socket to
 /// clear, spawns a fresh daemon, and waits for readiness.
+///
+/// Only genuinely too-old daemons (below the minimum supported protocol)
+/// reach this path now; compatible older daemons are attached in place.
 pub fn restart_stale_daemon(socket_path: &str) -> Result<(), String> {
     request_shutdown(socket_path);
 
@@ -112,8 +168,7 @@ pub fn restart_stale_daemon(socket_path: &str) -> Result<(), String> {
         return Err("stale daemon did not shut down within 3 seconds".to_string());
     }
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("failed to determine current executable path: {e}"))?;
+    let exe_path = daemon_executable_path();
     spawn_detached_daemon(&exe_path)?;
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -245,6 +300,51 @@ mod tests {
         assert!(
             !probe_daemon(&socket_path),
             "daemon should have stopped after Shutdown request"
+        );
+    }
+
+    // ---- task 6: daemon-binary path resolution from a stable location ----
+
+    #[test]
+    fn daemon_executable_path_prefers_data_dir_daemon_when_present() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "oppa-daemon-resolver-present-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(data_dir.join("daemon")).unwrap();
+        let daemon_file = data_dir.join("daemon").join(DAEMON_FILE_NAME);
+        std::fs::write(&daemon_file, b"placeholder").unwrap();
+
+        let resolved = daemon_executable_path_for(Some(data_dir.clone()));
+        assert_eq!(
+            resolved,
+            daemon_file,
+            "a daemon file in the data dir must be preferred over current_exe"
+        );
+        std::fs::remove_dir_all(&data_dir).ok();
+    }
+
+    #[test]
+    fn daemon_executable_path_falls_back_to_current_exe_when_absent() {
+        // A data dir with no daemon file (or no data dir at all) must resolve
+        // to today's current_exe so the single-build world keeps working.
+        let empty_dir = std::env::temp_dir().join(format!(
+            "oppa-daemon-resolver-absent-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&empty_dir).unwrap();
+        let resolved = daemon_executable_path_for(Some(empty_dir.clone()));
+        assert_eq!(
+            resolved,
+            std::env::current_exe().expect("current exe resolves"),
+            "absent daemon file must fall back to current_exe"
+        );
+        std::fs::remove_dir_all(&empty_dir).ok();
+
+        assert_eq!(
+            daemon_executable_path_for(None),
+            std::env::current_exe().expect("current exe resolves"),
+            "no data dir must fall back to current_exe"
         );
     }
 }

@@ -13,6 +13,17 @@ use std::path::PathBuf;
 
 pub const DAEMON_PROTOCOL_VERSION: u32 = 6;
 
+/// Floor for backward-compatible attach: a client/daemon speaking at least
+/// this protocol version may talk to a peer built from newer code, even when
+/// the versions differ. Versions below this floor are genuinely too old to
+/// serve the current build and are rejected at the Hello handshake.
+///
+/// Today MIN_SUPPORTED == DAEMON_PROTOCOL_VERSION == 6, so the current
+/// single-build world still accepts each other exactly as before; the
+/// constant only widens the window once a future build bumps
+/// DAEMON_PROTOCOL_VERSION without breaking the wire.
+pub const MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION: u32 = 6;
+
 /// How a cold-restored session's foreground work will be brought back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -153,6 +164,10 @@ pub enum DaemonRequest {
     ListSessions,
     Disconnect,
     Shutdown,
+    // Lazy-upgrade probe: Ok when the daemon holds zero live sessions, else a
+    // busy response naming how many sessions still run. The GUI calls this
+    // before restarting the daemon for an update; a busy daemon defers.
+    UpgradeIfIdle,
     RepoAdd { path: String },
     RepoList,
     WorktreeCreate {
@@ -268,6 +283,9 @@ pub enum DaemonResponse {
     SessionAttached(CreateOrAttachResult),
     SessionList(Vec<String>),
     Ok,
+    // UpgradeIfIdle verdict: count of sessions still holding the daemon open
+    // (0 means the daemon is idle and safe to upgrade).
+    Busy(u32),
     Error(String),
     // Viewport-only plain text (no scrollback, no ANSI); truncated is
     // reserved for a future raw byte-stream replay mode.
@@ -507,6 +525,7 @@ mod tests {
             DaemonRequest::ListSessions,
             DaemonRequest::Disconnect,
             DaemonRequest::Shutdown,
+            DaemonRequest::UpgradeIfIdle,
         ];
 
         for req in requests {
@@ -571,6 +590,7 @@ mod tests {
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
+            DaemonResponse::Busy(2),
             DaemonResponse::Error("session not found".into()),
             DaemonResponse::ScreenText {
                 text: "hello\nworld".into(),
