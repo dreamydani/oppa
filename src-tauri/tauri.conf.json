@@ -29,8 +29,7 @@
     "updater": {
       "endpoints": [
         "https://github.com/dreamydani/oppa/releases/latest/download/oppa-update-manifest.json"
-      ],
-      "pubkey": null
+      ]
     }
   },
   "bundle": {
