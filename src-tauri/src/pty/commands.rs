@@ -316,6 +316,7 @@ fn pty_list_impl(manager: &PtyManager) -> Vec<String> {
 ///   `unknown` implies `safe == false` — an unverifiable daemon must NEVER be
 ///   treated as safe (Task 6 carried note).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CanUpgradeDaemonPayload {
     pub safe: bool,
     pub session_count: u32,
@@ -570,9 +571,9 @@ mod tests {
     }
 
     #[test]
-    fn can_upgrade_daemon_payload_serializes_snake_case() {
+    fn can_upgrade_daemon_payload_serializes_camel_case() {
         let json = serde_json::to_string(&busy_payload(2)).unwrap();
-        assert_eq!(json, r#"{"safe":false,"session_count":2,"unknown":false}"#);
+        assert_eq!(json, r#"{"safe":false,"sessionCount":2,"unknown":false}"#);
         assert!(serde_json::from_str::<CanUpgradeDaemonPayload>(&json).is_ok());
     }
 }
