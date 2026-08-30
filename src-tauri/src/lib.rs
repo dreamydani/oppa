@@ -109,6 +109,13 @@ pub fn run() {
     // plugin (which would add its own update-check commands) is not registered
     // on dev. `Channel::current()` is compile-time, so the registration is
     // baked into the binary.
+    //
+    // NOTE: the plugin's NATIVE check() is NOT used — our update manifest is a
+    // custom {version, download} shape the plugin cannot parse, and there is no
+    // signing pubkey yet. The real update check runs through `updater.rs`
+    // (check_for_update) and the banner opens the download URL. This
+    // registration exists so the plugin's other surface is available and the
+    // installer-side follow-up (signed manifest + native format) can adopt it.
     if channel::Channel::current() == channel::Channel::Stable {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }

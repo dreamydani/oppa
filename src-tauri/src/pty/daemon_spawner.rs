@@ -157,6 +157,14 @@ fn request_shutdown(socket_path: &str) {
 ///
 /// Only genuinely too-old daemons (below the minimum supported protocol)
 /// reach this path now; compatible older daemons are attached in place.
+///
+/// **This is the breaking-swap path — it KILLS every running session.** The
+/// daemon's shutdown handler flushes checkpoints, but live shells end. It is
+/// unreachable today (`MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION` == the current
+/// protocol), but if a future protocol bump makes it live, it MUST route
+/// through the user-facing session warning (`can_upgrade_daemon` +
+/// UpdateBanner's "Update anyway") rather than firing silently. Sessions are
+/// sacred — never call this without surfacing the cost to the user.
 pub fn restart_stale_daemon(socket_path: &str) -> Result<(), String> {
     request_shutdown(socket_path);
 
