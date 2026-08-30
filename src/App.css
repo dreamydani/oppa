@@ -546,6 +546,13 @@
 
 .pane-leaf.focused {
   border-color: var(--accent-blue, #58a6ff);
+}
+
+/* Chrome effects gated on medium/high GPU tiers: the focused glow and the
+   divider hover line are compositor extras that a 2019-era iGPU should not
+   pay for. The border-color change above is cheap enough for every tier. */
+.app-container[data-gpu-tier="medium"] .pane-leaf.focused,
+.app-container[data-gpu-tier="high"] .pane-leaf.focused {
   /* Subtle active-pane glow: a soft halo that reads as "this pane owns the
      keyboard" without a heavy blur pass (compositor-cheap box-shadow). */
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-blue, #58a6ff) 22%, transparent),
@@ -648,17 +655,17 @@
 }
 
 .pane-divider.dir-h:hover,
-.pane-divider.dir-h:active {
-  background-color: color-mix(in srgb, var(--accent-blue, #58a6ff) 18%, transparent);
-}
-
+.pane-divider.dir-h:active,
 .pane-divider.dir-v:hover,
 .pane-divider.dir-v:active {
   background-color: color-mix(in srgb, var(--accent-blue, #58a6ff) 18%, transparent);
 }
 
-.pane-divider:hover::after,
-.pane-divider:active::after {
+/* The bright hover line is a medium/high-tier chrome extra. */
+.app-container[data-gpu-tier="medium"] .pane-divider:hover::after,
+.app-container[data-gpu-tier="high"] .pane-divider:hover::after,
+.app-container[data-gpu-tier="medium"] .pane-divider:active::after,
+.app-container[data-gpu-tier="high"] .pane-divider:active::after {
   background-color: var(--accent-blue, #58a6ff);
   border-radius: 1px;
 }

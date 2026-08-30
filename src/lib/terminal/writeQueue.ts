@@ -8,9 +8,7 @@
 import { onNextFrame } from "../layout/frameScheduler";
 import type { PanePriority } from "./panePriority";
 
-const MAX_BACKGROUND_FPS = 30;
-// Background flush cadence in frames (60fps rAF → every 2nd frame = 30fps).
-const FRAMES_PER_FLUSH = Math.round(60 / MAX_BACKGROUND_FPS);
+const DEFAULT_BACKGROUND_FPS = 30;
 
 export interface WriteQueue {
   push(data: string): void;
@@ -21,7 +19,11 @@ export interface WriteQueue {
 export function createThrottledWriteQueue(
   initialPriority: PanePriority,
   write: (data: string) => void,
+  backgroundFps: number = DEFAULT_BACKGROUND_FPS,
 ): WriteQueue {
+  // Background flush cadence in frames (60fps rAF). Low tier caps at 15fps
+  // (every 4th frame), medium/high at 30fps (every 2nd).
+  const framesPerFlush = Math.max(1, Math.round(60 / backgroundFps));
   let priority: PanePriority = initialPriority;
   let buffer: string[] = [];
   let scheduled = false;
@@ -36,7 +38,7 @@ export function createThrottledWriteQueue(
     buffer = [];
     write(batch);
     // After a flush, wait out the cap interval before the next one.
-    framesUntilAllowed = FRAMES_PER_FLUSH - 1;
+    framesUntilAllowed = framesPerFlush - 1;
   };
 
   const tick = () => {

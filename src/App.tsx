@@ -34,7 +34,12 @@ import {
 } from "./lib/extensions/extensionTransport";
 import { onPtyCwd } from "./lib/pty/transport";
 import { confirmSaveComplete } from "./lib/layout/transport";
+import { detectGpuTier } from "./lib/terminal/gpuTier";
 import "./App.css";
+
+// Detected once at module load; the root data-gpu-tier attribute gates
+// chrome effects (glow, divider affordance) on medium/high tiers only.
+const gpuTier = detectGpuTier();
 
 export type ActiveMode = "terminal" | "editor" | "browser";
 
@@ -386,7 +391,7 @@ function App() {
   return (
     <ErrorBoundary label="the app">
       <GlobalFailureBanner />
-      <div className={`app-container${booted ? " app-booted" : ""}`}>
+      <div className={`app-container${booted ? " app-booted" : ""}`} data-gpu-tier={gpuTier}>
         <TitleBar />
         {isSettingsOpen ? (
           <SettingsView />
