@@ -44,6 +44,7 @@ import {
   getFocusedPane,
 } from "../lib/terminal/panePriority";
 import { createThrottledWriteQueue } from "../lib/terminal/writeQueue";
+import { serializeScrollbackBounded, maybeWriteTruncationMarker, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
 import {
   isLayoutAnimating,
   runWhenLayoutIdle,
@@ -164,7 +165,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     term.loadAddon(serialize);
     searchAddonRef.current = search;
 
-    registerSerializer(id, () => serialize.serialize());
+    registerSerializer(id, () => serializeScrollbackBounded(() => serialize.serialize()));
 
     term.open(containerRef.current!);
 
@@ -478,7 +479,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     });
 
     const flushScrollback = () => {
-      const buffer = serializeAddonRef.current?.serialize();
+      const buffer = serializeScrollbackBounded(() =>
+        serializeAddonRef.current?.serialize() ?? "",
+      );
       if (buffer) {
         useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
         void saveScrollback(idRef.current, buffer).catch(() => {});
@@ -505,6 +508,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       if (!disposed) term.write(data);
     });
     writeQueueRef.current = writeQueue;
+    let truncationMarked = false;
     unsubs.push(
       subscribePtyData(id, (p) => {
         if (disposed) return;
@@ -512,6 +516,18 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
         // Cheap Set.add: the next layout save re-serializes this buffer only.
         markScrollbackDirty(id);
+        // Once the buffer hits the 10k scrollback cap, write a one-time
+        // marker so silent oldest-line eviction is visible to the user.
+        if (!truncationMarked) {
+          truncationMarked = maybeWriteTruncationMarker(
+            {
+              bufferLength: term.buffer.active.length,
+              write: (data) => writeQueue.push(data),
+            },
+            XTERM_SCROLLBACK_LINES,
+            truncationMarked,
+          );
+        }
         writeQueue.push(p.data);
       }),
     );

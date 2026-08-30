@@ -10,6 +10,7 @@ import {
 } from "../../lib/pty/transport";
 import type { PtySpawnOptions } from "../../lib/pty/transport";
 import { substituteLeafId } from "../../lib/pane-manager/layout";
+import { applyCachedScrollbackBudget } from "../../lib/terminal/scrollbackBudget";
 import type { TerminalState } from "../terminalStore";
 import { getSyncedTabs } from "./layoutQueries";
 import { triggerDebouncedSaveLayout } from "./layoutSaveScheduler";
@@ -127,7 +128,10 @@ export function createSessionsSlice(
     cacheScrollback: (id, buffer) => {
       markScrollbackDirty(id);
       set((state) => ({
-        cachedScrollbacks: { ...state.cachedScrollbacks, [id]: buffer },
+        cachedScrollbacks: {
+          ...state.cachedScrollbacks,
+          [id]: applyCachedScrollbackBudget(buffer),
+        },
       }));
     },
 
@@ -250,11 +254,16 @@ export function createSessionsSlice(
       set((state) => {
         const session = state.sessions[id];
         if (!session) return state;
+        // A killed session's cached scrollback must not stay resident — the
+        // closeTab/closePane paths prune it, but a bare kill left it behind.
+        const cachedScrollbacks = { ...state.cachedScrollbacks };
+        delete cachedScrollbacks[id];
         return {
           sessions: {
             ...state.sessions,
             [id]: { ...session, status: "exited" },
           },
+          cachedScrollbacks,
         };
       });
     },

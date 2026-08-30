@@ -912,7 +912,10 @@ export function createPaneLayoutSlice(
       };
       await transportSaveLayout(JSON.stringify(snapshot));
       // Serialize only buffers with new output since the last write — a tab
-      // switch or rename must not stringify every live terminal.
+      // switch or rename must not stringify every live terminal. Each
+      // serialize is bounded (~1MB via scrollbackBudget) and we yield between
+      // sessions so a burst of dirty buffers never blocks the UI thread in
+      // one synchronous block.
       const scrollbackPromises: Promise<void>[] = [];
       for (const s of Object.values(sessions)) {
         if (!isScrollbackDirty(s.id)) continue;
@@ -923,6 +926,9 @@ export function createPaneLayoutSlice(
         if (buffer) {
           scrollbackPromises.push(saveScrollback(s.id, buffer).catch(() => {}));
         }
+        // Yield to the event loop between serializations so a burst of dirty
+        // buffers never blocks the UI thread in one synchronous block.
+        await Promise.resolve();
       }
       if (scrollbackPromises.length > 0) {
         await Promise.all(scrollbackPromises);
