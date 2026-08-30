@@ -6,6 +6,8 @@ import * as gitTransport from "../../lib/git/transport";
 
 vi.mock("../../lib/git/transport", () => ({
   getGitStatus: vi.fn(),
+  onGitChanged: vi.fn().mockResolvedValue(() => {}),
+  onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 const mockGetGitStatus = vi.mocked(gitTransport.getGitStatus);

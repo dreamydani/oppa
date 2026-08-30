@@ -29,8 +29,10 @@ import {
   onTitleChanged,
   onFocusRequested,
   worktreeCreateFleet,
+  onSessionWorking,
+  onAgentStatus,
 } from "./transport";
-import type { PtySpawnResult, FleetSlotResult } from "./transport";
+import type { PtySpawnResult, FleetSlotResult, AgentStatusEntry } from "./transport";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -341,6 +343,40 @@ describe("pty transport", () => {
       slots: [{ name: null, agent: "claude", command: null, prompt: null }],
     });
     expect(result).toEqual({ results: rawSlots });
+  });
+
+  it("onSessionWorking listens to session-working and forwards payload", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onSessionWorking(cb);
+    expect(listenMock).toHaveBeenCalledWith("session-working", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { sessionId: string; working: boolean };
+    }) => void;
+    handler({ payload: { sessionId: "s1", working: true } });
+    expect(cb).toHaveBeenCalledWith({ sessionId: "s1", working: true });
+    expect(result).toBe(unlisten);
+  });
+
+  it("onAgentStatus listens to agent-status and normalizes snake_case to camelCase", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    const cb = vi.fn();
+    const result = await onAgentStatus(cb);
+    expect(listenMock).toHaveBeenCalledWith("agent-status", expect.any(Function));
+    const handler = listenMock.mock.calls[0][1] as (e: {
+      payload: { pane_key?: string; paneKey?: string; entry: AgentStatusEntry };
+    }) => void;
+    const entry: AgentStatusEntry = {
+      state: "working",
+      state_started_at_ms: 100,
+      updated_at_ms: 200,
+      origin: "hook",
+    };
+    handler({ payload: { pane_key: "s1", entry } });
+    expect(cb).toHaveBeenCalledWith({ paneKey: "s1", entry });
+    expect(result).toBe(unlisten);
   });
 });
 
