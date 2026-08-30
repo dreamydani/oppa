@@ -47,7 +47,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   padding: 0;
 }
 
@@ -143,7 +143,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .omnibox-clear-btn:hover {
@@ -191,7 +191,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .device-preset-btn:hover {
@@ -359,7 +359,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .hub-search-input-wrapper:focus-within {
@@ -396,7 +396,8 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity var(--dur-micro) var(--ease-out);
+  transition: opacity var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .hub-search-btn:hover {
@@ -462,7 +463,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   text-align: left;
   font-family: var(--font-sans);
 }
@@ -562,7 +563,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   text-align: left;
   font-family: var(--font-sans);
 }
@@ -589,7 +590,7 @@
 .bookmark-arrow {
   color: var(--text-faint, #71717a);
   transition: color var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .hub-bookmark-card:hover .bookmark-arrow {

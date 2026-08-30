@@ -148,10 +148,6 @@
   color: var(--text-primary, #ffffff);
 }
 
-.sidebar-icon-btn:active:not(:disabled) {
-  transform: scale(0.9);
-}
-
 /* --------------------------------------------------------------------------
    Body Area (Scrollable Workspaces Tree)
    -------------------------------------------------------------------------- */
@@ -244,10 +240,6 @@
 .sidebar-footer-btn:hover {
   background: var(--tint-hover, rgba(255, 255, 255, 0.06));
   color: var(--text-primary, #ffffff);
-}
-
-.sidebar-footer-btn:active:not(:disabled) {
-  transform: scale(0.9);
 }
 
 /* --------------------------------------------------------------------------

@@ -245,13 +245,43 @@
 
 /* --------------------------------------------------------------------------
    Press feedback.
-   Every button in the app changes colour on :active or not at all. A 2%
-   contraction on press is the single cheapest way to make a surface feel
-   physical, and it is the one interaction in the app that is guaranteed to
-   be user-initiated, so it can never feel gratuitous.
+   Before this, only 12 rules in the whole app reacted to :active. A press is
+   the one interaction guaranteed to be user-initiated, so it can never feel
+   gratuitous, and contracting the surface is what tells the user the click
+   registered before the response arrives.
+
+   Deliberately a curated list rather than a blanket `button:active`:
+   full-width rows and nav items (.settings-nav-item, .file-context-menu-item,
+   .ws-row) must be excluded — scaling a 100%-wide strip leaves a gap at both
+   edges that reads as a rendering bug, not as feedback. Those surfaces get
+   colour feedback instead. Small icon buttons contract harder (0.88) than
+   pill buttons (0.96) because a 2% change on a 16px target is sub-pixel.
+   .ws-row-pin-btn is absent on purpose: its resting transform is
+   translateY(-50%), which a bare scale would silently discard.
    -------------------------------------------------------------------------- */
+.mode-tab:active:not(.disabled),
+.title-bar-icon-btn:active:not(:disabled),
+.window-control-btn:active:not(:disabled),
+.sidebar-icon-btn:active:not(:disabled),
+.sidebar-footer-btn:active:not(:disabled),
+.settings-segmented-btn:active:not(:disabled),
+.settings-back-btn:active:not(:disabled),
+.activity-tab-btn:active:not(:disabled),
+.terminal-search-btn:active:not(:disabled),
+.device-preset-btn:active:not(:disabled),
+.hub-search-btn:active:not(:disabled),
+.wt-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+.ws-card-action-btn:active:not(:disabled),
+.ws-row-action-btn:active:not(:disabled),
+.ws-row-menu-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale-icon));
+}
+
 [data-motion="pressable"]:active:not(:disabled) {
-  transform: scale(0.975);
+  transform: scale(var(--press-scale));
 }
 
 /* --------------------------------------------------------------------------
@@ -315,9 +345,5 @@
     to {
       opacity: 1;
     }
-  }
-
-  [data-motion="pressable"]:active:not(:disabled) {
-    transform: none;
   }
 }

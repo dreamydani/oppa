@@ -310,10 +310,6 @@
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-.mode-tab:active:not(.disabled) {
-  transform: scale(0.97);
-}
-
 .mode-tab.disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -356,10 +352,6 @@
   color: var(--text-primary);
 }
 
-.title-bar-icon-btn:active:not(:disabled) {
-  transform: scale(0.92);
-}
-
 .title-bar-icon-btn.active {
   color: var(--text-primary);
   background-color: var(--bg-card-hover);
@@ -391,10 +383,6 @@
 .window-control-btn:hover {
   background-color: var(--bg-card-hover);
   color: var(--text-primary);
-}
-
-.window-control-btn:active:not(:disabled) {
-  transform: scale(0.92);
 }
 
 .window-control-btn.window-close:hover {
@@ -732,7 +720,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .terminal-search-btn:hover {
@@ -854,7 +842,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
   box-sizing: border-box;
 }

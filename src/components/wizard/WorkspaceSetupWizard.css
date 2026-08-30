@@ -134,7 +134,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-close-btn:hover {
@@ -177,7 +177,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
 }
 
@@ -415,7 +415,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
   box-sizing: border-box;
 }
@@ -436,7 +436,7 @@
 
 .wizard-dropdown-chevron {
   color: var(--wizard-text-muted);
-  transition: transform var(--dur-micro) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-custom-dropdown.open .wizard-dropdown-chevron {
@@ -481,7 +481,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   text-align: left;
   width: 100%;
 }
@@ -585,7 +585,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-cd-submit-btn:hover {
@@ -619,7 +619,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
 }
 
@@ -724,7 +724,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-recent-card:hover {
@@ -807,7 +807,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-preset-chip:hover {
@@ -852,7 +852,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
 }
 
@@ -963,7 +963,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-preset-toggle-row {
@@ -1040,7 +1040,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-switch-slider::before {
@@ -1057,7 +1057,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .wizard-switch-input:checked + .wizard-switch-slider {
@@ -1111,7 +1111,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
 }
 

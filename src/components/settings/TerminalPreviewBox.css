@@ -137,7 +137,7 @@
   height: 16px;
   border-radius: 4px;
   border: 1px solid var(--border-strong);
-  transition: transform var(--dur-micro) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-spring);
   cursor: default;
 }
 

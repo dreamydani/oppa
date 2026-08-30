@@ -88,6 +88,8 @@ describe("design token one-home invariant", () => {
       "--ease-spring",
       "--stagger-step",
       "--stagger-cap",
+      "--press-scale",
+      "--press-scale-icon",
     ]) {
       expect(declared.has(required), `${required} must live in theme.css`).toBe(
         true,

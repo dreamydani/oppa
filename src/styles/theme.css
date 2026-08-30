@@ -51,6 +51,12 @@
   --stagger-step: 32ms;
   --stagger-cap: 6;
 
+  /* Press contraction. Tokens rather than literals so reduced motion can
+     neutralise every press in the app by retuning one value in one place,
+     instead of restating each selector inside a media query. */
+  --press-scale: 0.96;
+  --press-scale-icon: 0.88;
+
   /* Legacy aliases retained for App.css pane-zoom + its JS mirrors (maximizeZoom,
      sideDrawer) which reason about these as named motions, not tiers. */
   --dur-zoom-out: 220ms;
@@ -295,6 +301,15 @@ summary:focus-visible,
       box-shadow,
       visibility !important;
     scroll-behavior: auto !important;
+  }
+
+  /* Press contraction is driven by these two tokens, so retuning them here
+     removes every press in the app — no need to restate each selector. */
+  :root,
+  [data-theme="dark"],
+  [data-theme="light"] {
+    --press-scale: 1;
+    --press-scale-icon: 1;
   }
 }
 

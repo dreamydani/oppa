@@ -124,7 +124,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   flex-shrink: 0;
 }
 
@@ -160,7 +160,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .editor-tab-btn:hover {
@@ -260,7 +260,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   font-family: var(--font-sans);
 }
 
@@ -295,7 +295,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
   user-select: none;
 }
 
@@ -409,7 +409,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .ai-diff-toggle-btn.active {
@@ -436,7 +436,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .ai-diff-reject-btn {
@@ -507,7 +507,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .view-only-diff-close:hover {
@@ -549,7 +549,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .view-only-diff-note-btn:hover:not(:disabled) {
@@ -980,7 +980,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .editor-quick-file-chip:hover {

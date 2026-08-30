@@ -112,7 +112,8 @@
   opacity: 0;
   padding: 0;
   transition: opacity var(--dur-micro) var(--ease-out),
-              color var(--dur-micro) var(--ease-out);
+              color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .ws-card-header:hover .ws-card-action-btn {
@@ -318,7 +319,8 @@
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
-  transition: color var(--dur-micro) var(--ease-out);
+  transition: color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .ws-row-action-btn:hover {
@@ -352,7 +354,8 @@
   flex-shrink: 0;
   opacity: 0;
   transition: opacity var(--dur-micro) var(--ease-out),
-              color var(--dur-micro) var(--ease-out);
+              color var(--dur-micro) var(--ease-out),
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .ws-row:hover .ws-row-menu-btn {

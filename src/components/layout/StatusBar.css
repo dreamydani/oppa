@@ -98,7 +98,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .status-bar-item.localhost-badge:hover {
@@ -128,7 +128,7 @@
               border-color var(--dur-micro) var(--ease-out),
               opacity var(--dur-micro) var(--ease-out),
               box-shadow var(--dur-micro) var(--ease-out),
-              transform var(--dur-micro) var(--ease-out);
+              transform var(--dur-fast) var(--ease-spring);
 }
 
 .status-bar-item.fleet-aggregate:hover {
