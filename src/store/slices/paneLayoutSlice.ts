@@ -926,8 +926,7 @@ export function createPaneLayoutSlice(
         if (buffer) {
           scrollbackPromises.push(saveScrollback(s.id, buffer).catch(() => {}));
         }
-        // Yield to the event loop between serializations so a burst of dirty
-        // buffers never blocks the UI thread in one synchronous block.
+        // Yield to the event loop between serializations.
         await Promise.resolve();
       }
       if (scrollbackPromises.length > 0) {

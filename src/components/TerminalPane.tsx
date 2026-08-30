@@ -45,6 +45,8 @@ import {
 } from "../lib/terminal/panePriority";
 import { createThrottledWriteQueue } from "../lib/terminal/writeQueue";
 import { serializeScrollbackBounded, maybeWriteTruncationMarker, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
+import { detectGpuTier, GpuTier } from "../lib/terminal/gpuTier";
+import { prefersReducedMotion } from "../lib/motion/reducedMotion";
 import {
   isLayoutAnimating,
   runWhenLayoutIdle,
@@ -504,9 +506,13 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     // Routed through the shared multiplexer: one global listener dispatches
     // per session id (O(1)) instead of every pane filtering every event.
-    const writeQueue = createThrottledWriteQueue(getPanePriority(id), (data) => {
-      if (!disposed) term.write(data);
-    });
+    const writeQueue = createThrottledWriteQueue(
+      getPanePriority(id),
+      (data) => {
+        if (!disposed) term.write(data);
+      },
+      GpuTier[detectGpuTier()].backgroundFps,
+    );
     writeQueueRef.current = writeQueue;
     let truncationMarked = false;
     unsubs.push(
@@ -516,15 +522,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
         // Cheap Set.add: the next layout save re-serializes this buffer only.
         markScrollbackDirty(id);
-        // Once the buffer hits the 10k scrollback cap, write a one-time
-        // marker so silent oldest-line eviction is visible to the user.
+        // Once the buffer reaches the scrollback plateau (rows + cap), xterm
+        // has started evicting the oldest lines — write a one-time marker so
+        // that silent history drop is visible to the user.
         if (!truncationMarked) {
           truncationMarked = maybeWriteTruncationMarker(
             {
               bufferLength: term.buffer.active.length,
               write: (data) => writeQueue.push(data),
             },
-            XTERM_SCROLLBACK_LINES,
+            XTERM_SCROLLBACK_LINES + term.rows,
             truncationMarked,
           );
         }
@@ -600,6 +607,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // resizes (fresh stream) commit normally; the settle fit is the crisp
     // swap, applied after the overlay comes off.
     const stretchOverlay = () => {
+      // Reduced motion: skip the stretch and commit directly — a stale
+      // scaled frame is more jarring than an instant reflow.
+      if (prefersReducedMotion()) return;
       const el = term.element;
       if (!el) return;
       const parentEl = el.parentElement;
@@ -688,7 +698,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   // It also drives the render-priority registry: the focused pane owns the
   // full frame budget, background panes render at the capped rate.
   useEffect(() => {
-    setFocusedPane(isFocused ? id : getFocusedPane() === id ? null : getFocusedPane());
+    // A pane losing focus clears its own registry entry only; another pane's
+    // focus change owns the rest.
+    const wasFocused = !isFocused && getFocusedPane() === id;
+    setFocusedPane(isFocused ? id : wasFocused ? null : getFocusedPane());
     writeQueueRef.current?.setPriority(getPanePriority(id));
     if (!isFocused) return;
     touchGlSlot(id);

@@ -18,13 +18,15 @@ conventional commit. `.superpowers/` is git-ignored scratch; the git history is 
 
 ## Task list (ordered)
 
-### Task 1 — Fix leaked PaneSplit store subscription
+### Task 1 — PaneSplit store subscription (verified no-op, ruled in review)
 **Files:** `src/components/PaneSplit.tsx`
-**Do:** The maximize-snapshot `useTerminalStore.subscribe` in the `useEffect` has
-no unsubscribe. Return `unsubscribe` from the effect's cleanup (alongside the
-existing zoom-cancel cleanup). Verifies no StrictMode double-mount leak.
-**Tests:** unit — subscribe is cleaned up on unmount; double-mount leaves one live subscription.
-**Commit:** `fix(ui): unsubscribe PaneSplit maximize-snapshot store subscription`
+**Do:** The audit claimed the maximize-snapshot `useTerminalStore.subscribe` leaks.
+**Ruling:** Verified no-op. `useEffect(() => useTerminalStore.subscribe(...))` returns
+the unsubscribe directly, and zustand's `subscribe` returns `() => void`. The
+subscription is correctly cleaned up on unmount; React 19 StrictMode double-mount
+does not leak. No change made — the real drag-path hot spot (`findDropTargetUnderPointer`
+per pointermove) was throttled instead as Task 1b.
+**Commit:** none (superseded by Task 1b)
 
 ### Task 2 — Daemon ack-reset on reattach (Rust)
 **Files:** `src-tauri/src/pty/daemon_session.rs`, `src-tauri/src/pty/request_router.rs` (+ tests)

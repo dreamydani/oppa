@@ -45,9 +45,11 @@ function evictOldest(): void {
     // background panes are the LRU pool even if they were focused recently.
     const priority = getPanePriority(id);
     if (priority === "focused") continue;
-    const key = priority === "hovered" ? entry.lastFocusedAt + 1 : entry.lastFocusedAt;
-    if (key < oldestAt) {
-      oldestAt = key;
+    // Bump hovered above any same-timestamp background entry.
+    const evictionKey =
+      priority === "hovered" ? entry.lastFocusedAt + 1 : entry.lastFocusedAt;
+    if (evictionKey < oldestAt) {
+      oldestAt = evictionKey;
       oldestId = id;
     }
   }

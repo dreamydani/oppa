@@ -114,18 +114,22 @@ export function createDropTargetCoalescer(
   let scheduled = false;
   let lastTargetKey: string | null = null;
 
-  const run = () => {
-    scheduled = false;
-    if (!hasPending) return;
-    const x = pendingX;
-    const y = pendingY;
-    hasPending = false;
+  const detectAndNotify = (x: number, y: number) => {
     const target = detect(x, y);
     const key = target ? `${target.targetId}:${target.zone}` : "";
     if (key !== lastTargetKey) {
       lastTargetKey = key;
       onTarget(target);
     }
+  };
+
+  const run = () => {
+    scheduled = false;
+    if (!hasPending) return;
+    const x = pendingX;
+    const y = pendingY;
+    hasPending = false;
+    detectAndNotify(x, y);
   };
 
   return {
@@ -144,12 +148,7 @@ export function createDropTargetCoalescer(
       const x = pendingX;
       const y = pendingY;
       hasPending = false;
-      const target = detect(x, y);
-      const key = target ? `${target.targetId}:${target.zone}` : "";
-      if (key !== lastTargetKey) {
-        lastTargetKey = key;
-        onTarget(target);
-      }
+      detectAndNotify(x, y);
     },
   };
 }
