@@ -546,6 +546,10 @@
 
 .pane-leaf.focused {
   border-color: var(--accent-blue, #58a6ff);
+  /* Subtle active-pane glow: a soft halo that reads as "this pane owns the
+     keyboard" without a heavy blur pass (compositor-cheap box-shadow). */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-blue, #58a6ff) 22%, transparent),
+              0 0 12px color-mix(in srgb, var(--accent-blue, #58a6ff) 14%, transparent);
 }
 
 .pane-leaf.is-drag-source {
@@ -606,19 +610,56 @@
 }
 
 .pane-divider.dir-h {
-  width: 3px;
+  width: 9px;
   cursor: col-resize;
-  margin: 0 -1px;
+  margin: 0 -4px;
 }
 
 .pane-divider.dir-v {
-  height: 3px;
+  height: 9px;
   cursor: row-resize;
-  margin: -1px 0;
+  margin: -4px 0;
 }
 
-.pane-divider:hover {
-  background-color: rgba(88, 166, 255, 0.3);
+/* Generous invisible hit-area (9px) around the 3px visual line so drags are
+   easy to grab; the visible line is the ::after strip. */
+.pane-divider.dir-h::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background-color: transparent;
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+.pane-divider.dir-v::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  transform: translateY(-50%);
+  background-color: transparent;
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+.pane-divider.dir-h:hover,
+.pane-divider.dir-h:active {
+  background-color: color-mix(in srgb, var(--accent-blue, #58a6ff) 18%, transparent);
+}
+
+.pane-divider.dir-v:hover,
+.pane-divider.dir-v:active {
+  background-color: color-mix(in srgb, var(--accent-blue, #58a6ff) 18%, transparent);
+}
+
+.pane-divider:hover::after,
+.pane-divider:active::after {
+  background-color: var(--accent-blue, #58a6ff);
   border-radius: 1px;
 }
 
