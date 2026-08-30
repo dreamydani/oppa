@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { resolveChannel } from "./channel";
-import { checkForUpdate, type UpdateInfo } from "./updater";
+import {
+  checkForUpdate,
+  canUpgradeSafely,
+  probeUpgradeSafety,
+  type UpdateInfo,
+  type CanUpgradeDaemonResult,
+} from "./updater";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -56,5 +62,53 @@ describe("updater seam", () => {
     invokeMock.mockRejectedValue(new Error("network down"));
     const result = await checkForUpdate();
     expect(result).toBeNull();
+  });
+
+  describe("canUpgradeSafely", () => {
+    const IDLE: CanUpgradeDaemonResult = { safe: true, sessionCount: 0, unknown: false };
+    const BUSY: CanUpgradeDaemonResult = { safe: false, sessionCount: 3, unknown: false };
+    const UNKNOWN: CanUpgradeDaemonResult = { safe: false, sessionCount: 0, unknown: true };
+
+    it("returns 'unknown' on dev and never invokes can_upgrade_daemon", async () => {
+      await setChannel("dev");
+      expect(await canUpgradeSafely()).toBe("unknown");
+      expect(invokeMock).not.toHaveBeenCalledWith("can_upgrade_daemon");
+    });
+
+    it("returns 'unknown' when the channel is unresolved", async () => {
+      expect(await canUpgradeSafely()).toBe("unknown");
+      expect(invokeMock).not.toHaveBeenCalledWith("can_upgrade_daemon");
+    });
+
+    it("maps idle to 'idle' on stable", async () => {
+      await setChannel("stable");
+      invokeMock.mockResolvedValue(IDLE);
+      expect(await canUpgradeSafely()).toBe("idle");
+    });
+
+    it("maps busy to 'busy' and surfaces the live session count via probeUpgradeSafety", async () => {
+      await setChannel("stable");
+      invokeMock.mockResolvedValue(BUSY);
+      expect(await canUpgradeSafely()).toBe("busy");
+      // Each call is one can_upgrade_daemon round trip (app_channel excluded).
+      const daemonProbes = () =>
+        invokeMock.mock.calls.filter((c) => c[0] === "can_upgrade_daemon").length;
+      expect(daemonProbes()).toBe(1);
+      const probe = await probeUpgradeSafety();
+      expect(probe).toEqual({ status: "busy", sessionCount: 3 });
+      expect(daemonProbes()).toBe(2);
+    });
+
+    it("maps unknown (error / None payload) to 'unknown' — never 'idle'", async () => {
+      await setChannel("stable");
+      invokeMock.mockResolvedValue(UNKNOWN);
+      expect(await canUpgradeSafely()).toBe("unknown");
+    });
+
+    it("returns 'unknown' when the command rejects (transport failure)", async () => {
+      await setChannel("stable");
+      invokeMock.mockRejectedValue(new Error("daemon unreachable"));
+      expect(await canUpgradeSafely()).toBe("unknown");
+    });
   });
 });

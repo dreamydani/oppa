@@ -1,5 +1,6 @@
+use crate::pty::ipc_protocol::DaemonResponse;
 use crate::pty::manager::PtyManager;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -304,9 +305,117 @@ fn pty_list_impl(manager: &PtyManager) -> Vec<String> {
     manager.list()
 }
 
+/// Payload returned by `can_upgrade_daemon`.
+///
+/// - `safe`: the daemon holds zero live sessions and is safe to replace.
+/// - `session_count`: live sessions still holding the daemon open (0 when
+///   idle). The count is exposed so the banner can say "N sessions are still
+///   running".
+/// - `unknown`: the daemon's upgrade-ability could not be verified (dev
+///   channel, a daemon built before `UpgradeIfIdle`, or a transport error).
+///   `unknown` implies `safe == false` — an unverifiable daemon must NEVER be
+///   treated as safe (Task 6 carried note).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanUpgradeDaemonPayload {
+    pub safe: bool,
+    pub session_count: u32,
+    pub unknown: bool,
+}
+
+/// Pure mapping from a `daemon_can_upgrade()` probe result to the wire
+/// payload. Injected probe so tests exercise the mapping without a daemon.
+///
+/// The probe returns:
+/// - `Ok(Ok(()))` — idle, safe to upgrade.
+/// - `Ok(Err(count))` — busy, `count` live sessions still running.
+/// - `Err(_)` — can't verify (old daemon / transport).
+fn can_upgrade_daemon_payload(
+    channel: crate::channel::Channel,
+    probe: impl FnOnce() -> Result<Result<(), u32>, String>,
+) -> CanUpgradeDaemonPayload {
+    // Dev builds never update, so the question is not applicable. Reported as
+    // unknown-not-safe so the banner never claims a dev daemon is safe.
+    if channel.is_dev() {
+        return CanUpgradeDaemonPayload {
+            safe: false,
+            session_count: 0,
+            unknown: true,
+        };
+    }
+    match probe() {
+        Ok(Ok(())) => CanUpgradeDaemonPayload {
+            safe: true,
+            session_count: 0,
+            unknown: false,
+        },
+        Ok(Err(count)) => CanUpgradeDaemonPayload {
+            safe: false,
+            session_count: count,
+            unknown: false,
+        },
+        Err(_) => CanUpgradeDaemonPayload {
+            // Old daemon (pre-UpgradeIfIdle) or transport failure: can't
+            // verify. NEVER safe.
+            safe: false,
+            session_count: 0,
+            unknown: true,
+        },
+    }
+}
+
+/// Whether the daemon is safe to upgrade right now (stable channel).
+///
+/// The dev channel returns not-applicable (`unknown: true, safe: false`).
+/// Stable asks the daemon via `UpgradeIfIdle`: idle → `{ safe: true }`, busy →
+/// `{ safe: false, session_count }`, and any error (old daemon, transport)
+/// → `{ safe: false, unknown: true }` — an unverifiable daemon is never
+/// treated as safe.
+#[tauri::command]
+pub fn can_upgrade_daemon(manager: State<'_, PtyManager>) -> CanUpgradeDaemonPayload {
+    let channel = crate::channel::Channel::current();
+    can_upgrade_daemon_payload(channel, || {
+        let client = manager.get_client()?;
+        match client.raw_upgrade_if_idle()? {
+            // Idle: safe to upgrade, no sessions holding the daemon open.
+            DaemonResponse::Ok => Ok(Ok(())),
+            // Busy: live sessions still running; name the count.
+            DaemonResponse::Busy(count) => Ok(Err(count)),
+            other => Err(format!("unexpected response for UpgradeIfIdle: {other:?}")),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channel::Channel;
+
+    /// Injected stand-in for a real daemon-client upgrade probe:
+    /// `Ok(Ok(()))` idle, `Ok(Err(n))` busy with `n` live sessions, `Err(_)`
+    /// can't verify (a daemon built before `UpgradeIfIdle`, or a transport
+    /// failure). The mapping MUST never claim safe on `Err` (Task 6 note).
+    fn map_probe(
+        channel: Channel,
+        probe: Result<Result<(), u32>, String>,
+    ) -> CanUpgradeDaemonPayload {
+        can_upgrade_daemon_payload(channel, || probe)
+    }
+
+    fn busy_payload(count: u32) -> CanUpgradeDaemonPayload {
+        CanUpgradeDaemonPayload {
+            safe: false,
+            session_count: count,
+            unknown: false,
+        }
+    }
+
+    fn not_applicable_payload() -> CanUpgradeDaemonPayload {
+        CanUpgradeDaemonPayload {
+            safe: false,
+            session_count: 0,
+            unknown: true,
+        }
+    }
 
     #[test]
     fn pty_list_empty_on_fresh_manager() {
@@ -414,5 +523,56 @@ mod tests {
         let json =
             serde_json::to_string(&SessionFocusRequestedPayload { id: "s1".into() }).unwrap();
         assert_eq!(json, r#"{"id":"s1"}"#);
+    }
+
+    // ---- task 7: can_upgrade_daemon payload mapping (no daemon needed) ----
+
+    #[test]
+    fn stable_idle_probe_maps_to_safe_true() {
+        let payload = map_probe(Channel::Stable, Ok(Ok(())));
+        assert!(payload.safe);
+        assert_eq!(payload.session_count, 0);
+        assert!(!payload.unknown);
+    }
+
+    #[test]
+    fn stable_busy_probe_maps_to_unsafe_with_live_session_count() {
+        let payload = map_probe(Channel::Stable, Ok(Err(3)));
+        assert!(!payload.safe);
+        assert_eq!(payload.session_count, 3);
+        assert!(!payload.unknown);
+    }
+
+    #[test]
+    fn stable_busy_payload_with_count_rides_through() {
+        let payload = busy_payload(2);
+        assert!(!payload.safe);
+        assert_eq!(payload.session_count, 2);
+        assert!(!payload.unknown);
+    }
+
+    #[test]
+    fn stable_err_probe_maps_to_unknown_not_safe() {
+        // A daemon built BEFORE UpgradeIfIdle answers Error but keeps serving;
+        // Err must read "can't verify" — NEVER "safe to update".
+        let payload = map_probe(Channel::Stable, Err("unknown variant UpgradeIfIdle".into()));
+        assert!(!payload.safe, "Err must never claim safe");
+        assert!(payload.unknown);
+    }
+
+    #[test]
+    fn dev_channel_is_never_applicable() {
+        // Even an idle probe result must not make dev look upgradeable.
+        let payload = map_probe(Channel::Dev, Ok(Ok(())));
+        assert_eq!(payload, not_applicable_payload());
+        assert!(!payload.safe, "dev must never claim safe");
+        assert!(payload.unknown, "dev reports not-applicable/unknown");
+    }
+
+    #[test]
+    fn can_upgrade_daemon_payload_serializes_snake_case() {
+        let json = serde_json::to_string(&busy_payload(2)).unwrap();
+        assert_eq!(json, r#"{"safe":false,"session_count":2,"unknown":false}"#);
+        assert!(serde_json::from_str::<CanUpgradeDaemonPayload>(&json).is_ok());
     }
 }

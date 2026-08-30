@@ -589,6 +589,15 @@ impl DaemonClient {
         }
     }
 
+    /// Full `UpgradeIfIdle` verdict: idle (safe, zero sessions), busy (live
+    /// session count), or an error when the daemon could not answer (a build
+    /// predating `UpgradeIfIdle` keeps serving but errors the unknown request,
+    /// or a transport failure). Callers treat the error arm as "can't verify",
+    /// never as safe.
+    pub fn raw_upgrade_if_idle(&self) -> Result<DaemonResponse, String> {
+        self.send_request(DaemonRequest::UpgradeIfIdle)
+    }
+
     /// Gracefully disconnect from the daemon without stopping sessions.
     pub fn disconnect(&self) -> Result<(), String> {
         let req = DaemonRequest::Disconnect;

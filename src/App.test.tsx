@@ -3,6 +3,7 @@ import { render, fireEvent, within, act } from "@testing-library/react";
 import App from "./App";
 import { useTerminalStore } from "./store/terminalStore";
 import * as transport from "./lib/pty/transport";
+import * as layoutTransport from "./lib/layout/transport";
 
 vi.mock("./lib/pty/transport", () => ({
   onPtyCwd: vi.fn(),
@@ -155,6 +156,26 @@ describe("App", () => {
     expect(container.querySelector(".status-bar")).not.toBeNull();
     expect(container.querySelector(".soft-edge-left")).not.toBeNull();
     expect(container.querySelector(".soft-edge-right")).not.toBeNull();
+  });
+
+  it("restores the persisted layout on boot via loadLayout (simulated restart)", async () => {
+    // Task 7, requirement 4: after an update/restart the app must re-run the
+    // layout restore path on boot. This pins the BOOT WIRING — App calls
+    // loadLayout once on mount. The store-level loadLayout tests (in
+    // terminalStore.test.ts) cover the actual pane/session remap; this test
+    // pins that a restart re-enters the restore path (the channel-isolated
+    // data dir keeps it per-channel).
+    const loadLayoutMock = vi.mocked(layoutTransport.loadLayout);
+
+    render(<App />);
+
+    // The boot init effect must call the layout restore exactly once.
+    await vi.waitFor(() => {
+      expect(loadLayoutMock).toHaveBeenCalledTimes(1);
+    });
+    // The seeded before-each store (tab-1 / s1) is replaced by the restore
+    // path marking the store ready; the app reaches its ready state.
+    expect(useTerminalStore.getState().ready).toBe(true);
   });
 
   it("keeps sidebars mounted but drawer-hidden when store says closed", () => {

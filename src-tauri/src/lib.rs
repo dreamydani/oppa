@@ -122,6 +122,7 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_ack,
             pty::commands::pty_list,
+            pty::commands::can_upgrade_daemon,
             layout::save_scrollback,
             layout::load_scrollback,
             layout::delete_scrollback,
