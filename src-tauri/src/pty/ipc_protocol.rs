@@ -373,13 +373,24 @@ pub fn sanitize_session_title(raw: &str) -> String {
 }
 
 pub fn get_daemon_socket_path() -> String {
+    get_daemon_socket_path_for(crate::channel::Channel::current())
+}
+
+/// Channel-aware variant used by tests and by callers that already know the
+/// channel: dev daemons listen on their own pipe/socket so they can never
+/// collide with (or be killed by) the stable daemon.
+pub fn get_daemon_socket_path_for(channel: crate::channel::Channel) -> String {
+    let suffix = match channel {
+        crate::channel::Channel::Dev => "-dev",
+        crate::channel::Channel::Stable => "",
+    };
     if cfg!(windows) {
         let username = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
-        format!(r"\\.\pipe\oppa-daemon-{}", username)
+        format!(r"\\.\pipe\oppa-daemon-{username}{suffix}")
     } else {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(runtime_dir)
-            .join("oppa-daemon.sock")
+            .join(format!("oppa-daemon{suffix}.sock"))
             .to_string_lossy()
             .into_owned()
     }
@@ -1060,6 +1071,20 @@ mod tests {
             assert!(path.starts_with(r"\\.\pipe\oppa-daemon-"));
         } else {
             assert!(path.ends_with("oppa-daemon.sock"));
+        }
+    }
+
+    #[test]
+    fn test_daemon_socket_path_dev_differs_from_stable() {
+        let dev = get_daemon_socket_path_for(crate::channel::Channel::Dev);
+        let stable = get_daemon_socket_path_for(crate::channel::Channel::Stable);
+        assert_ne!(dev, stable, "dev and stable must never share a daemon pipe");
+        // Dev must carry the channel marker so it is unmistakably a dev pipe
+        // (and so a stale dev daemon never shadows the stable one or vice versa).
+        if cfg!(windows) {
+            assert!(dev.contains("-dev"), "dev pipe must be suffixed: {dev}");
+        } else {
+            assert!(dev.contains("oppa-daemon-dev"), "dev socket must be suffixed: {dev}");
         }
     }
 

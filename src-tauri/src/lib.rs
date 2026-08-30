@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod atomic_file;
 mod browser;
+pub mod channel;
 pub mod cli;
 pub mod extensions;
 mod fs;
