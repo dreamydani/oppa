@@ -24,6 +24,7 @@ import {
   readdirSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -70,9 +71,26 @@ function detectEol(text) {
 // Write-temp + rename: an atomic per-file write that never leaves a
 // half-written version file behind.
 function atomicWrite(file, content) {
-  const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`);
-  writeFileSync(tmp, content, "utf8");
-  renameSync(tmp, file);
+  const tmp = join(
+    dirname(file),
+    `.${basename(file)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+  );
+  try {
+    unlinkSync(tmp); // stale tmp would block renameSync on Windows
+  } catch {
+    // missing tmp is the common case — nothing to clean
+  }
+  try {
+    writeFileSync(tmp, content, "utf8");
+    renameSync(tmp, file);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // best-effort: the original error is what matters
+    }
+    throw err;
+  }
 }
 
 function readPackageVersion(file) {
@@ -336,7 +354,7 @@ function runBuild() {
 
 const INSTALLER_EXTS = [".msi", ".exe", ".dmg", ".deb", ".rpm", ".AppImage"];
 
-function collectInstallers(dir) {
+export function collectInstallers(dir) {
   const found = [];
   const walk = (d) => {
     for (const entry of readdirSync(d, { withFileTypes: true })) {
@@ -356,13 +374,25 @@ function collectInstallers(dir) {
     if (name.endsWith(".exe")) return 1;
     return 2;
   };
-  found.sort(
-    (a, b) => rank(a) - rank(b) || statSync(b).mtimeMs - statSync(a).mtimeMs
-  );
+  found.sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    let aTime;
+    try {
+      aTime = statSync(a).mtimeMs;
+    } catch {
+      return 1; // a vanished mid-scan — sort it last, never throw
+    }
+    try {
+      return statSync(b).mtimeMs - aTime;
+    } catch {
+      return -1; // b vanished mid-scan — sort it last, never throw
+    }
+  });
   return found;
 }
 
-function findInstaller(projectRoot, _version) {
+export function findInstaller(projectRoot, version, arch = process.arch) {
   const bundleDir = join(
     projectRoot,
     "src-tauri",
@@ -376,17 +406,23 @@ function findInstaller(projectRoot, _version) {
     );
   }
   const installers = collectInstallers(bundleDir);
-  if (installers.length === 0) {
-    throw new Error(
-      `no installer found under ${bundleDir} — expected a .msi / .exe (or platform bundle) file`
-    );
-  }
-  return installers[0];
+  const versioned = version
+    ? installers.filter((f) => basename(f).includes(version))
+    : installers;
+  const pool = versioned.length > 0 ? versioned : installers;
+  const archFiltered = pool.filter(
+    (f) =>
+      basename(f).includes(arch) || !/x64|arm64|aarch64/.test(basename(f))
+  );
+  const ranked = archFiltered.length > 0 ? archFiltered : pool;
+  if (ranked.length === 0)
+    throw new Error(`no installer found under ${bundleDir}`);
+  return ranked[0];
 }
 
-function writeManifest(version, installerFilename) {
+export function writeManifest(version, installerFilename, signature = "") {
   const download = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${encodeURIComponent(installerFilename)}`;
-  const manifest = { version, download };
+  const manifest = { version, download, signature };
   const dir = mkdtempSync(join(tmpdir(), "oppa-release-"));
   const manifestPath = join(dir, "oppa-update-manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
@@ -469,7 +505,14 @@ async function main() {
     console.log(`Manifest:    ${JSON.stringify(manifest)}`);
 
     console.log(`\nCreating the GitHub release v${nextVersion} and uploading assets...`);
-    await createGitHubRelease(nextVersion, installer, manifestPath);
+    if (process.argv.includes("--dry-run")) {
+      // Print-only path: show the exact gh invocation without spawning.
+      console.log(
+        ["gh", ...buildGhReleaseArgs(nextVersion, installer, manifestPath)].join(" ")
+      );
+    } else {
+      await createGitHubRelease(nextVersion, installer, manifestPath);
+    }
 
     console.log(`\nReleased oppa ${nextVersion}:`);
     console.log(`  Installer: ${manifest.download}`);

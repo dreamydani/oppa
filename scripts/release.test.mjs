@@ -9,7 +9,7 @@
 // The repo-wide vitest environment is happy-dom, which cannot resolve
 // `node:`-prefixed builtin imports; this file touches real files on disk, so
 // it runs in the plain Node environment instead.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   SEMVER_RE,
   isValidVersion,
@@ -23,7 +23,29 @@ import {
   SNAPSHOT_FILES,
   buildGhReleaseArgs,
   spawnChecked,
+  collectInstallers,
+  findInstaller,
+  writeManifest,
 } from "./release.mjs";
+
+// statSync throwing ENOENT is exactly what the OS reports for a file
+// deleted between readdir and stat — the installer scan must survive it.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    statSync: (...args) => {
+      if (typeof args[0] === "string" && args[0].endsWith("vanished.msi")) {
+        const err = new Error(
+          `ENOENT: no such file or directory, stat '${args[0]}'`
+        );
+        err.code = "ENOENT";
+        throw err;
+      }
+      return actual.statSync(...args);
+    },
+  };
+});
 
 function makeTempDir(prefix) {
   return import("node:fs").then((fs) =>
@@ -449,5 +471,51 @@ describe("gh release invocation", () => {
     await expect(
       spawnChecked("gh", ["release", "create"], "failed to create GitHub release", fakeSpawn)
     ).rejects.toThrow("failed to create GitHub release (exit code 1)");
+  });
+});
+
+describe("findInstaller version-aware pick", () => {
+  it("prefers matching version over newer mtime", async () => {
+    const tmp = await makeTempDir("oppa-find-");
+    const { fs, path } = tmp;
+    const bundleDir = path.join(
+      tmp.dir,
+      "src-tauri",
+      "target",
+      "release",
+      "bundle"
+    );
+    fs.mkdirSync(bundleDir, { recursive: true });
+    const older = path.join(bundleDir, "oppa-0.2.2.msi");
+    const newer = path.join(bundleDir, "oppa-0.2.1.msi");
+    fs.writeFileSync(older, "old");
+    fs.writeFileSync(newer, "new");
+    const now = Date.now();
+    fs.utimesSync(older, new Date(now - 60000), new Date(now - 60000));
+    fs.utimesSync(newer, new Date(now), new Date(now));
+    expect(path.basename(findInstaller(tmp.dir, "0.2.2", "x64"))).toBe(
+      "oppa-0.2.2.msi"
+    );
+  });
+});
+
+describe("collectInstallers race tolerance", () => {
+  it("survives a file vanishing between readdir and stat", async () => {
+    const tmp = await makeTempDir("oppa-race-");
+    const { fs, path } = tmp;
+    fs.writeFileSync(path.join(tmp.dir, "oppa-0.2.2.msi"), "fake-installer");
+    fs.writeFileSync(path.join(tmp.dir, "vanished.msi"), "gone");
+    expect(() => collectInstallers(tmp.dir)).not.toThrow();
+    expect(
+      collectInstallers(tmp.dir).some((f) => f.endsWith("oppa-0.2.2.msi"))
+    ).toBe(true);
+  });
+});
+
+describe("writeManifest signature slot", () => {
+  it("includes a signature slot in the manifest", () => {
+    const { manifest } = writeManifest("0.2.2", "oppa-0.2.2.msi");
+    expect(manifest).toHaveProperty("signature");
+    expect(manifest.signature).toBe("");
   });
 });
