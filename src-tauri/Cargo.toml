@@ -37,6 +37,7 @@ clap = { version = "4", features = ["derive"] }
 rquickjs = "0.12"
 sha2 = "0.10"
 tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 # HTTP client for the update-manifest check. 0.13 (not 0.12): it is what
 # tauri-plugin-updater itself depends on, so we reuse the exact crate version
 # already in the lockfile instead of duplicating a second reqwest major.

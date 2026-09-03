@@ -103,6 +103,8 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Process plugin (relaunch after install) is channel-independent.
+        .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
         .manage(browser::manager::BrowserManager::new());
     // The updater is stable-only: a dev build NEVER checks for updates, so the
@@ -110,12 +112,9 @@ pub fn run() {
     // on dev. `Channel::current()` is compile-time, so the registration is
     // baked into the binary.
     //
-    // NOTE: the plugin's NATIVE check() is NOT used — our update manifest is a
-    // custom {version, download} shape the plugin cannot parse, and there is no
-    // signing pubkey yet. The real update check runs through `updater.rs`
-    // (check_for_update) and the banner opens the download URL. This
-    // registration exists so the plugin's other surface is available and the
-    // installer-side follow-up (signed manifest + native format) can adopt it.
+    // NOTE: the plugin's NATIVE check()/downloadAndInstall() become the real
+    // flow in Task 5; the custom manifest check in `updater.rs` stays as the
+    // fallback for one release (dual-manifest transition, no flag day).
     if channel::Channel::current() == channel::Channel::Stable {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
