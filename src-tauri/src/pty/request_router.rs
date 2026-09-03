@@ -215,17 +215,28 @@ impl DaemonServer {
                 }
             }
             DaemonRequest::Kill { session_id } => {
-                let session = self.sessions.lock().get(&session_id).cloned();
+                // Single critical section: lookup + remove together so a
+                // concurrent Kill cannot double-signal the same child.
+                let session = {
+                    let mut sessions = self.sessions.lock();
+                    let session = sessions.get(&session_id).cloned();
+                    if session.is_some() {
+                        sessions.remove(&session_id);
+                    }
+                    session
+                };
                 if let Some(session) = session {
-                    // Orderly teardown: subscribers observe Exit before the id
-                    // vanishes, so listeners never hang on a silent removal.
-                    // The watchdog's later Exit (with the real code) is a
-                    // harmless duplicate; clients treat Exit idempotently.
-                    session.publish_event(DaemonEvent::Exit {
-                        session_id: session_id.clone(),
-                        code: session.exit_code(),
-                    });
-                    self.sessions.lock().remove(&session_id);
+                    // Already-exited children may have fired Exit before any
+                    // subscriber attached — re-emit it so listeners never hang
+                    // on a silent removal. A live child is left to the
+                    // watchdog: a None-code Exit here would shadow its real
+                    // code (clients drop state on first Exit).
+                    if let Some(code) = session.exit_code() {
+                        session.publish_event(DaemonEvent::Exit {
+                            session_id: session_id.clone(),
+                            code: Some(code),
+                        });
+                    }
                     let _ = session.kill();
                     DaemonResponse::Ok
                 } else {
