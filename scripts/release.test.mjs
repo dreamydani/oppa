@@ -26,6 +26,10 @@ import {
   collectInstallers,
   findInstaller,
   writeManifest,
+  buildLatestJson,
+  manifestFilenames,
+  assertReleaseFlags,
+  parseChannel,
 } from "./release.mjs";
 
 // statSync throwing ENOENT is exactly what the OS reports for a file
@@ -534,5 +538,146 @@ describe("writeManifest signature slot", () => {
     const { manifest } = writeManifest("0.2.2", "oppa-0.2.2.msi");
     expect(manifest).toHaveProperty("signature");
     expect(manifest.signature).toBe("");
+  });
+});
+
+describe("NSIS-primary installer ranking", () => {
+  it("ranks *-setup.exe above .msi for the same version", async () => {
+    const tmp = await makeTempDir("oppa-nsis-");
+    const { fs, path } = tmp;
+    const bundleDir = path.join(
+      tmp.dir,
+      "src-tauri",
+      "target",
+      "release",
+      "bundle"
+    );
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, "oppa_0.2.2_x64-setup.exe"), "nsis");
+    fs.writeFileSync(path.join(bundleDir, "oppa_0.2.2_x64_en-US.msi"), "msi");
+    expect(path.basename(findInstaller(tmp.dir, "0.2.2", "x64"))).toBe(
+      "oppa_0.2.2_x64-setup.exe"
+    );
+  });
+
+  it("ranks .msi above a non-setup .exe", async () => {
+    const tmp = await makeTempDir("oppa-rank-");
+    const { fs, path } = tmp;
+    fs.writeFileSync(path.join(tmp.dir, "oppa-0.2.2.msi"), "msi");
+    fs.writeFileSync(path.join(tmp.dir, "oppa-0.2.2.exe"), "exe");
+    const ranked = collectInstallers(tmp.dir).map((f) => path.basename(f));
+    expect(ranked.indexOf("oppa-0.2.2.msi")).toBeLessThan(
+      ranked.indexOf("oppa-0.2.2.exe")
+    );
+  });
+});
+
+describe("buildLatestJson", () => {
+  const platforms = {
+    "windows-x86_64": {
+      url: "https://github.com/dreamydani/oppa/releases/download/v0.2.3/oppa_0.2.3_x64-setup.exe",
+      signature: "sig-windows",
+    },
+    "darwin-aarch64": {
+      url: "https://github.com/dreamydani/oppa/releases/download/v0.2.3/oppa_0.2.3_aarch64.app.tar.gz",
+      signature: "sig-macos",
+    },
+  };
+
+  it("emits the exact plugin schema from fixture inputs", () => {
+    expect(
+      buildLatestJson({
+        version: "0.2.3",
+        pubDate: "2026-09-04T00:00:00Z",
+        notes: "Bug fixes",
+        platforms,
+      })
+    ).toEqual({
+      version: "0.2.3",
+      notes: "Bug fixes",
+      pub_date: "2026-09-04T00:00:00Z",
+      platforms,
+    });
+  });
+
+  it("passes custom platform keys through without a hardcoded OS list", () => {
+    const out = buildLatestJson({
+      version: "0.2.3",
+      platforms: {
+        "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "s" },
+      },
+    });
+    expect(out.platforms["linux-x86_64"]).toEqual({
+      url: "https://example.com/app.AppImage",
+      signature: "s",
+    });
+  });
+
+  it("throws on a missing signature", () => {
+    expect(() =>
+      buildLatestJson({
+        version: "0.2.3",
+        platforms: {
+          "windows-x86_64": { url: "https://example.com/setup.exe", signature: "" },
+        },
+      })
+    ).toThrow(/signature/);
+  });
+
+  it("throws on bad semver", () => {
+    expect(() =>
+      buildLatestJson({ version: "abc", platforms })
+    ).toThrow(/semver|version/i);
+  });
+
+  it("throws on a bad pub date", () => {
+    expect(() =>
+      buildLatestJson({
+        version: "0.2.3",
+        pubDate: "not-a-date",
+        platforms,
+      })
+    ).toThrow(/date|pub_date/i);
+  });
+});
+
+describe("release channel flags", () => {
+  it("accepts the (stable, false) and (rc, true) combos", () => {
+    expect(() => assertReleaseFlags("stable", false)).not.toThrow();
+    expect(() => assertReleaseFlags("rc", true)).not.toThrow();
+  });
+
+  it("rejects rc without prerelease and stable with prerelease", () => {
+    expect(() => assertReleaseFlags("rc", false)).toThrow(/prerelease/i);
+    expect(() => assertReleaseFlags("stable", true)).toThrow(/prerelease/i);
+  });
+
+  it("parseChannel defaults to stable and parses both flag forms", () => {
+    expect(parseChannel([])).toBe("stable");
+    expect(parseChannel(["node", "release.mjs"])).toBe("stable");
+    expect(parseChannel(["--channel", "rc"])).toBe("rc");
+    expect(parseChannel(["--channel=stable"])).toBe("stable");
+  });
+
+  it("parseChannel throws on unknown channels", () => {
+    expect(() => parseChannel(["--channel", "beta"])).toThrow(/channel/i);
+  });
+
+  it("uses channel-aware manifest filenames", () => {
+    expect(manifestFilenames("stable")).toEqual({
+      manifest: "oppa-update-manifest.json",
+      latest: "latest.json",
+    });
+    expect(manifestFilenames("rc")).toEqual({
+      manifest: "oppa-update-manifest-rc.json",
+      latest: "latest-rc.json",
+    });
+  });
+
+  it("appends --prerelease for rc releases only", () => {
+    const stable = buildGhReleaseArgs("0.2.3", "setup.exe", "manifest.json");
+    expect(stable).not.toContain("--prerelease");
+    const rc = buildGhReleaseArgs("0.2.3", "setup.exe", "manifest.json", true);
+    expect(rc[rc.length - 1]).toBe("--prerelease");
   });
 });

@@ -367,12 +367,13 @@ export function collectInstallers(dir) {
     }
   };
   walk(dir);
-  // Prefer the MSI (Windows) installer, then EXE, then other platform bundles.
+  // NSIS-first: setup.exe is the update-path installer, MSI an alternate asset.
   const rank = (f) => {
-    const name = basename(f);
-    if (name.endsWith(".msi")) return 0;
-    if (name.endsWith(".exe")) return 1;
-    return 2;
+    const name = basename(f).toLowerCase();
+    if (name.endsWith("-setup.exe")) return 0;
+    if (name.endsWith(".msi")) return 1;
+    if (name.endsWith(".exe")) return 2;
+    return 3;
   };
   found.sort((a, b) => {
     const byRank = rank(a) - rank(b);
@@ -433,13 +434,140 @@ export function findInstaller(projectRoot, version, arch = process.arch) {
   return ranked[0];
 }
 
-export function writeManifest(version, installerFilename, signature = "") {
+export function writeManifest(
+  version,
+  installerFilename,
+  signature = "",
+  manifestFilename = "oppa-update-manifest.json"
+) {
   const download = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${encodeURIComponent(installerFilename)}`;
   const manifest = { version, download, signature };
   const dir = mkdtempSync(join(tmpdir(), "oppa-release-"));
-  const manifestPath = join(dir, "oppa-update-manifest.json");
+  const manifestPath = join(dir, manifestFilename);
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
   return { manifestPath, manifest };
+}
+
+// Release channels. Stable serves `latest.json`; rc serves the isolated
+// `latest-rc.json` feed so pre-releases never leak into stable updates.
+export const RELEASE_CHANNELS = ["stable", "rc"];
+
+// Scans an argv-style array for `--channel <name>` / `--channel=<name>`.
+// Defaults to stable; unknown values throw so a typo never ships to prod.
+export function parseChannel(argv = process.argv) {
+  const args = Array.isArray(argv) ? argv : [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--channel") {
+      const value = args[i + 1];
+      if (typeof value !== "string" || value.startsWith("--")) {
+        throw new Error(`--channel needs a value: ${RELEASE_CHANNELS.join("|")}`);
+      }
+      if (!RELEASE_CHANNELS.includes(value)) {
+        throw new Error(
+          `unknown channel "${value}" — expected ${RELEASE_CHANNELS.join(" or ")}`
+        );
+      }
+      return value;
+    }
+    if (typeof arg === "string" && arg.startsWith("--channel=")) {
+      const value = arg.slice("--channel=".length);
+      if (!RELEASE_CHANNELS.includes(value)) {
+        throw new Error(
+          `unknown channel "${value}" — expected ${RELEASE_CHANNELS.join(" or ")}`
+        );
+      }
+      return value;
+    }
+  }
+  return "stable";
+}
+
+// Flag discipline: only (stable, final) and (rc, prerelease) may ship.
+export function assertReleaseFlags(channel, isPrerelease) {
+  if (!RELEASE_CHANNELS.includes(channel)) {
+    throw new Error(
+      `unknown channel "${channel}" — expected ${RELEASE_CHANNELS.join(" or ")}`
+    );
+  }
+  // WHY: a non-prerelease rc would be picked up by the stable `latest` feed.
+  if (channel === "rc" && !isPrerelease) {
+    throw new Error('rc releases must pass --prerelease (GitHub prerelease: true)');
+  }
+  if (channel === "stable" && isPrerelease) {
+    throw new Error('stable releases must not pass --prerelease');
+  }
+}
+
+// Channel-aware manifest filenames, shared with the CI matrix (T9).
+export function manifestFilenames(channel) {
+  if (channel === "rc") {
+    return { manifest: "oppa-update-manifest-rc.json", latest: "latest-rc.json" };
+  }
+  if (channel === "stable") {
+    return { manifest: "oppa-update-manifest.json", latest: "latest.json" };
+  }
+  throw new Error(
+    `unknown channel "${channel}" — expected ${RELEASE_CHANNELS.join(" or ")}`
+  );
+}
+
+// Accepts an optional leading `v` (Tauri does) on top of strict X.Y.Z.
+const LOOSE_SEMVER_RE = /^v?\d+\.\d+\.\d+$/;
+// RFC3339 timestamps as emitted by `new Date().toISOString()`.
+const RFC3339_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * Builds the Tauri updater plugin manifest (`latest.json`):
+ * `{version, notes?, pub_date?, platforms: {<target>: {url, signature}}}`.
+ * Pure passthrough over `platforms` (no hardcoded OS list) with validation —
+ * every entry needs a non-empty url+signature, version must be semver,
+ * pubDate must be RFC3339 or omitted.
+ */
+export function buildLatestJson({ version, pubDate, notes, platforms }) {
+  if (typeof version !== "string" || !LOOSE_SEMVER_RE.test(version)) {
+    throw new Error(
+      `Invalid version "${version}". Expected X.Y.Z semver (e.g. 0.2.3).`
+    );
+  }
+  if (platforms === null || typeof platforms !== "object" || Array.isArray(platforms)) {
+    throw new Error("platforms must be a record of <target> -> {url, signature}");
+  }
+  const shaped = {};
+  for (const [target, entry] of Object.entries(platforms)) {
+    const url = entry?.url;
+    const signature = entry?.signature;
+    if (typeof url !== "string" || url === "") {
+      throw new Error(`platform "${target}" is missing a non-empty url`);
+    }
+    // WHY: an empty signature ships an unverifiable update for that platform.
+    if (typeof signature !== "string" || signature === "") {
+      throw new Error(`platform "${target}" is missing a non-empty signature`);
+    }
+    shaped[target] = { url, signature };
+  }
+  const out = { version };
+  if (notes !== undefined) {
+    if (typeof notes !== "string") {
+      throw new Error("notes must be a string when provided");
+    }
+    out.notes = notes;
+  }
+  if (pubDate !== undefined && pubDate !== null && pubDate !== "") {
+    if (
+      typeof pubDate !== "string" ||
+      !RFC3339_RE.test(pubDate) ||
+      Number.isNaN(Date.parse(pubDate))
+    ) {
+      throw new Error(
+        `Invalid pub_date "${pubDate}". Expected RFC3339 (e.g. 2026-09-04T00:00:00Z).`
+      );
+    }
+    out.pub_date = pubDate;
+  }
+  out.platforms = shaped;
+  return out;
 }
 
 /**
@@ -447,10 +575,16 @@ export function writeManifest(version, installerFilename, signature = "") {
  * with `installer` and `manifestPath` as assets. Pure — exported so tests can
  * assert the args are an array (spaced --title/--notes values stay single
  * elements; a shell string-join would split them into phantom asset paths).
+ * `isPrerelease` appends `--prerelease` for rc releases.
  */
-export function buildGhReleaseArgs(version, installer, manifestPath) {
+export function buildGhReleaseArgs(
+  version,
+  installer,
+  manifestPath,
+  isPrerelease = false
+) {
   const tag = `v${version}`;
-  return [
+  const args = [
     "release",
     "create",
     tag,
@@ -463,6 +597,9 @@ export function buildGhReleaseArgs(version, installer, manifestPath) {
     "--notes",
     `Release ${version} of oppa.`,
   ];
+  // WHY: rc must be prerelease:true or the stable `latest` feed picks it up.
+  if (isPrerelease) args.push("--prerelease");
+  return args;
 }
 
 /**
@@ -490,10 +627,10 @@ export function spawnChecked(command, args, errorPrefix, spawnFn = spawn) {
   });
 }
 
-function createGitHubRelease(version, installer, manifestPath) {
+function createGitHubRelease(version, installer, manifestPath, isPrerelease = false) {
   return spawnChecked(
     "gh",
-    buildGhReleaseArgs(version, installer, manifestPath),
+    buildGhReleaseArgs(version, installer, manifestPath, isPrerelease),
     `failed to create GitHub release v${version}`
   );
 }
@@ -501,6 +638,9 @@ function createGitHubRelease(version, installer, manifestPath) {
 async function main() {
   try {
     checkGh();
+    const channel = parseChannel(process.argv);
+    const isPrerelease = process.argv.includes("--prerelease");
+    assertReleaseFlags(channel, isPrerelease);
     const currentVersion = readVersions().packageJson;
     console.log(`oppa release — current version ${currentVersion}`);
     const nextVersion = await promptVersion(currentVersion);
@@ -510,9 +650,12 @@ async function main() {
     console.log("Build succeeded.");
 
     const installer = findInstaller(PROJECT_ROOT, nextVersion);
+    const { manifest: manifestFilename } = manifestFilenames(channel);
     const { manifestPath, manifest } = writeManifest(
       nextVersion,
-      basename(installer)
+      basename(installer),
+      "",
+      manifestFilename
     );
     console.log(`Installer:   ${installer}`);
     console.log(`Manifest:    ${JSON.stringify(manifest)}`);
@@ -521,13 +664,13 @@ async function main() {
     if (process.argv.includes("--dry-run")) {
       // Print-only path: show the exact gh invocation without spawning.
       console.log(
-        ["gh", ...buildGhReleaseArgs(nextVersion, installer, manifestPath)].join(" ")
+        ["gh", ...buildGhReleaseArgs(nextVersion, installer, manifestPath, isPrerelease)].join(" ")
       );
     } else {
       // WHY-only: an empty signature ships an unverifiable update.
       if (!manifest.signature)
         console.warn("Manifest is unsigned: clients cannot verify this update.");
-      await createGitHubRelease(nextVersion, installer, manifestPath);
+      await createGitHubRelease(nextVersion, installer, manifestPath, isPrerelease);
     }
 
     console.log(`\nReleased oppa ${nextVersion}:`);
