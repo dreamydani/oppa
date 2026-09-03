@@ -47,6 +47,18 @@ function setDismissedUpdateVersion(version: string | null) {
   });
 }
 
+function setAutoCheckUpdates(value: boolean) {
+  useTerminalStore.setState({
+    settings: {
+      ...useTerminalStore.getState().settings,
+      general: {
+        ...useTerminalStore.getState().settings.general,
+        autoCheckUpdates: value,
+      },
+    },
+  });
+}
+
 describe("StatusBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -214,6 +226,7 @@ describe("StatusBar update segment", () => {
     checkForNativeUpdateMock.mockResolvedValue(null);
     checkForUpdateMock.mockResolvedValue(null);
     setDismissedUpdateVersion(null);
+    setAutoCheckUpdates(true);
   });
 
   afterEach(() => {
@@ -265,6 +278,26 @@ describe("StatusBar update segment", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("update-segment")).toBeNull(),
     );
+  });
+
+  it("skips its mount check when autoCheckUpdates is off, but event sync still works", async () => {
+    setAutoCheckUpdates(false);
+    checkForNativeUpdateMock.mockResolvedValue({
+      version: "0.3.0",
+      currentVersion: "0.2.3",
+    });
+    render(<StatusBar />);
+    await act(async () => {});
+
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("update-segment")).toBeNull();
+
+    // Event sync stays ungated: the card's announcement still shows the dot.
+    announceUpdate("0.3.0");
+    expect(await screen.findByTestId("update-segment")).toBeInTheDocument();
+
+    setAutoCheckUpdates(true);
   });
 
   it("click runs a manual Check-now for the card", async () => {

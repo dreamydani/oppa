@@ -125,7 +125,13 @@ export function UpdateBanner() {
     console.debug(
       `[updater] channel=${getChannel() ?? "unresolved"} engine=${result.engine} available=${available} version=${version}`,
     );
-    if (!available) return true;
+    if (!available) {
+      // Resolved negative: clear any stale card (e.g. a re-check after the
+      // release was pulled) instead of leaving the old offer up.
+      setPhase(null);
+      emitAvailability(null, null);
+      return true;
+    }
     if (useTerminalStore.getState().settings.general.dismissedUpdateVersion === version) {
       setPhase(null);
       emitAvailability(null, null);
@@ -240,6 +246,7 @@ export function UpdateBanner() {
     setError(null);
     setErrorOrigin(null);
     setPhase("downloading");
+    // Pending keeps the dot: no availability emit until downloaded or error.
     setProgress({ downloaded: 0 });
     const onProgress: NativeProgressCallback = (downloaded, total) => {
       if (mountedRef.current) setProgress({ downloaded, total });
@@ -258,6 +265,8 @@ export function UpdateBanner() {
       setPhase("downloaded");
       emitAvailability(native.version, "downloaded");
     } else {
+      // Error card itself is visible; clear the dot to avoid double-signaling.
+      emitAvailability(null, null);
       setError(result.error);
       setErrorOrigin("download");
       setPhase("error");
@@ -274,6 +283,8 @@ export function UpdateBanner() {
       setBusySessionCount(outcome.sessionCount);
       return;
     }
+    // Error card itself is visible; clear the dot to avoid double-signaling.
+    emitAvailability(null, null);
     setError(outcome.error);
     setErrorOrigin("install");
     setPhase("error");

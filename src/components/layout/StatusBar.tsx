@@ -94,19 +94,22 @@ function UpdateSegment(): React.ReactElement | null {
 
   useEffect(() => {
     let cancelled = false;
-    // Own silent check on mount (fail-silent like the card).
-    void checkForNativeUpdate()
-      .then((native) => {
-        if (cancelled) return;
-        if (native) {
-          setUpdateVersion(native.version);
-          return;
-        }
-        return checkForUpdate().then((legacy) => {
-          if (!cancelled && legacy?.available) setUpdateVersion(legacy.version);
-        });
-      })
-      .catch(() => {});
+    // Own silent check on mount (fail-silent like the card), gated on the
+    // auto-check opt-out. Event sync below + manual click stay ungated.
+    if (useTerminalStore.getState().settings.general.autoCheckUpdates !== false) {
+      void checkForNativeUpdate()
+        .then((native) => {
+          if (cancelled) return;
+          if (native) {
+            setUpdateVersion(native.version);
+            return;
+          }
+          return checkForUpdate().then((legacy) => {
+            if (!cancelled && legacy?.available) setUpdateVersion(legacy.version);
+          });
+        })
+        .catch(() => {});
+    }
     const onAvailability = (event: Event) => {
       if (cancelled) return;
       setUpdateVersion((event as CustomEvent<UpdateAvailabilityDetail>).detail.version);

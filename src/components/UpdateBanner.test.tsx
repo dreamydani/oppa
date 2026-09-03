@@ -3,6 +3,8 @@ import { act, render, screen, waitFor, fireEvent } from "@testing-library/react"
 import {
   UpdateBanner,
   MANUAL_UPDATE_CHECK_EVENT,
+  UPDATE_AVAILABILITY_EVENT,
+  type UpdateAvailabilityDetail,
 } from "./UpdateBanner";
 import * as updater from "../lib/updater";
 import type {
@@ -76,6 +78,14 @@ function dispatchManualCheck() {
   act(() => {
     window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
   });
+}
+
+function clearedAvailabilityCount(spy: { mock: { calls: unknown[][] } }) {
+  return spy.mock.calls.filter(([event]) => {
+    if (!(event instanceof CustomEvent)) return false;
+    if (event.type !== UPDATE_AVAILABILITY_EVENT) return false;
+    return (event as CustomEvent<UpdateAvailabilityDetail>).detail.version === null;
+  }).length;
 }
 
 beforeEach(() => {
@@ -580,7 +590,7 @@ describe("UpdateBanner", () => {
     expect(getDismissed()).toBe("0.3.0");
   });
 
-  it("manual Check-now bypasses the 6h floor but stays channel-gated via the seam", async () => {
+  it("manual Check-now bypasses the 6h floor", async () => {
     setLastCheckAt(Date.now());
     checkForNativeUpdateMock.mockResolvedValue(null);
     checkForUpdateMock.mockResolvedValue(null);
@@ -616,5 +626,80 @@ describe("UpdateBanner", () => {
     dispatchManualCheck();
     expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
     expect(checkForNativeUpdateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("Later hides the downloaded card without dismissing; the next check re-offers", async () => {
+    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(<UpdateBanner />);
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    await screen.findByRole("button", { name: "Restart now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    expect(screen.queryByTestId("update-banner")).toBeNull();
+    expect(getDismissed()).toBeNull();
+    // The segment clears through the availability contract.
+    expect(clearedAvailabilityCount(dispatchSpy)).toBeGreaterThan(0);
+
+    // No dismissal persisted, so the next check offers the update again.
+    dispatchManualCheck();
+    expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
+  });
+
+  it("clears a stale card when a re-check resolves legacy available:false", async () => {
+    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(<UpdateBanner />);
+    await screen.findByRole("button", { name: "Download now" });
+
+    checkForNativeUpdateMock.mockResolvedValue(null);
+    checkForUpdateMock.mockResolvedValue({ ...AVAILABLE, available: false });
+    dispatchManualCheck();
+
+    await waitFor(() => expect(screen.queryByTestId("update-banner")).toBeNull());
+    expect(clearedAvailabilityCount(dispatchSpy)).toBeGreaterThan(0);
+  });
+
+  it("keeps the segment dot during downloading; clears it on error", async () => {
+    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
+    let resolveDownload!: (value: NativeDownloadResult) => void;
+    downloadNativeUpdateMock.mockImplementation(
+      () => new Promise<NativeDownloadResult>((resolve) => { resolveDownload = resolve; }),
+    );
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(<UpdateBanner />);
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    await screen.findByRole("progressbar");
+    // Download pending: no cleared availability — the dot stays.
+    const clearedBefore = clearedAvailabilityCount(dispatchSpy);
+    expect(screen.getByTestId("update-banner")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveDownload({ ok: false, error: "boom" });
+    });
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
+    // The error card itself is visible; the dot clears to avoid double-signaling.
+    expect(clearedAvailabilityCount(dispatchSpy)).toBeGreaterThan(clearedBefore);
+  });
+
+  it("keeps the segment dot while opening the legacy browser download", async () => {
+    checkForNativeUpdateMock.mockResolvedValue(null);
+    checkForUpdateMock.mockResolvedValue(AVAILABLE);
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(<UpdateBanner />);
+    await screen.findByText(/A new version of OPPA is available/);
+    const clearedBefore = clearedAvailabilityCount(dispatchSpy);
+
+    act(() => {
+      screen.getByRole("button", { name: "Update now" }).click();
+    });
+    await waitFor(() =>
+      expect(openUrlMock).toHaveBeenCalledWith("https://example.com/oppa-0.2.0.exe"),
+    );
+    expect(clearedAvailabilityCount(dispatchSpy)).toBe(clearedBefore);
   });
 });
