@@ -5,7 +5,8 @@ import { getChannel } from "../lib/channel";
 import { useTerminalStore } from "../store/terminalStore";
 
 // Floor between banner-driven re-checks so repeated window focus can't poll
-// the manifest; the one-shot recovery check after an empty mount is exempt.
+// the manifest; empty checks never stamp, so first recovery isn't suppressed;
+// resolved checks throttle later focus checks at 6h.
 const RECHECK_FLOOR_MS = 6 * 60 * 60 * 1000;
 
 // "Update now / Not now" banner shown at stable startup when a newer version
@@ -70,10 +71,10 @@ export function UpdateBanner() {
       // rejection from the re-check.
       void checkForUpdate()
         .then((result) => {
-          finish(result, true);
+          finish(result, result != null);
           if (result && !cancelled) window.removeEventListener("focus", onFocus);
         })
-        .catch(() => finish(null, true));
+        .catch(() => finish(null, false));
     };
     // The seam resolves null on failure, but guard the rejection anyway: a
     // future rewire or a different transport must never surface an unhandled

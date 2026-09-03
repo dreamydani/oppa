@@ -282,8 +282,30 @@ describe("UpdateBanner", () => {
     expect(checkForUpdateMock).toHaveBeenCalledTimes(2);
   });
 
-  it("skips the focus re-check within 6h of the last check", async () => {
-    useTerminalStore.setState({
+  it("retries on the next focus when the focus re-check was also empty", async () => {
+    checkForUpdateMock.mockResolvedValueOnce(null);
+    checkForUpdateMock.mockResolvedValueOnce(null);
+    checkForUpdateMock.mockResolvedValueOnce(AVAILABLE);
+    render(<UpdateBanner />);
+    await act(async () => {});
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {});
+    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
+    // The empty focus check stamped nothing, so recovery is not suppressed.
+    expect(useTerminalStore.getState().settings.general.lastCheckAt).toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
+    expect(checkForUpdateMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips the focus re-check within 6h of the last check", async () => {    useTerminalStore.setState({
       settings: {
         ...useTerminalStore.getState().settings,
         general: { ...useTerminalStore.getState().settings.general, lastCheckAt: Date.now() },
