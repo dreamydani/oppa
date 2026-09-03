@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { checkForUpdate, probeUpgradeSafety, type UpdateInfo } from "../lib/updater";
+import { getChannel } from "../lib/channel";
 import { useTerminalStore } from "../store/terminalStore";
+
+// Floor between banner-driven re-checks so repeated window focus can't poll
+// the manifest; the one-shot recovery check after an empty mount is exempt.
+const RECHECK_FLOOR_MS = 6 * 60 * 60 * 1000;
 
 // "Update now / Not now" banner shown at stable startup when a newer version
 // is available. Mirrors GlobalFailureBanner's fixed bottom-centered bar.
@@ -38,24 +43,55 @@ export function UpdateBanner() {
   );
   const updateSettings = useTerminalStore((s) => s.updateSettings);
 
-  // Check once on mount. checkForUpdate already gates on the channel (dev /
-  // unresolved → null, never invokes) and resolves to null on any failure
-  // (offline, 404, bad JSON), so the banner simply never appears in those
-  // cases and the app works fine offline.
+  // Check once on mount. checkForUpdate already gates on the channel (dev →
+  // null, never invokes) and resolves to null on any failure (offline, 404,
+  // bad JSON), so the banner simply never appears in those cases and the app
+  // works fine offline. An empty mount (the startup race: the channel cache
+  // was still null) arms a one-shot focus listener as recovery; it is
+  // removed on info or unmount.
   useEffect(() => {
     let cancelled = false;
+    // One debug line per check outcome so a missing card is diagnosable.
+    const finish = (result: UpdateInfo | null, recordCheck: boolean) => {
+      if (cancelled) return;
+      setInfo(result);
+      if (recordCheck) {
+        updateSettings({ general: { lastCheckAt: Date.now() } });
+      }
+      console.debug(
+        `[updater] channel=${getChannel() ?? "unresolved"} available=${result?.available ?? false} version=${result?.version ?? "none"}`,
+      );
+    };
+    const onFocus = () => {
+      const lastCheckAt = useTerminalStore.getState().settings.general.lastCheckAt;
+      if (lastCheckAt != null && Date.now() - lastCheckAt < RECHECK_FLOOR_MS) return;
+      // The seam resolves null on failure, but guard the rejection anyway: a
+      // future rewire or a different transport must never surface an unhandled
+      // rejection from the re-check.
+      void checkForUpdate()
+        .then((result) => {
+          finish(result, true);
+          if (result && !cancelled) window.removeEventListener("focus", onFocus);
+        })
+        .catch(() => finish(null, true));
+    };
     // The seam resolves null on failure, but guard the rejection anyway: a
     // future rewire or a different transport must never surface an unhandled
     // rejection from the mount check.
     void checkForUpdate()
       .then((result) => {
-        if (!cancelled) setInfo(result);
+        // Only a resolving check counts toward the floor; an empty mount must
+        // not suppress the focus recovery check.
+        finish(result, result != null);
+        if (!cancelled && !result) window.addEventListener("focus", onFocus);
       })
       .catch(() => {
-        if (!cancelled) setInfo(null);
+        finish(null, false);
+        if (!cancelled) window.addEventListener("focus", onFocus);
       });
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 

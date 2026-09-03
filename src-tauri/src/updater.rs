@@ -218,6 +218,20 @@ mod tests {
     }
 
     #[test]
+    fn manifest_parses_three_field_shape_with_signature() {
+        // Forward-compat pin: a future manifest may carry a `signature`
+        // alongside version/download; the custom-shape parse must tolerate it.
+        let json = r#"{
+            "version": "0.2.3",
+            "download": "https://github.com/dreamydani/oppa/releases/download/v0.2.3/oppa_0.2.3_x64-setup.exe",
+            "signature": "RWQfakeSignatureBase64=="
+        }"#;
+        let parsed: UpdateManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.version, "0.2.3");
+        assert!(parsed.download.starts_with("https://github.com/dreamydani/oppa/releases/download/"));
+    }
+
+    #[test]
     fn manifest_parses_the_task_three_shape() {
         let json = r#"{
             "version": "0.2.0",

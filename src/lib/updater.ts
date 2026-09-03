@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getChannel } from "./channel";
+import { getChannel, resolveChannel } from "./channel";
 
 export interface UpdateInfo {
   version: string;
@@ -33,12 +33,15 @@ export interface UpgradeSafetyProbe {
 // Frontend seam for Task 5's "Update now / Not now" banner.
 //
 // The dev build NEVER checks for updates (confirmed user requirement): this
-// seam gates on the resolved build channel and short-circuits to null on dev
-// or when the channel is still unresolved, exactly like the Rust side does.
-// Any backend failure (offline, 404, bad JSON) also resolves to null — the
-// update check must never break the app.
+// seam short-circuits to null on dev. An empty channel cache self-resolves
+// instead of suppressing the check — callers may run before
+// applyChannelIdentity finishes. Any backend failure (offline, 404, bad
+// JSON) also resolves to null — the update check must never break the app.
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
-  if (getChannel() !== "stable") {
+  // Callers may run before applyChannelIdentity finishes; a null cache
+  // must not permanently suppress the check.
+  const channel = getChannel() ?? (await resolveChannel().catch(() => null));
+  if (channel !== "stable") {
     return null;
   }
   try {

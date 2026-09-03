@@ -37,7 +37,24 @@ describe("updater seam", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("check_for_update");
   });
 
-  it("returns null when the channel is unresolved", async () => {
+  it("resolves an uncached channel and returns the payload on stable", async () => {
+    invokeMock.mockResolvedValueOnce("stable");
+    invokeMock.mockResolvedValueOnce({ version: "0.2.3", download: "https://example.com/i.msi", available: true });
+    const result = await checkForUpdate();
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "app_channel");
+    expect(invokeMock).toHaveBeenCalledWith("check_for_update");
+    expect(result?.available).toBe(true);
+  });
+
+  it("returns null without check_for_update when the uncached channel is dev", async () => {
+    invokeMock.mockResolvedValueOnce("dev");
+    const result = await checkForUpdate();
+    expect(result).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("check_for_update");
+  });
+
+  it("returns null without check_for_update when the uncached channel rejects", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("no tauri"));
     const result = await checkForUpdate();
     expect(result).toBeNull();
     expect(invokeMock).not.toHaveBeenCalledWith("check_for_update");

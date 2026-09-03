@@ -49,6 +49,14 @@ beforeEach(() => {
   // the component's `.catch` chain to work.
   openUrlMock.mockResolvedValue(undefined);
   setDismissed(null);
+  // lastCheckAt persists in the store across tests; reset so each test starts
+  // with no recorded check (the 6h-floor test sets its own value).
+  useTerminalStore.setState({
+    settings: {
+      ...useTerminalStore.getState().settings,
+      general: { ...useTerminalStore.getState().settings.general, lastCheckAt: null },
+    },
+  });
 });
 
 afterEach(() => {
@@ -257,5 +265,40 @@ describe("UpdateBanner", () => {
     await waitFor(() =>
       expect(openUrlMock).toHaveBeenCalledWith("https://example.com/oppa-0.2.0.exe"),
     );
+  });
+
+  it("re-checks once on focus when the mount check was empty", async () => {
+    checkForUpdateMock.mockResolvedValueOnce(null);
+    checkForUpdateMock.mockResolvedValueOnce(AVAILABLE);
+    render(<UpdateBanner />);
+    await act(async () => {});
+    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
+    expect(checkForUpdateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the focus re-check within 6h of the last check", async () => {
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        general: { ...useTerminalStore.getState().settings.general, lastCheckAt: Date.now() },
+      },
+    });
+    checkForUpdateMock.mockResolvedValue(null);
+    render(<UpdateBanner />);
+    await act(async () => {});
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {});
+
+    expect(checkForUpdateMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
   });
 });

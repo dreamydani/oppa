@@ -58,6 +58,9 @@ export interface GeneralSettings {
   // banner shows again only when a NEWER version becomes available. `null`
   // (or absent, for old saves) means never dismissed.
   dismissedUpdateVersion: string | null;
+  // Epoch-ms of the last update check that resolved; focus re-checks skip
+  // when this is fresher than the 6h floor. `null` means never checked.
+  lastCheckAt: number | null;
 }
 
 export interface AppSettings {
@@ -96,6 +99,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     browserHomePage: "https://duckduckgo.com",
     autoResumeAgents: true,
     dismissedUpdateVersion: null,
+    lastCheckAt: null,
   },
   appearance: DEFAULT_APPEARANCE_SETTINGS,
 };
