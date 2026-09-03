@@ -86,6 +86,8 @@ impl DaemonServer {
                     }
                     // A previous client may have disconnected without ACKing;
                     // clear the balance so the reader is never parked forever.
+                    // Only the ack counter resets (and the gate opens): queued
+                    // batcher bytes are preserved for the new client.
                     let _ = session.reset_pending();
                     let snapshot = session.get_snapshot();
                     DaemonResponse::SessionAttached(CreateOrAttachResult {
@@ -188,6 +190,9 @@ impl DaemonServer {
                 cols,
                 rows,
             } => {
+                if cols == 0 || rows == 0 {
+                    return DaemonResponse::Error("cols and rows must be > 0".to_string());
+                }
                 let session = self.sessions.lock().get(&session_id).cloned();
                 if let Some(session) = session {
                     match session.resize(cols, rows) {
@@ -210,8 +215,17 @@ impl DaemonServer {
                 }
             }
             DaemonRequest::Kill { session_id } => {
-                let mut sessions = self.sessions.lock();
-                if let Some(session) = sessions.remove(&session_id) {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                if let Some(session) = session {
+                    // Orderly teardown: subscribers observe Exit before the id
+                    // vanishes, so listeners never hang on a silent removal.
+                    // The watchdog's later Exit (with the real code) is a
+                    // harmless duplicate; clients treat Exit idempotently.
+                    session.publish_event(DaemonEvent::Exit {
+                        session_id: session_id.clone(),
+                        code: session.exit_code(),
+                    });
+                    self.sessions.lock().remove(&session_id);
                     let _ = session.kill();
                     DaemonResponse::Ok
                 } else {
@@ -914,6 +928,51 @@ mod tests {
         );
         assert_eq!(
             server.handle_request(DaemonRequest::UpgradeIfIdle),
+            DaemonResponse::Ok
+        );
+    }
+
+    #[test]
+    fn resize_zero_is_rejected() {
+        let server = DaemonServer::new();
+        let session_id = "resize-zero-test";
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: session_id.into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        });
+        assert!(
+            matches!(resp, DaemonResponse::SessionAttached(_)),
+            "setup spawn failed: {resp:?}"
+        );
+        let session = server
+            .sessions
+            .lock()
+            .get(session_id)
+            .cloned()
+            .expect("session registered");
+        match server.handle_request(DaemonRequest::Resize {
+            session_id: session_id.into(),
+            cols: 0,
+            rows: 0,
+        }) {
+            DaemonResponse::Error(e) => {
+                assert!(e.contains("cols and rows must be > 0"), "got: {e}")
+            }
+            other => panic!("zero resize must be rejected, got {other:?}"),
+        }
+        // A rejected resize must never touch the live size.
+        assert_eq!(session.cols(), 80);
+        assert_eq!(session.rows(), 24);
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: session_id.into()
+            }),
             DaemonResponse::Ok
         );
     }

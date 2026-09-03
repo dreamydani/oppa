@@ -89,6 +89,21 @@ fn emit_event(
     subs.retain(|tx| tx.send(std::sync::Arc::clone(&shared)).is_ok());
 }
 
+// Split-safe ready-marker scan: `tail` carries the last marker_len-1
+// bytes across reads so a marker straddling two chunks still matches.
+fn feed_ready_marker(tail: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    let mut windowed = Vec::with_capacity(tail.len() + chunk.len());
+    windowed.extend_from_slice(tail);
+    windowed.extend_from_slice(chunk);
+    let found = windowed
+        .windows(READY_MARKER_BYTES.len())
+        .any(|w| w == READY_MARKER_BYTES);
+    tail.clear();
+    let start = windowed.len().saturating_sub(READY_MARKER_BYTES.len() - 1);
+    tail.extend_from_slice(&windowed[start..]);
+    found
+}
+
 impl DaemonSession {
     /// Spawn a new shell session using standard shell resolution.
     pub fn spawn(
@@ -318,6 +333,7 @@ impl DaemonSession {
             let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
+            let mut marker_tail: Vec<u8> = Vec::new();
             loop {
                 if paused.wait_while_paused(POLL_INTERVAL) {
                     // Timed out still paused. ack() normally releases us via
@@ -345,9 +361,7 @@ impl DaemonSession {
 
                         // Ready-marker detection; stop scanning once found
                         if !ready_seen.load(Ordering::SeqCst)
-                            && chunk
-                                .windows(READY_MARKER_BYTES.len())
-                                .any(|w| w == READY_MARKER_BYTES)
+                            && feed_ready_marker(&mut marker_tail, chunk)
                         {
                             ready_seen.store(true, Ordering::SeqCst);
                         }
@@ -525,7 +539,10 @@ impl DaemonSession {
         {
             if self.pid > 0 {
                 unsafe {
-                    libc::killpg(self.pid as i32, libc::SIGKILL);
+                    // Prefer process group, fall back to pid on ESRCH.
+                    if libc::killpg(self.pid as i32, libc::SIGKILL) != 0 {
+                        let _ = libc::kill(self.pid as i32, libc::SIGKILL);
+                    }
                 }
             }
         }
@@ -1299,6 +1316,69 @@ mod tests {
             "checkpoint must carry the session title for warm/cold restore"
         );
         let _ = session.kill();
+    }
+
+    #[test]
+    fn ready_marker_split_across_chunks_is_detected() {
+        let mid = READY_MARKER_BYTES.len() / 2;
+        let mut tail = Vec::new();
+        // First half alone must not match...
+        assert!(!feed_ready_marker(&mut tail, &READY_MARKER_BYTES[..mid]));
+        // ...but the second half completes the straddled marker.
+        assert!(feed_ready_marker(&mut tail, &READY_MARKER_BYTES[mid..]));
+        // Whole marker in one chunk still matches; noise never does.
+        assert!(feed_ready_marker(&mut Vec::new(), READY_MARKER_BYTES));
+        assert!(!feed_ready_marker(&mut Vec::new(), b"hello"));
+    }
+
+    #[tokio::test]
+    async fn kill_emits_exit_before_session_removed() {
+        use crate::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
+        let server = DaemonServer::new();
+        let sh = test_sh_path();
+        let session_id = "kill-order-test";
+        let session = DaemonSession::spawn_with_args(
+            session_id.into(),
+            &sh,
+            &["-c".into(), "exit 3".into()],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn exiting shell");
+        // Let the child exit and the watchdog fire so only Kill can emit next.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.exit_code().is_none() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(session.exit_code().is_some(), "child must exit on its own");
+        server
+            .sessions
+            .lock()
+            .insert(session_id.to_string(), Arc::clone(&session));
+        let mut rx = session.subscribe();
+        // Drain seed SessionWorking + any stale watchdog Exit, then quiet.
+        let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        while rx.try_recv().is_ok() {}
+        // Kill must synchronously publish Exit before removing the map entry.
+        let resp = server.handle_request(DaemonRequest::Kill {
+            session_id: session_id.into(),
+        });
+        assert_eq!(resp, DaemonResponse::Ok);
+        assert!(
+            !server.sessions.lock().contains_key(session_id),
+            "map entry must vanish on Kill"
+        );
+        match rx.try_recv() {
+            Ok(event) => match &*event {
+                DaemonEvent::Exit { session_id: eid, .. } => assert_eq!(eid, session_id),
+                other => panic!("expected Exit synchronously on Kill, got {other:?}"),
+            },
+            Err(_) => panic!("Kill must synchronously emit Exit before the map entry vanishes"),
+        }
     }
 
     #[tokio::test]
