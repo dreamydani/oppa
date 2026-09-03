@@ -6,7 +6,6 @@ import {
   ptyWrite,
   ptyResize,
   ptyKill,
-  ptyAck,
   ptyList,
   onPtyData,
   onPtyExit,
