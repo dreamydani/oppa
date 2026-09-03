@@ -377,17 +377,23 @@ export function collectInstallers(dir) {
   found.sort((a, b) => {
     const byRank = rank(a) - rank(b);
     if (byRank !== 0) return byRank;
-    let aTime;
+    // Null sentinel on throw: a vanished entry sorts last, never throws.
+    let aTime = null;
     try {
       aTime = statSync(a).mtimeMs;
     } catch {
-      return 1; // a vanished mid-scan — sort it last, never throw
+      aTime = null;
     }
+    let bTime = null;
     try {
-      return statSync(b).mtimeMs - aTime;
+      bTime = statSync(b).mtimeMs;
     } catch {
-      return -1; // b vanished mid-scan — sort it last, never throw
+      bTime = null;
     }
+    if (aTime === null && bTime === null) return 0;
+    if (aTime === null) return 1;
+    if (bTime === null) return -1;
+    return bTime - aTime;
   });
   return found;
 }
@@ -409,7 +415,14 @@ export function findInstaller(projectRoot, version, arch = process.arch) {
   const versioned = version
     ? installers.filter((f) => basename(f).includes(version))
     : installers;
-  const pool = versioned.length > 0 ? versioned : installers;
+  // Strict version match: a requested version with no installer is an error,
+  // never a silent fallback to an unrelated build.
+  if (version && versioned.length === 0) {
+    throw new Error(
+      `no installer matching version ${version} under ${bundleDir}`
+    );
+  }
+  const pool = versioned;
   const archFiltered = pool.filter(
     (f) =>
       basename(f).includes(arch) || !/x64|arm64|aarch64/.test(basename(f))
@@ -511,6 +524,9 @@ async function main() {
         ["gh", ...buildGhReleaseArgs(nextVersion, installer, manifestPath)].join(" ")
       );
     } else {
+      // WHY-only: an empty signature ships an unverifiable update.
+      if (!manifest.signature)
+        console.warn("Manifest is unsigned: clients cannot verify this update.");
       await createGitHubRelease(nextVersion, installer, manifestPath);
     }
 

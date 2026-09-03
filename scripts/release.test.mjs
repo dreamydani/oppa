@@ -497,6 +497,23 @@ describe("findInstaller version-aware pick", () => {
       "oppa-0.2.2.msi"
     );
   });
+
+  it("throws when the version matches no installer instead of falling back", async () => {
+    const tmp = await makeTempDir("oppa-find-");
+    const { fs, path } = tmp;
+    const bundleDir = path.join(
+      tmp.dir,
+      "src-tauri",
+      "target",
+      "release",
+      "bundle"
+    );
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, "oppa-0.2.1.msi"), "other");
+    expect(() => findInstaller(tmp.dir, "0.2.2", "x64")).toThrow(
+      "no installer matching version 0.2.2"
+    );
+  });
 });
 
 describe("collectInstallers race tolerance", () => {

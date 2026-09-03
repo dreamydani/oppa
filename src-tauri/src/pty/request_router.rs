@@ -237,6 +237,8 @@ impl DaemonServer {
                             code: Some(code),
                         });
                     }
+                    // Kill is fire-and-forget for Exit delivery: the watchdog owns
+                    // the real-code Exit, so callers must not wait on Exit after Kill.
                     let _ = session.kill();
                     DaemonResponse::Ok
                 } else {

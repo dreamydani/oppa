@@ -571,7 +571,7 @@ describe("TerminalPane", () => {
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 13);
   });
 
-  it("acks pending bytes to the live session id, not a stale closure id", async () => {
+  it("flushes pending ack bytes to the owning session across an id change", async () => {
     const { rerender } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
