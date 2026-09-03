@@ -1,9 +1,11 @@
+use oppa_lib::agents::status::{AgentStatusEntry, AgentStatusState, StatusOrigin};
 use oppa_lib::git::hosted_reviews::{GhClient, PrStatus};
 use oppa_lib::git::worktree_registry::{
     worktree_record_id, WorktreeRecord, WorktreeRegistry, WorktreeStatus,
 };
 use oppa_lib::pty::daemon_client::DaemonClient;
 use oppa_lib::pty::daemon_server::{CancellationToken, DaemonServer};
+use oppa_lib::pty::snapshot::{AgentSessionRef, SessionSnapshot, SnapshotStorage};
 use std::collections::HashMap;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
@@ -1623,4 +1625,422 @@ fn test_e2e_daemon_agent_status_hook_lifecycle_over_http() {
     );
 
     let _ = session.kill();
+}
+
+// ---------- Task 8: session-safe restart verification (update-restart shape) ----------
+
+// Update restarts drop every GUI client while the daemon lives on. These
+// tests prove sessions survive that shape. They extend (not duplicate)
+// test_e2e_daemon_warm_reattach_and_snapshot, which covers only a
+// single-client handoff with no continuity, ack, or cold-restore assertions.
+
+// Highest TICK_<n> counter value visible in captured output.
+fn max_tick_in(output: &str) -> Option<u64> {
+    let mut max: Option<u64> = None;
+    for (idx, _) in output.match_indices("TICK_") {
+        let digits: String = output[idx + "TICK_".len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digits.parse::<u64>() {
+            max = Some(max.map_or(n, |m| m.max(n)));
+        }
+    }
+    max
+}
+
+#[test]
+fn test_e2e_update_restart_full_client_drop_keeps_session_alive() {
+    let socket_path = generate_test_socket_path("update_restart");
+    let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
+    let session_id = "e2e-update-restart-session";
+
+    // GUI before the update: spawn a session with a shell counter proving liveness.
+    let client1 = DaemonClient::connect(&socket_path).expect("connect pre-restart client");
+    let (data_tx1, data_rx1) = channel::<String>();
+    client1.register_callbacks(
+        session_id,
+        Some(Box::new(move |_id, bytes| {
+            let _ = data_tx1.send(String::from_utf8_lossy(bytes).into_owned());
+        })),
+        None,
+        None,
+    );
+    let attach1 = client1
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
+        .expect("pre-restart create_or_attach failed");
+    assert!(attach1.is_new);
+
+    #[cfg(target_os = "windows")]
+    client1
+        .write(
+            session_id,
+            "$i=0; while($true){$i++; Write-Output \"TICK_$i\"; Start-Sleep -Seconds 1}\r\n",
+        )
+        .expect("start counter failed");
+
+    #[cfg(not(target_os = "windows"))]
+    client1
+        .write(
+            session_id,
+            "i=0; while true; do i=$((i+1)); echo TICK_$i; sleep 1; done\n",
+        )
+        .expect("start counter failed");
+
+    // Output must be flowing before the drop.
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    let mut pre_output = String::new();
+    while std::time::Instant::now() < deadline {
+        if let Ok(chunk) = data_rx1.recv_timeout(Duration::from_millis(200)) {
+            pre_output.push_str(&chunk);
+            if max_tick_in(&pre_output).is_some_and(|n| n >= 2) {
+                break;
+            }
+        }
+    }
+    let pre_max =
+        max_tick_in(&pre_output).expect("counter must tick before the client drop");
+
+    // The update-restart shape: EVERY client gone, daemon alive.
+    client1.disconnect().expect("pre-restart disconnect failed");
+    drop(client1);
+    drop(data_rx1);
+
+    // Post-update GUI: the session is still listed, reattaches warm, same child.
+    let client2 = DaemonClient::connect(&socket_path).expect("connect post-restart client");
+    let live = client2.list_sessions().expect("list_sessions failed");
+    assert!(
+        live.contains(&session_id.to_string()),
+        "daemon must retain the session across a full client drop, got: {live:?}"
+    );
+
+    let (data_tx2, data_rx2) = channel::<String>();
+    client2.register_callbacks(
+        session_id,
+        Some(Box::new(move |_id, bytes| {
+            let _ = data_tx2.send(String::from_utf8_lossy(bytes).into_owned());
+        })),
+        None,
+        None,
+    );
+    let attach2 = client2
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
+        .expect("post-restart reattach failed");
+    assert!(
+        !attach2.is_new,
+        "reattach after a full client drop must be warm"
+    );
+    assert_eq!(
+        attach2.pid, attach1.pid,
+        "warm reattach must keep the same child (no restart)"
+    );
+    let snapshot = attach2
+        .snapshot
+        .expect("warm reattach must carry an ANSI screen snapshot");
+    assert!(
+        snapshot.contains("TICK_"),
+        "snapshot must carry pre-drop output, got:\n{snapshot}"
+    );
+
+    // Continuity: the SAME shell counter keeps incrementing across the drop.
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    let mut post_output = String::new();
+    let mut post_max: Option<u64> = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(chunk) = data_rx2.recv_timeout(Duration::from_millis(200)) {
+            post_output.push_str(&chunk);
+            post_max = max_tick_in(&post_output).filter(|n| *n > pre_max);
+            if post_max.is_some() {
+                break;
+            }
+        }
+    }
+    assert!(
+        post_max.is_some_and(|n| n > pre_max),
+        "counter must keep incrementing across the drop (pre_max={pre_max}), got: {post_output}"
+    );
+
+    client2.kill(session_id).expect("kill session failed");
+    client2.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
+#[test]
+fn test_e2e_update_restart_ack_sane_across_reattach() {
+    let socket_path = generate_test_socket_path("update_ack");
+    let (_server, cancel_token, server_thread) = start_test_daemon(&socket_path);
+    let session_id = "e2e-update-restart-ack-session";
+
+    // Pre-restart GUI streams a flood it never acks (killed mid-render).
+    let client1 = DaemonClient::connect(&socket_path).expect("connect pre-restart client");
+    let (data_tx1, data_rx1) = channel::<String>();
+    client1.register_callbacks(
+        session_id,
+        Some(Box::new(move |_id, bytes| {
+            let _ = data_tx1.send(String::from_utf8_lossy(bytes).into_owned());
+        })),
+        None,
+        None,
+    );
+    let attach1 = client1
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
+        .expect("pre-restart create_or_attach failed");
+    assert!(attach1.is_new);
+
+    // ~300KB of fat lines with zero acks: the reader MUST park at the 256KB
+    // high watermark mid-flood (delivery stalls at ~256KB while the child
+    // blocks). Collect until that stall: substantial flow, then silence.
+    // (Thin 10000-line floods never park the reader, so they cannot wedge it.)
+    #[cfg(target_os = "windows")]
+    client1
+        .write(
+            session_id,
+            "1..600 | ForEach-Object { [Console]::WriteLine(\"FLOOD_$_\" + \"x\"*500) }\r\n",
+        )
+        .expect("flood write failed");
+
+    #[cfg(not(target_os = "windows"))]
+    client1
+        .write(
+            session_id,
+            "awk 'BEGIN { pad=sprintf(\"%500s\", \" \"); for (i=1; i<=600; i++) print \"FLOOD_\" i pad }'\n",
+        )
+        .expect("flood write failed");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    let mut flooded = String::new();
+    let mut last_receive = std::time::Instant::now();
+    while std::time::Instant::now() < deadline {
+        match data_rx1.recv_timeout(Duration::from_millis(200)) {
+            Ok(chunk) => {
+                flooded.push_str(&chunk);
+                last_receive = std::time::Instant::now();
+            }
+            Err(_) => {
+                if flooded.len() > 128 * 1024
+                    && last_receive.elapsed() > Duration::from_millis(1500)
+                {
+                    break; // parked: volume flowed, then silence
+                }
+            }
+        }
+    }
+    assert!(
+        flooded.len() > 128 * 1024,
+        "flood must engage the reader pre-drop ({} bytes received)",
+        flooded.len()
+    );
+
+    // Drop without acking anything, like a GUI killed mid-render.
+    client1.disconnect().expect("pre-restart disconnect failed");
+    drop(client1);
+    drop(data_rx1);
+
+    // Post-restart GUI: warm reattach, ack the snapshot, reader must not wedge.
+    let client2 = DaemonClient::connect(&socket_path).expect("connect post-restart client");
+    let (data_tx2, data_rx2) = channel::<String>();
+    client2.register_callbacks(
+        session_id,
+        Some(Box::new(move |_id, bytes| {
+            let _ = data_tx2.send(String::from_utf8_lossy(bytes).into_owned());
+        })),
+        None,
+        None,
+    );
+    let attach2 = client2
+        .create_or_attach(session_id, 80, 24, None, None, false, None)
+        .expect("post-restart reattach failed");
+    assert!(!attach2.is_new, "reattach must be warm");
+    let snapshot_len = attach2.snapshot.as_deref().map(str::len).unwrap_or(0);
+    client2
+        .ack(session_id, snapshot_len)
+        .expect("ack of snapshot bytes failed");
+
+    // Fresh output must still flow: the reader never wedged on stale pending.
+    #[cfg(target_os = "windows")]
+    client2
+        .write(session_id, "Write-Output \"ack_continuity_ok\"\r\n")
+        .expect("continuity write failed");
+
+    #[cfg(not(target_os = "windows"))]
+    client2
+        .write(session_id, "echo ack_continuity_ok\n")
+        .expect("continuity write failed");
+
+    // The parked reader must resume: the stuck flood tail unblocks AND fresh
+    // output flows after acking the snapshot. (A small post-reattach backlog
+    // drains first, so allow the file's max deadline.)
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut output = String::new();
+    while std::time::Instant::now() < deadline {
+        if let Ok(chunk) = data_rx2.recv_timeout(Duration::from_millis(200)) {
+            output.push_str(&chunk);
+            if output.contains("FLOOD_600") && output.contains("ack_continuity_ok") {
+                break;
+            }
+        }
+    }
+    assert!(
+        output.contains("FLOOD_600"),
+        "stuck flood tail must unblock after reattach + ack, got {} bytes",
+        output.len()
+    );
+    assert!(
+        output.contains("ack_continuity_ok"),
+        "post-reattach output must flow after acking the snapshot, got: {output}"
+    );
+
+    client2.kill(session_id).expect("kill session failed");
+    client2.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
+}
+
+fn restart_seed_status() -> AgentStatusEntry {
+    // Last hook-classified truth a checkpoint would carry across the restart.
+    AgentStatusEntry {
+        state: AgentStatusState::Working,
+        prompt: "refactor the login flow".into(),
+        agent_type: Some("claude".into()),
+        model: None,
+        tool_name: Some("Edit".into()),
+        tool_input: None,
+        interactive_prompt: None,
+        interrupted: None,
+        turn_completed_at_ms: None,
+        state_started_at_ms: 1724050000000,
+        updated_at_ms: 1724050001000,
+        origin: StatusOrigin::Hook,
+    }
+}
+
+#[test]
+fn test_update_restart_checkpoint_disk_roundtrip_preserves_restore_state() {
+    // Disk layer must preserve every field a cold restore rehydrates from.
+    let dir = tempfile::tempdir().expect("temp snapshot dir");
+    let storage = SnapshotStorage::new(dir.path().to_path_buf());
+    let seeded = SessionSnapshot {
+        session_id: "e2e-update-restart-cold".into(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        title: Some("release pane".into()),
+        cols: 100,
+        rows: 30,
+        persona_id: None,
+        scrollback: "TICK_41 mid-update screen".into(),
+        timestamp: 1724050000000,
+        foreground_command: None,
+        agent_session: Some(AgentSessionRef {
+            agent: "claude".into(),
+            id: "conv-1".into(),
+            transcript_path: None,
+        }),
+        worktree_id: Some("repo::C:/ws/feat-a".into()),
+        agent_status: Some(restart_seed_status()),
+    };
+    storage.save_snapshot(&seeded).expect("seed checkpoint");
+    let loaded = storage
+        .load_snapshot("e2e-update-restart-cold")
+        .expect("load succeeds")
+        .expect("checkpoint found");
+    assert_eq!(loaded.cwd, seeded.cwd, "cold restore must recover cwd");
+    assert_eq!(loaded.title, seeded.title, "cold restore must recover title");
+    assert_eq!(
+        loaded.agent_status, seeded.agent_status,
+        "cold restore must recover last-known agent status"
+    );
+    assert_eq!(loaded, seeded, "checkpoint must round-trip intact");
+}
+
+#[test]
+fn test_e2e_update_restart_cold_boot_restores_checkpoint_state() {
+    // "Pre-restart": a checkpoint as the periodic task / Shutdown flush writes it.
+    let app_data_dir = tempfile::tempdir().expect("temp app data dir");
+    let storage = SnapshotStorage::new(app_data_dir.path().to_path_buf());
+    let seeded_cwd = app_data_dir.path().to_string_lossy().into_owned();
+    let seeded_status = restart_seed_status();
+    storage
+        .save_snapshot(&SessionSnapshot {
+            session_id: "e2e-update-restart-cold-live".into(),
+            cwd: seeded_cwd.clone(),
+            title: Some("release pane".into()),
+            cols: 100,
+            rows: 30,
+            persona_id: None,
+            scrollback: "TICK_41 mid-update screen".into(),
+            timestamp: 1724050000000,
+            // Idle shell: an honest cold boot restores no resume plan for it.
+            foreground_command: None,
+            agent_session: None,
+            worktree_id: None,
+            agent_status: Some(seeded_status.clone()),
+        })
+        .expect("seed checkpoint");
+
+    // "Post-restart": a fresh daemon on the same snapshot dir cold-boots the pane.
+    let socket_path = generate_test_socket_path("update_cold");
+    let server = Arc::new(DaemonServer::with_snapshot_storage(
+        app_data_dir.path().to_path_buf(),
+    ));
+    let cancel_token = CancellationToken::new();
+    let srv_clone = Arc::clone(&server);
+    let cancel_clone = cancel_token.clone();
+    let path_clone = socket_path.clone();
+    let server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test daemon tokio runtime");
+        rt.block_on(async move {
+            let _ = srv_clone.run_listener(&path_clone, cancel_clone).await;
+        });
+    });
+    std::thread::sleep(Duration::from_millis(150));
+
+    let client = DaemonClient::connect(&socket_path).expect("connect post-restart client");
+    let attach = client
+        .create_or_attach(
+            "e2e-update-restart-cold-live",
+            80,
+            24,
+            None,
+            None,
+            false,
+            None,
+        )
+        .expect("cold attach failed");
+
+    // Cold boot honestly reports a NEW child with no warm snapshot...
+    assert!(
+        attach.is_new,
+        "no live session exists post-restart: attach must be cold"
+    );
+    assert!(
+        attach.snapshot.is_none(),
+        "a fresh child has no warm snapshot to hydrate from"
+    );
+    // ...relaunched in the checkpointed cwd, carrying last-known agent truth...
+    assert_eq!(
+        attach.cwd.as_deref(),
+        Some(seeded_cwd.as_str()),
+        "cold boot must relaunch in the checkpointed cwd"
+    );
+    assert_eq!(
+        attach.agent_status,
+        Some(seeded_status),
+        "cold boot must carry last-known agent status"
+    );
+    // ...and invents no resume plan for an idle shell.
+    assert!(
+        attach.resume.is_none(),
+        "an idle checkpoint must not invent a resume plan"
+    );
+    assert!(attach.resume_declined_reason.is_none());
+
+    client
+        .kill("e2e-update-restart-cold-live")
+        .expect("kill session failed");
+    client.disconnect().expect("disconnect failed");
+    cancel_token.cancel();
+    let _ = server_thread.join();
 }
