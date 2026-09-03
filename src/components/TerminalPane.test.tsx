@@ -571,6 +571,38 @@ describe("TerminalPane", () => {
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 13);
   });
 
+  it("acks pending bytes to the live session id, not a stale closure id", async () => {
+    const { rerender } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      seq: number;
+    }) => void;
+    dataHandler({ id: "abc", data: "hello", seq: 1 });
+
+    const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
+    parsedHandler();
+    // Still coalesced: no frame has fired, so nothing is acked yet.
+    expect(ptyAckMock).not.toHaveBeenCalled();
+
+    // Retarget the pane: the pending bytes belong to "abc" and the flush
+    // must credit that owner, never the new id.
+    useTerminalStore.setState({
+      sessions: {
+        ...useTerminalStore.getState().sessions,
+        def: { id: "def", title: "def", status: "running", cols: 80, rows: 24 },
+      },
+    });
+    rerender(<TerminalPane id="def" />);
+    pumpRaf(); // flush the coalesced frame
+
+    expect(ptyAckMock).toHaveBeenCalledTimes(1);
+    expect(ptyAckMock).toHaveBeenCalledWith("abc", 5);
+    expect(ptyAckMock).not.toHaveBeenCalledWith("def", expect.anything());
+  });
+
   it("keeps rendering the session after the id prop changes", async () => {
     const { rerender } = render(<TerminalPane id="abc" />);
     await waitForSpawned();

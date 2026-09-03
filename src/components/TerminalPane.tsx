@@ -494,7 +494,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // one floods the IPC channel. Frame-cadence flushes keep the daemon's
     // watermark math identical while cutting invoke count ~10x.
     const ackCoalescer = new AckCoalescer((bytes) => {
-      void ackSession(id, bytes).catch(() => {});
+      void ackSession(idRef.current, bytes).catch(() => {});
     });
 
     term.onWriteParsed(() => {
