@@ -217,6 +217,45 @@ describe("updater seam", () => {
       await expect(checkForNativeUpdate()).resolves.toBeNull();
     });
 
+    it("closes the displaced pending Update when a newer check supersedes it", async () => {
+      await setChannel("stable");
+      const first = fakeNativeUpdate();
+      const closeFirst = vi.fn().mockResolvedValue(undefined);
+      (first as unknown as { close: () => Promise<void> }).close = closeFirst;
+      checkMock.mockResolvedValue(first as unknown as Update);
+      await checkForNativeUpdate();
+
+      const second = fakeNativeUpdate();
+      const closeSecond = vi.fn().mockResolvedValue(undefined);
+      (second as unknown as { close: () => Promise<void> }).close = closeSecond;
+      checkMock.mockResolvedValue(second as unknown as Update);
+      const info = await checkForNativeUpdate();
+
+      expect(info?.version).toBe("0.3.0");
+      expect(closeFirst).toHaveBeenCalledTimes(1);
+      expect(closeSecond).not.toHaveBeenCalled();
+    });
+
+    it("tolerates a displaced pending Update without close (struct fakes)", async () => {
+      await setChannel("stable");
+      checkMock.mockResolvedValue(fakeNativeUpdate() as unknown as Update);
+      await checkForNativeUpdate();
+      checkMock.mockResolvedValue(fakeNativeUpdate() as unknown as Update);
+      await expect(checkForNativeUpdate()).resolves.not.toBeNull();
+    });
+
+    it("tolerates a displaced close that rejects (already released)", async () => {
+      await setChannel("stable");
+      const first = fakeNativeUpdate();
+      (first as unknown as { close: () => Promise<void> }).close = vi
+        .fn()
+        .mockRejectedValue(new Error("gone"));
+      checkMock.mockResolvedValue(first as unknown as Update);
+      await checkForNativeUpdate();
+      checkMock.mockResolvedValue(fakeNativeUpdate() as unknown as Update);
+      await expect(checkForNativeUpdate()).resolves.not.toBeNull();
+    });
+
     it("download emits the progress sequence then resolves ok", async () => {
       const update = await establishPending();
       const progress: Array<[number, number?]> = [];

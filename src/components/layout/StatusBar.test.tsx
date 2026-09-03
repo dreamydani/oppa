@@ -244,13 +244,21 @@ describe("StatusBar update segment", () => {
     expect(segment.textContent).toContain("v0.3.0");
   });
 
-  it("finds an update on mount via the native seam", async () => {
+  it("performs zero seam checks on mount; results arrive via availability event", async () => {
     checkForNativeUpdateMock.mockResolvedValue({
       version: "0.3.0",
       currentVersion: "0.2.3",
     });
     render(<StatusBar />);
+    await act(async () => {});
 
+    // The scheduler owns every check: a bare mount never touches the seams…
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("update-segment")).toBeNull();
+
+    // …results arrive through the availability event instead.
+    announceUpdate("0.3.0");
     expect(await screen.findByTestId("update-segment")).toBeInTheDocument();
     expect(screen.getByText("v0.3.0")).toBeInTheDocument();
   });

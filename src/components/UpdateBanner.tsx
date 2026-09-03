@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  checkForUpdate,
-  checkForNativeUpdate,
   downloadNativeUpdate,
   installNativeUpdateAndRelaunch,
   probeUpgradeSafety,
@@ -12,25 +10,20 @@ import {
   type NativeProgressCallback,
   type NativeDownloadResult,
 } from "../lib/updater";
-import { getChannel } from "../lib/channel";
+import {
+  MANUAL_UPDATE_CHECK_EVENT,
+  UPDATE_AVAILABILITY_EVENT,
+  type UpdateAvailabilityDetail,
+} from "../lib/updateScheduler";
 import { useTerminalStore } from "../store/terminalStore";
 
-// Cross-surface update signals. The card owns every check (native-first,
-// legacy fallback) so engines never double-run: Settings Check-now and the
-// status segment dispatch the manual event, and the card announces
-// availability changes for the segment.
-export const MANUAL_UPDATE_CHECK_EVENT = "oppa:manual-update-check";
-export const UPDATE_AVAILABILITY_EVENT = "oppa:update-availability";
-
-export interface UpdateAvailabilityDetail {
-  version: string | null;
-  phase: "available" | "downloaded" | null;
-}
-
-// Floor between banner-driven re-checks so repeated window focus can't poll
-// the manifest; empty checks never stamp, so first recovery isn't suppressed;
-// resolved checks throttle later focus checks at 6h.
-const RECHECK_FLOOR_MS = 6 * 60 * 60 * 1000;
+// The scheduler owns the event bus; re-exported so existing importers
+// (Settings, status segment) keep working untouched.
+export {
+  MANUAL_UPDATE_CHECK_EVENT,
+  UPDATE_AVAILABILITY_EVENT,
+  type UpdateAvailabilityDetail,
+} from "../lib/updateScheduler";
 
 type Engine = "native" | "legacy";
 type CardPhase =
@@ -40,17 +33,13 @@ type CardPhase =
   | "downloaded"
   | "browser"
   | "error";
-type CheckResult =
-  | { engine: "native"; native: NativeUpdateInfo }
-  | { engine: "legacy"; info: UpdateInfo };
 
 // "Update now / Not now" card shown at stable startup when a newer version
 // is available. Mirrors GlobalFailureBanner's fixed bottom-centered bar.
 //
-// Dual-engine card (native preferred): `checkForNativeUpdate()` runs first;
-// on null (incl. pre-H1 signature builds) the legacy `checkForUpdate()`
-// drives the OLD browser-download flow (openUrl) — one card, two engines,
-// never both. `dismissedUpdateVersion` stays per-version across engines.
+// Renderer for the scheduler's announcements (native preferred, legacy
+// browser fallback): one card, two engines, never both.
+// `dismissedUpdateVersion` stays per-version across engines.
 //
 // Update flow (native): available → "Download now" (percent bar, no cancel)
 // → downloaded → "Restart now" (install + relaunch). Failures surface the
@@ -90,111 +79,54 @@ export function UpdateBanner() {
     };
   }, []);
 
-  const emitAvailability = (version: string | null, cardPhase: "available" | "downloaded" | null) => {
-    const detail: UpdateAvailabilityDetail = { version, phase: cardPhase };
+  // Announces card-side transitions (downloaded, error/dismiss/later
+  // clears) for the status segment. Carries the full detail so re-processing
+  // the card's own announcement is idempotent and never flips the engine.
+  const emitAvailability = (detail: UpdateAvailabilityDetail) => {
     window.dispatchEvent(new CustomEvent<UpdateAvailabilityDetail>(UPDATE_AVAILABILITY_EVENT, { detail }));
   };
 
-  // Native-first priority check; the legacy fallback drives the old browser
-  // flow. Seams resolve null on failure, but guard rejections anyway: a
-  // future rewire must never surface an unhandled rejection from a check.
-  const runPriorityCheck = async (): Promise<CheckResult | null> => {
-    const next = await checkForNativeUpdate().catch(() => null);
-    if (next) return { engine: "native", native: next };
-    const legacy = await checkForUpdate().catch(() => null);
-    if (legacy) return { engine: "legacy", info: legacy };
-    return null;
-  };
-
-  // Presents a check outcome: stamps resolved checks (empty ones never
-  // stamp, so recovery isn't suppressed), debug-logs every outcome so a
-  // missing card is diagnosable, and shows the card unless dismissed.
-  // Returns true when the check resolved (recovery done).
-  const presentResult = (result: CheckResult | null): boolean => {
-    if (result === null) {
-      console.debug(
-        `[updater] channel=${getChannel() ?? "unresolved"} available=false version=none`,
-      );
+  // Renders a scheduler announcement: clears on null (resolved-negative or
+  // failed check), suppresses dismissed versions, otherwise stages the
+  // matching engine's payload for the action handlers below.
+  const presentAvailability = (detail: UpdateAvailabilityDetail) => {
+    if (detail.version === null || detail.phase === null) {
       setPhase(null);
-      emitAvailability(null, null);
-      return false;
+      return;
     }
-    const version = result.engine === "native" ? result.native.version : result.info.version;
-    const available = result.engine === "native" || result.info.available;
-    updateSettings({ general: { lastCheckAt: Date.now() } });
-    console.debug(
-      `[updater] channel=${getChannel() ?? "unresolved"} engine=${result.engine} available=${available} version=${version}`,
+    if (useTerminalStore.getState().settings.general.dismissedUpdateVersion === detail.version) {
+      setPhase(null);
+      return;
+    }
+    const announcedEngine = detail.engine ?? "legacy";
+    setEngine(announcedEngine);
+    setNative(
+      announcedEngine === "native"
+        ? { version: detail.version, currentVersion: detail.currentVersion ?? detail.version }
+        : null,
     );
-    if (!available) {
-      // Resolved negative: clear any stale card (e.g. a re-check after the
-      // release was pulled) instead of leaving the old offer up.
-      setPhase(null);
-      emitAvailability(null, null);
-      return true;
-    }
-    if (useTerminalStore.getState().settings.general.dismissedUpdateVersion === version) {
-      setPhase(null);
-      emitAvailability(null, null);
-      return true;
-    }
-    setEngine(result.engine);
-    setNative(result.engine === "native" ? result.native : null);
-    setInfo(result.engine === "legacy" ? result.info : null);
+    setInfo(
+      announcedEngine === "legacy"
+        ? { version: detail.version, download: detail.download ?? "", available: true }
+        : null,
+    );
     setError(null);
     setErrorOrigin(null);
     setBusySessionCount(null);
     setProgress(null);
-    setPhase("available");
-    emitAvailability(version, "available");
-    return true;
+    // The scheduler only announces available/clears; "downloaded" arrives
+    // from the card's own emit below — render it, don't downgrade it.
+    setPhase(detail.phase === "downloaded" ? "downloaded" : "available");
   };
 
-  // Check once on mount (silent while pending — checks stay fail-silent).
-  // An empty mount arms a one-shot focus listener as recovery; it is
-  // removed on a resolved check or unmount. Auto-checks honor the
-  // `autoCheckUpdates` switch; manual Check-now bypasses it below.
+  // Renderer only: the scheduler owns every check and announces outcomes on
+  // the bus. Manual requests surface the checking state; the matching
+  // availability announcement below resolves it.
   useEffect(() => {
-    let cancelled = false;
-    const autoCheckEnabled = () =>
-      useTerminalStore.getState().settings.general.autoCheckUpdates !== false;
-    const onFocus = () => {
-      if (!autoCheckEnabled()) return;
-      const lastCheckAt = useTerminalStore.getState().settings.general.lastCheckAt;
-      if (lastCheckAt != null && Date.now() - lastCheckAt < RECHECK_FLOOR_MS) return;
-      void runPriorityCheck()
-        .then((result) => {
-          if (cancelled) return;
-          if (presentResult(result)) window.removeEventListener("focus", onFocus);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setPhase(null);
-        });
+    const onAvailability = (event: Event) => {
+      if (!mountedRef.current) return;
+      presentAvailability((event as CustomEvent<UpdateAvailabilityDetail>).detail);
     };
-    if (!autoCheckEnabled()) return () => {};
-    void runPriorityCheck()
-      .then((result) => {
-        // Only a resolving check counts toward the floor; an empty mount must
-        // not suppress the focus recovery check.
-        if (cancelled) return;
-        if (!presentResult(result)) window.addEventListener("focus", onFocus);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setPhase(null);
-        window.addEventListener("focus", onFocus);
-      });
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-    };
-    // Mount-only: later store edits flow through getState reads above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Manual Check-now (Settings + status segment): bypasses the 6h floor but
-  // stays channel-gated inside the seam fns. Shows the checking state.
-  useEffect(() => {
     const onManualCheck = () => {
       if (!mountedRef.current) return;
       setBusySessionCount(null);
@@ -202,17 +134,14 @@ export function UpdateBanner() {
       setErrorOrigin(null);
       setProgress(null);
       setPhase("checking");
-      void runPriorityCheck()
-        .then((result) => {
-          if (mountedRef.current) presentResult(result);
-        })
-        .catch(() => {
-          if (mountedRef.current) setPhase(null);
-        });
     };
+    window.addEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
     window.addEventListener(MANUAL_UPDATE_CHECK_EVENT, onManualCheck);
-    return () => window.removeEventListener(MANUAL_UPDATE_CHECK_EVENT, onManualCheck);
-    // Mount-only listener; work flows through refs and getState.
+    return () => {
+      window.removeEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
+      window.removeEventListener(MANUAL_UPDATE_CHECK_EVENT, onManualCheck);
+    };
+    // Mount-only listeners; work flows through refs and getState.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -263,10 +192,15 @@ export function UpdateBanner() {
       // release landing mid-download is the scheduler's supersede case (T7),
       // which also owns the pending-update close().
       setPhase("downloaded");
-      emitAvailability(native.version, "downloaded");
+      emitAvailability({
+        version: native.version,
+        phase: "downloaded",
+        engine: "native",
+        currentVersion: native.currentVersion,
+      });
     } else {
       // Error card itself is visible; clear the dot to avoid double-signaling.
-      emitAvailability(null, null);
+      emitAvailability({ version: null, phase: null });
       setError(result.error);
       setErrorOrigin("download");
       setPhase("error");
@@ -284,7 +218,7 @@ export function UpdateBanner() {
       return;
     }
     // Error card itself is visible; clear the dot to avoid double-signaling.
-    emitAvailability(null, null);
+    emitAvailability({ version: null, phase: null });
     setError(outcome.error);
     setErrorOrigin("install");
     setPhase("error");
@@ -320,7 +254,7 @@ export function UpdateBanner() {
     setInfo(null);
     setError(null);
     setBusySessionCount(null);
-    emitAvailability(null, null);
+    emitAvailability({ version: null, phase: null });
   };
 
   const handleNotNow = () => {
@@ -332,7 +266,7 @@ export function UpdateBanner() {
     // Remind on next launch: hide without persisting a dismissal, so the
     // next check offers the downloaded update again.
     setPhase(null);
-    emitAvailability(null, null);
+    emitAvailability({ version: null, phase: null });
   };
 
   const version = engine === "native" ? native?.version : info?.version;

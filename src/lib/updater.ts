@@ -135,8 +135,18 @@ export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {
       nativeUpdateDownloaded = false;
       return null;
     }
+    const displaced = pendingNativeUpdate;
     pendingNativeUpdate = update;
     nativeUpdateDownloaded = false;
+    if (displaced && displaced !== update) {
+      // A newer check superseded the staged update: release the displaced
+      // plugin resource instead of leaking it. Test fakes may lack close().
+      try {
+        await displaced.close?.();
+      } catch {
+        // Already released; the fresh update below is what matters.
+      }
+    }
     return {
       version: update.version,
       currentVersion: update.currentVersion,

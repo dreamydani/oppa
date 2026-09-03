@@ -1,6 +1,6 @@
 import React from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import { MANUAL_UPDATE_CHECK_EVENT } from "../UpdateBanner";
+import { requestManualCheck } from "../../lib/updateScheduler";
 import type {
   DefaultCwdMode,
   StartupBehavior,
@@ -69,9 +69,9 @@ export function GeneralSettingsPane(): React.ReactElement {
   };
 
   const handleCheckNow = () => {
-    // The update card owns the check (native-first, legacy fallback) and
-    // shows the outcome; this only requests it, bypassing the 6h floor.
-    window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
+    // The scheduler owns the check (native-first, legacy fallback) and the
+    // card shows the outcome; this only requests it, bypassing the 6h floor.
+    requestManualCheck();
   };
 
   return (

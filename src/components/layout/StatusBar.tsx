@@ -5,9 +5,8 @@ import { focus } from "../../lib/pane-manager/layout";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { getGitStatus, GitStatusResult } from "../../lib/git/transport";
-import { checkForNativeUpdate, checkForUpdate } from "../../lib/updater";
+import { requestManualCheck } from "../../lib/updateScheduler";
 import {
-  MANUAL_UPDATE_CHECK_EVENT,
   UPDATE_AVAILABILITY_EVENT,
   type UpdateAvailabilityDetail,
 } from "../UpdateBanner";
@@ -85,38 +84,19 @@ function FleetAggregate(): React.ReactElement | null {
 }
 
 // Update segment: dot + version, visible only while the update card holds an
-// available/downloaded update. The card announces transitions via
-// availability events; the mount check covers a segment mounted after the
-// card already resolved. Click runs Check-now (the card owns the check).
+// available/downloaded update. The scheduler announces transitions via
+// availability events; the segment never checks itself. Click runs Check-now
+// through the scheduler (the card owns the outcome).
 function UpdateSegment(): React.ReactElement | null {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const dismissedUpdateVersion = useTerminalStore((s) => s.settings.general.dismissedUpdateVersion);
 
   useEffect(() => {
-    let cancelled = false;
-    // Own silent check on mount (fail-silent like the card), gated on the
-    // auto-check opt-out. Event sync below + manual click stay ungated.
-    if (useTerminalStore.getState().settings.general.autoCheckUpdates !== false) {
-      void checkForNativeUpdate()
-        .then((native) => {
-          if (cancelled) return;
-          if (native) {
-            setUpdateVersion(native.version);
-            return;
-          }
-          return checkForUpdate().then((legacy) => {
-            if (!cancelled && legacy?.available) setUpdateVersion(legacy.version);
-          });
-        })
-        .catch(() => {});
-    }
     const onAvailability = (event: Event) => {
-      if (cancelled) return;
       setUpdateVersion((event as CustomEvent<UpdateAvailabilityDetail>).detail.version);
     };
     window.addEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
     return () => {
-      cancelled = true;
       window.removeEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
     };
   }, []);
@@ -129,7 +109,7 @@ function UpdateSegment(): React.ReactElement | null {
       data-testid="update-segment"
       title={`Update to v${updateVersion} is ready — check now`}
       onClick={() => {
-        window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
+        requestManualCheck();
       }}
     >
       <span className="status-indicator-dot update-available" aria-hidden="true" />

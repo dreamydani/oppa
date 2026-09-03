@@ -15,10 +15,10 @@ import type {
 import * as opener from "@tauri-apps/plugin-opener";
 import { useTerminalStore } from "../store/terminalStore";
 
-// The updater seam is mocked at module level so each test controls whether an
-// update is "available" (the seam itself already gates on the channel and
-// swallows rejections — component tests exercise the banner logic, not the
-// seam).
+// The updater seam is mocked at module level. The card is a renderer: it must
+// NEVER call the check seams (checkForNativeUpdate/checkForUpdate — the
+// scheduler owns every check); it only uses the action seams
+// (download/install/probe) plus the availability event bus.
 vi.mock("../lib/updater", () => ({
   checkForUpdate: vi.fn(),
   probeUpgradeSafety: vi.fn(),
@@ -56,22 +56,22 @@ function getDismissed() {
   return useTerminalStore.getState().settings.general.dismissedUpdateVersion;
 }
 
-function setAutoCheckUpdates(value: boolean) {
-  useTerminalStore.setState({
-    settings: {
-      ...useTerminalStore.getState().settings,
-      general: { ...useTerminalStore.getState().settings.general, autoCheckUpdates: value },
-    },
+function announce(detail: UpdateAvailabilityDetail) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent(UPDATE_AVAILABILITY_EVENT, { detail }));
   });
 }
 
-function setLastCheckAt(value: number | null) {
-  useTerminalStore.setState({
-    settings: {
-      ...useTerminalStore.getState().settings,
-      general: { ...useTerminalStore.getState().settings.general, lastCheckAt: value },
-    },
-  });
+function announceNative(version = NATIVE.version) {
+  announce({ version, phase: "available", engine: "native", currentVersion: NATIVE.currentVersion });
+}
+
+function announceLegacy() {
+  announce({ version: AVAILABLE.version, phase: "available", engine: "legacy", download: AVAILABLE.download });
+}
+
+function announceCleared() {
+  announce({ version: null, phase: null });
 }
 
 function dispatchManualCheck() {
@@ -108,10 +108,6 @@ beforeEach(() => {
   // the component's `.catch` chain to work.
   openUrlMock.mockResolvedValue(undefined);
   setDismissed(null);
-  setAutoCheckUpdates(true);
-  // lastCheckAt persists in the store across tests; reset so each test starts
-  // with no recorded check (the 6h-floor test sets its own value).
-  setLastCheckAt(null);
 });
 
 afterEach(() => {
@@ -119,50 +115,58 @@ afterEach(() => {
 });
 
 describe("UpdateBanner", () => {
-  it("renders the banner with both buttons when an update is available", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
+  it("performs zero seam checks on mount; the scheduler owns every check", async () => {
     render(<UpdateBanner />);
+    await act(async () => {});
+    expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument();
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the legacy banner with both buttons when a legacy availability arrives", async () => {
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
     expect(screen.getByText(/v0\.2\.0/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update now" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Not now" })).toBeInTheDocument();
+    // The card rendered from the event — no check seam ran.
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
   });
 
-  it("renders nothing when checkForUpdate returns null", async () => {
-    checkForUpdateMock.mockResolvedValue(null);
+  it("renders nothing when availability is cleared", async () => {
     render(<UpdateBanner />);
     await act(async () => {});
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Update now" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Not now" })).not.toBeInTheDocument();
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+    announceCleared();
+    await waitFor(() => expect(screen.queryByTestId("update-banner")).toBeNull());
   });
 
-  it("renders nothing when checkForUpdate rejects (offline / backend failure)", async () => {
-    checkForUpdateMock.mockRejectedValue(new Error("offline"));
+  it("renders nothing when the dismissed version equals the announced version", async () => {
+    setDismissed("0.3.0");
     render(<UpdateBanner />);
     await act(async () => {});
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
-  });
-
-  it("renders nothing when the dismissed version equals the available version", async () => {
-    setDismissed("0.2.0");
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
-    render(<UpdateBanner />);
+    announceNative();
     await act(async () => {});
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/v0\.3\.0/)).not.toBeInTheDocument();
   });
 
-  it("shows the banner again when a newer version than the dismissed one is available", async () => {
+  it("shows the banner again when a newer version than the dismissed one is announced", async () => {
     setDismissed("0.1.9");
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update now" })).toBeInTheDocument();
   });
 
   it("Not now hides the banner and persists dismissedUpdateVersion", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -174,8 +178,9 @@ describe("UpdateBanner", () => {
   });
 
   it("Update now opens the download URL via the opener plugin", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -190,8 +195,9 @@ describe("UpdateBanner", () => {
   it("Update now shows the in-progress state and falls back to window.open when the opener rejects", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     openUrlMock.mockRejectedValue(new Error("no opener"));
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -212,9 +218,10 @@ describe("UpdateBanner", () => {
   // ---- task 7: session-running warning (seam-driven "Update now" flow) ----
 
   it("Update now probes the daemon and proceeds immediately when idle", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockResolvedValue({ status: "idle", sessionCount: 0 });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -230,9 +237,10 @@ describe("UpdateBanner", () => {
   });
 
   it("Update now shows the session warning with the live count when busy", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockResolvedValue({ status: "busy", sessionCount: 3 });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -248,9 +256,10 @@ describe("UpdateBanner", () => {
   });
 
   it("Update anyway on the busy warning proceeds with the v1 action", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockResolvedValue({ status: "busy", sessionCount: 2 });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -268,9 +277,10 @@ describe("UpdateBanner", () => {
   });
 
   it("Not now on the busy warning dismisses the warning and keeps the banner", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockResolvedValue({ status: "busy", sessionCount: 1 });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -290,9 +300,10 @@ describe("UpdateBanner", () => {
   });
 
   it("Update now proceeds without claiming safe when the probe is unknown", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockResolvedValue({ status: "unknown", sessionCount: 0 });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -308,9 +319,10 @@ describe("UpdateBanner", () => {
   });
 
   it("Update now proceeds when the upgrade probe rejects (transport failure)", async () => {
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     probeUpgradeSafetyMock.mockRejectedValue(new Error("daemon unreachable"));
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -322,82 +334,24 @@ describe("UpdateBanner", () => {
     );
   });
 
-  it("re-checks once on focus when the mount check was empty", async () => {
-    checkForUpdateMock.mockResolvedValueOnce(null);
-    checkForUpdateMock.mockResolvedValueOnce(AVAILABLE);
+  // ---- task 6: native-preferred dual engine (announced by the scheduler) ----
+
+  it("renders Download now for a native availability without calling seams", async () => {
     render(<UpdateBanner />);
     await act(async () => {});
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
-    expect(checkForUpdateMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("retries on the next focus when the focus re-check was also empty", async () => {
-    checkForUpdateMock.mockResolvedValueOnce(null);
-    checkForUpdateMock.mockResolvedValueOnce(null);
-    checkForUpdateMock.mockResolvedValueOnce(AVAILABLE);
-    render(<UpdateBanner />);
-    await act(async () => {});
-
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await act(async () => {});
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
-    // The empty focus check stamped nothing, so recovery is not suppressed.
-    expect(useTerminalStore.getState().settings.general.lastCheckAt).toBeNull();
-
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    expect(await screen.findByText(/A new version of OPPA is available/)).toBeInTheDocument();
-    expect(checkForUpdateMock).toHaveBeenCalledTimes(3);
-  });
-
-  it("skips the focus re-check within 6h of the last check", async () => {    useTerminalStore.setState({
-      settings: {
-        ...useTerminalStore.getState().settings,
-        general: { ...useTerminalStore.getState().settings.general, lastCheckAt: Date.now() },
-      },
-    });
-    checkForUpdateMock.mockResolvedValue(null);
-    render(<UpdateBanner />);
-    await act(async () => {});
-
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await act(async () => {});
-
-    expect(checkForUpdateMock).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(/A new version of OPPA is available/)).not.toBeInTheDocument();
-  });
-
-  // ---- task 6: native-preferred dual engine ----
-
-  it("prefers native: shows Download now and never calls the legacy check", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
-    render(<UpdateBanner />);
+    announceNative();
 
     expect(await screen.findByText(/v0\.3\.0/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download now" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Not now" })).toBeInTheDocument();
-    // One card, two engines, native preferred — the legacy flow never runs.
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
     expect(checkForUpdateMock).not.toHaveBeenCalled();
-    expect(screen.queryByText(/v0\.2\.0/)).not.toBeInTheDocument();
   });
 
-  it("falls back to the legacy browser flow when native is null (no plugin download)", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(null);
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
+  it("falls back to the legacy browser flow for a legacy availability (no plugin download)", async () => {
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
 
     act(() => {
@@ -412,16 +366,18 @@ describe("UpdateBanner", () => {
 
   it("suppresses the card when the dismissed version equals the native version", async () => {
     setDismissed("0.3.0");
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await act(async () => {});
     expect(screen.queryByText(/v0\.3\.0/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Download now" })).not.toBeInTheDocument();
   });
 
   it("Not now on a native update persists dismissedUpdateVersion", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     act(() => {
@@ -432,30 +388,25 @@ describe("UpdateBanner", () => {
     expect(getDismissed()).toBe("0.3.0");
   });
 
-  it("shows a checking state with no buttons while a manual check is pending", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(null);
-    checkForUpdateMock.mockResolvedValue(null);
+  it("shows a checking state with no buttons on a manual request, then renders on availability", async () => {
     render(<UpdateBanner />);
     await act(async () => {});
     expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument();
 
-    let resolveCheck!: (value: NativeUpdateInfo | null) => void;
-    checkForNativeUpdateMock.mockImplementation(
-      () => new Promise<NativeUpdateInfo | null>((resolve) => { resolveCheck = resolve; }),
-    );
     dispatchManualCheck();
 
+    // The scheduler owns the check: the card shows progress but calls no seam.
     expect(await screen.findByText(/Checking for updates/)).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
 
-    await act(async () => {
-      resolveCheck(null);
-    });
+    announceNative();
+    expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
     expect(screen.queryByText(/Checking for updates/)).not.toBeInTheDocument();
   });
 
   it("downloads with percent progress (no cancel) then offers Restart now + Later", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     let progressCb!: NativeProgressCallback;
     let resolveDownload!: (value: NativeDownloadResult) => void;
     downloadNativeUpdateMock.mockImplementation((cb: NativeProgressCallback) => {
@@ -463,6 +414,8 @@ describe("UpdateBanner", () => {
       return new Promise<NativeDownloadResult>((resolve) => { resolveDownload = resolve; });
     });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -485,11 +438,12 @@ describe("UpdateBanner", () => {
   });
 
   it("surfaces a download failure as an error card; Retry re-downloads", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     downloadNativeUpdateMock
       .mockResolvedValueOnce({ ok: false, error: "signature verification failed" })
       .mockResolvedValue({ ok: true });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -503,28 +457,30 @@ describe("UpdateBanner", () => {
   });
 
   it("shows Restart without re-checking (installs what was checked)", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
     expect(await screen.findByRole("button", { name: "Restart now" })).toBeInTheDocument();
-    const checksBefore = checkForNativeUpdateMock.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
     await waitFor(() =>
       expect(installNativeUpdateAndRelaunchMock).toHaveBeenCalledTimes(1),
     );
     // The pending update is installed as checked — no fresh check in between.
-    expect(checkForNativeUpdateMock.mock.calls.length).toBe(checksBefore);
+    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
+    expect(checkForUpdateMock).not.toHaveBeenCalled();
   });
 
   it("Restart now shows the busy warning; Update-anyway re-attempts the install", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     installNativeUpdateAndRelaunchMock
       .mockResolvedValueOnce({ proceeded: false, reason: "busy", sessionCount: 2 })
       .mockResolvedValue({ proceeded: true });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -542,13 +498,14 @@ describe("UpdateBanner", () => {
   });
 
   it("Not now on the native busy warning returns to the downloaded card", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     installNativeUpdateAndRelaunchMock.mockResolvedValue({
       proceeded: false,
       reason: "busy",
       sessionCount: 1,
     });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -567,13 +524,14 @@ describe("UpdateBanner", () => {
   });
 
   it("surfaces an install failure as an error card; Dismiss persists the version", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     installNativeUpdateAndRelaunchMock.mockResolvedValue({
       proceeded: false,
       reason: "error",
       error: "install failed",
     });
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -590,48 +548,11 @@ describe("UpdateBanner", () => {
     expect(getDismissed()).toBe("0.3.0");
   });
 
-  it("manual Check-now bypasses the 6h floor", async () => {
-    setLastCheckAt(Date.now());
-    checkForNativeUpdateMock.mockResolvedValue(null);
-    checkForUpdateMock.mockResolvedValue(null);
-    render(<UpdateBanner />);
-    await act(async () => {});
-    expect(checkForNativeUpdateMock).toHaveBeenCalledTimes(1);
-
-    // Focus re-check stays floored.
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await act(async () => {});
-    expect(checkForNativeUpdateMock).toHaveBeenCalledTimes(1);
-
-    // Manual Check-now forces a fresh check despite the floor.
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
-    dispatchManualCheck();
-    expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
-    expect(checkForNativeUpdateMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("skips auto-checks when autoCheckUpdates is off, but manual checks still run", async () => {
-    setAutoCheckUpdates(false);
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
-    render(<UpdateBanner />);
-    await act(async () => {});
-
-    expect(checkForNativeUpdateMock).not.toHaveBeenCalled();
-    expect(checkForUpdateMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument();
-
-    dispatchManualCheck();
-    expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
-    expect(checkForNativeUpdateMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("Later hides the downloaded card without dismissing; the next check re-offers", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
+  it("Later hides the downloaded card without dismissing; the next announcement re-offers", async () => {
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -643,33 +564,33 @@ describe("UpdateBanner", () => {
     // The segment clears through the availability contract.
     expect(clearedAvailabilityCount(dispatchSpy)).toBeGreaterThan(0);
 
-    // No dismissal persisted, so the next check offers the update again.
-    dispatchManualCheck();
+    // No dismissal persisted, so the next announcement offers it again.
+    announceNative();
     expect(await screen.findByRole("button", { name: "Download now" })).toBeInTheDocument();
   });
 
-  it("clears a stale card when a re-check resolves legacy available:false", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
+  it("clears a stale card when availability is cleared", async () => {
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
-    checkForNativeUpdateMock.mockResolvedValue(null);
-    checkForUpdateMock.mockResolvedValue({ ...AVAILABLE, available: false });
-    dispatchManualCheck();
+    announceCleared();
 
     await waitFor(() => expect(screen.queryByTestId("update-banner")).toBeNull());
     expect(clearedAvailabilityCount(dispatchSpy)).toBeGreaterThan(0);
   });
 
   it("keeps the segment dot during downloading; clears it on error", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(NATIVE);
     let resolveDownload!: (value: NativeDownloadResult) => void;
     downloadNativeUpdateMock.mockImplementation(
       () => new Promise<NativeDownloadResult>((resolve) => { resolveDownload = resolve; }),
     );
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
@@ -687,10 +608,10 @@ describe("UpdateBanner", () => {
   });
 
   it("keeps the segment dot while opening the legacy browser download", async () => {
-    checkForNativeUpdateMock.mockResolvedValue(null);
-    checkForUpdateMock.mockResolvedValue(AVAILABLE);
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<UpdateBanner />);
+    await act(async () => {});
+    announceLegacy();
     await screen.findByText(/A new version of OPPA is available/);
     const clearedBefore = clearedAvailabilityCount(dispatchSpy);
 

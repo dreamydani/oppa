@@ -20,6 +20,7 @@ const EditorViewport = lazy(() =>
 );
 import { SettingsView } from "./components/settings/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { startUpdateScheduler } from "./lib/updateScheduler";
 import { useTerminalStore } from "./store/terminalStore";
 import {
   handleExtensionCrash,
@@ -167,6 +168,14 @@ function App() {
     };
     void init();
   }, [loadLayout]);
+
+  // Centralized update checks: deferred past startup, daily with backoff,
+  // focus/resume guarded by the last-check floor. The card + segment render
+  // the announced outcomes.
+  useEffect(() => {
+    const stop = startUpdateScheduler();
+    return stop;
+  }, []);
 
   // Subscribe to live PTY CWD updates and keep session CWD in sync.
   useEffect(() => {
@@ -474,8 +483,8 @@ function App() {
           work from any mode/tab (the host pushes events app-wide). */}
       <ExtensionConsentModal />
       <ExtensionToasts />
-      {/* Stable-startup update banner (checkForUpdate gates on channel; dev
-          builds and offline runs render nothing). */}
+      {/* Stable-startup update card (the scheduler owns checks; dev builds
+          and offline runs render nothing). */}
       <UpdateBanner />
       </div>
     </ErrorBoundary>
