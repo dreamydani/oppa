@@ -113,8 +113,9 @@ pub fn run() {
     // baked into the binary.
     //
     // NOTE: the plugin's NATIVE check()/downloadAndInstall() become the real
-    // flow in Task 5; the custom manifest check in `updater.rs` stays as the
-    // fallback for one release (dual-manifest transition, no flag day).
+    // flow in Task 5 once the H1 pubkey lands; the custom manifest check in
+    // `updater.rs` stays as the fallback for one release (dual-manifest
+    // transition, no flag day).
     if channel::Channel::current() == channel::Channel::Stable {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
