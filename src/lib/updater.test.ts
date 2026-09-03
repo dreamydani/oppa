@@ -310,5 +310,14 @@ describe("updater seam", () => {
       expect(outcome).toEqual({ proceeded: false, reason: "error", error: "install failed" });
       expect(relaunchMock).not.toHaveBeenCalled();
     });
+
+    it("install does not reject when the probe payload is malformed (degrades to unknown, proceeds)", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(null as unknown as CanUpgradeDaemonResult);
+      const outcome = await installNativeUpdateAndRelaunch(() => {});
+      expect(outcome).toEqual({ proceeded: true });
+      expect(update.download).toHaveBeenCalledTimes(1);
+      expect(update.install).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -191,7 +191,12 @@ export async function downloadNativeUpdate(
 export async function installNativeUpdateAndRelaunch(
   onProgress: NativeProgressCallback = () => {},
 ): Promise<NativeInstallOutcome> {
-  const probe = await probeUpgradeSafety();
+  // probeUpgradeSafety swallows invoke rejections but not a malformed
+  // resolved payload — a throwing probe must degrade to unknown, never reject.
+  const probe = await probeUpgradeSafety().catch(() => ({
+    status: "unknown" as const,
+    sessionCount: 0,
+  }));
   if (probe.status === "busy") {
     return { proceeded: false, reason: "busy", sessionCount: probe.sessionCount };
   }
