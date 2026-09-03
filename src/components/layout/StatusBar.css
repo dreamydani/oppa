@@ -74,6 +74,15 @@
   background-color: var(--destructive, #e05252);
 }
 
+/* Update segment: dot + version, shown only while an update is pending. */
+.status-indicator-dot.update-available {
+  background-color: var(--status-warning, #f5a623);
+}
+
+.status-bar button.status-bar-item.update-segment:hover {
+  background-color: color-mix(in srgb, var(--text-primary, #ededec) 12%, transparent);
+}
+
 .status-bar button.status-bar-item {
   background: transparent;
   border: none;

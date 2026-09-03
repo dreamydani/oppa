@@ -61,6 +61,9 @@ export interface GeneralSettings {
   // Epoch-ms of the last update check that resolved; focus re-checks skip
   // when this is fresher than the 6h floor. `null` means never checked.
   lastCheckAt: number | null;
+  // Master switch for automatic update checks (launch/focus/scheduled).
+  // Manual Check-now always runs regardless. Absent in old saves = enabled.
+  autoCheckUpdates: boolean;
 }
 
 export interface AppSettings {
@@ -100,6 +103,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     autoResumeAgents: true,
     dismissedUpdateVersion: null,
     lastCheckAt: null,
+    autoCheckUpdates: true,
   },
   appearance: DEFAULT_APPEARANCE_SETTINGS,
 };

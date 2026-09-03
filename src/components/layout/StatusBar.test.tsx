@@ -1,7 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { StatusBar } from "./StatusBar";
+import {
+  MANUAL_UPDATE_CHECK_EVENT,
+  UPDATE_AVAILABILITY_EVENT,
+} from "../UpdateBanner";
+import type { UpdateAvailabilityDetail } from "../UpdateBanner";
+import * as updater from "../../lib/updater";
 import * as gitTransport from "../../lib/git/transport";
 
 vi.mock("../../lib/git/transport", () => ({
@@ -10,11 +16,43 @@ vi.mock("../../lib/git/transport", () => ({
   onPrChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
+vi.mock("../../lib/updater", () => ({
+  checkForNativeUpdate: vi.fn(),
+  checkForUpdate: vi.fn(),
+}));
+
 const mockGetGitStatus = vi.mocked(gitTransport.getGitStatus);
+const checkForNativeUpdateMock = vi.mocked(updater.checkForNativeUpdate);
+const checkForUpdateMock = vi.mocked(updater.checkForUpdate);
+
+function announceUpdate(version: string | null) {
+  const detail: UpdateAvailabilityDetail = {
+    version,
+    phase: version ? "available" : null,
+  };
+  act(() => {
+    window.dispatchEvent(new CustomEvent(UPDATE_AVAILABILITY_EVENT, { detail }));
+  });
+}
+
+function setDismissedUpdateVersion(version: string | null) {
+  useTerminalStore.setState({
+    settings: {
+      ...useTerminalStore.getState().settings,
+      general: {
+        ...useTerminalStore.getState().settings.general,
+        dismissedUpdateVersion: version,
+      },
+    },
+  });
+}
 
 describe("StatusBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    checkForNativeUpdateMock.mockResolvedValue(null);
+    checkForUpdateMock.mockResolvedValue(null);
+    setDismissedUpdateVersion(null);
     useTerminalStore.setState({
       sessions: {
         s1: {
@@ -160,6 +198,89 @@ describe("StatusBar", () => {
 
     expect(screen.getByText("localhost:3000")).toBeTruthy();
     expect(screen.getByText("localhost:8080")).toBeTruthy();
+  });
+});
+
+describe("StatusBar update segment", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetGitStatus.mockResolvedValue({
+      is_git: false,
+      branch: "",
+      files: [],
+      ahead: 0,
+      behind: 0,
+    });
+    checkForNativeUpdateMock.mockResolvedValue(null);
+    checkForUpdateMock.mockResolvedValue(null);
+    setDismissedUpdateVersion(null);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows dot + version when the card reports an available update", async () => {
+    render(<StatusBar />);
+    await act(async () => {});
+    expect(screen.queryByTestId("update-segment")).toBeNull();
+
+    announceUpdate("0.3.0");
+
+    const segment = await screen.findByTestId("update-segment");
+    expect(segment.textContent).toContain("v0.3.0");
+  });
+
+  it("finds an update on mount via the native seam", async () => {
+    checkForNativeUpdateMock.mockResolvedValue({
+      version: "0.3.0",
+      currentVersion: "0.2.3",
+    });
+    render(<StatusBar />);
+
+    expect(await screen.findByTestId("update-segment")).toBeInTheDocument();
+    expect(screen.getByText("v0.3.0")).toBeInTheDocument();
+  });
+
+  it("hides the segment for the dismissed version", async () => {
+    setDismissedUpdateVersion("0.3.0");
+    render(<StatusBar />);
+    await act(async () => {});
+
+    announceUpdate("0.3.0");
+    await act(async () => {});
+    expect(screen.queryByTestId("update-segment")).toBeNull();
+
+    setDismissedUpdateVersion(null);
+  });
+
+  it("clears the segment when availability is cleared", async () => {
+    render(<StatusBar />);
+    await act(async () => {});
+
+    announceUpdate("0.3.0");
+    expect(await screen.findByTestId("update-segment")).toBeInTheDocument();
+
+    announceUpdate(null);
+    await waitFor(() =>
+      expect(screen.queryByTestId("update-segment")).toBeNull(),
+    );
+  });
+
+  it("click runs a manual Check-now for the card", async () => {
+    render(<StatusBar />);
+    await act(async () => {});
+    announceUpdate("0.3.0");
+    const segment = await screen.findByTestId("update-segment");
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    fireEvent.click(segment);
+
+    const manualChecks = dispatchSpy.mock.calls.filter(
+      ([event]) =>
+        event instanceof CustomEvent && event.type === MANUAL_UPDATE_CHECK_EVENT,
+    );
+    expect(manualChecks).toHaveLength(1);
   });
 });
 

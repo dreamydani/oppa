@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { GitBranch, Folder, Terminal, Users } from "lucide-react";
+import { GitBranch, Folder, Terminal, Users, Download } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { focus } from "../../lib/pane-manager/layout";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { getGitStatus, GitStatusResult } from "../../lib/git/transport";
+import { checkForNativeUpdate, checkForUpdate } from "../../lib/updater";
+import {
+  MANUAL_UPDATE_CHECK_EVENT,
+  UPDATE_AVAILABILITY_EVENT,
+  type UpdateAvailabilityDetail,
+} from "../UpdateBanner";
 import "./StatusBar.css";
 
 // Attention order for the fleet aggregate click: what needs a human first.
@@ -74,6 +80,58 @@ function FleetAggregate(): React.ReactElement | null {
     >
       <Users size={13} />
       {FLEET_ATTENTION.map((state) => label(state, fleet.counts[state]))}
+    </button>
+  );
+}
+
+// Update segment: dot + version, visible only while the update card holds an
+// available/downloaded update. The card announces transitions via
+// availability events; the mount check covers a segment mounted after the
+// card already resolved. Click runs Check-now (the card owns the check).
+function UpdateSegment(): React.ReactElement | null {
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const dismissedUpdateVersion = useTerminalStore((s) => s.settings.general.dismissedUpdateVersion);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Own silent check on mount (fail-silent like the card).
+    void checkForNativeUpdate()
+      .then((native) => {
+        if (cancelled) return;
+        if (native) {
+          setUpdateVersion(native.version);
+          return;
+        }
+        return checkForUpdate().then((legacy) => {
+          if (!cancelled && legacy?.available) setUpdateVersion(legacy.version);
+        });
+      })
+      .catch(() => {});
+    const onAvailability = (event: Event) => {
+      if (cancelled) return;
+      setUpdateVersion((event as CustomEvent<UpdateAvailabilityDetail>).detail.version);
+    };
+    window.addEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
+    };
+  }, []);
+
+  if (!updateVersion || dismissedUpdateVersion === updateVersion) return null;
+  return (
+    <button
+      type="button"
+      className="status-bar-item update-segment"
+      data-testid="update-segment"
+      title={`Update to v${updateVersion} is ready — check now`}
+      onClick={() => {
+        window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
+      }}
+    >
+      <span className="status-indicator-dot update-available" aria-hidden="true" />
+      <Download size={13} />
+      <span>{`v${updateVersion}`}</span>
     </button>
   );
 }
@@ -179,6 +237,7 @@ export function StatusBar(): React.ReactElement {
       </div>
 
       <div className="status-bar-section status-bar-section-right">
+        <UpdateSegment />
         <div className="status-bar-item" title="Terminal Dimensions">
           <Terminal size={13} />
           <span>{`${cols}x${rows}`}</span>

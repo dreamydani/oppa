@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GeneralSettingsPane } from "./GeneralSettingsPane";
+import { MANUAL_UPDATE_CHECK_EVENT } from "../UpdateBanner";
 import { useTerminalStore } from "../../store/terminalStore";
 import { DEFAULT_APP_SETTINGS } from "../../lib/settings/types";
 
@@ -13,7 +14,7 @@ describe("GeneralSettingsPane", () => {
     });
   });
 
-  it("renders all 4 main sections and descriptive headers", () => {
+  it("renders all 5 main sections and descriptive headers", () => {
     render(<GeneralSettingsPane />);
 
     expect(screen.getByRole("heading", { name: /^general$/i, level: 2 })).toBeInTheDocument();
@@ -21,6 +22,7 @@ describe("GeneralSettingsPane", () => {
     expect(screen.getByRole("heading", { name: /navigation & confirmations/i, level: 3 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /code editor/i, level: 3 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /web browser/i, level: 3 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^updates$/i, level: 3 })).toBeInTheDocument();
   });
 
   describe("Workspace & Startup", () => {
@@ -164,6 +166,48 @@ describe("GeneralSettingsPane", () => {
 
       fireEvent.change(homePageInput, { target: { value: "https://news.ycombinator.com" } });
       expect(useTerminalStore.getState().settings.general.browserHomePage).toBe("https://news.ycombinator.com");
+    });
+  });
+
+  describe("Updates", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("auto-check switch defaults on and flips autoCheckUpdates", () => {
+      render(<GeneralSettingsPane />);
+
+      const autoCheckSwitch = screen.getByRole("switch", {
+        name: /automatically check for updates/i,
+      });
+      expect(autoCheckSwitch).toBeChecked();
+      expect(
+        useTerminalStore.getState().settings.general.autoCheckUpdates,
+      ).toBe(true);
+
+      fireEvent.click(autoCheckSwitch);
+      expect(
+        useTerminalStore.getState().settings.general.autoCheckUpdates,
+      ).toBe(false);
+      expect(autoCheckSwitch).not.toBeChecked();
+
+      fireEvent.click(autoCheckSwitch);
+      expect(
+        useTerminalStore.getState().settings.general.autoCheckUpdates,
+      ).toBe(true);
+    });
+
+    it("Check-now dispatches a manual update check for the card", () => {
+      render(<GeneralSettingsPane />);
+      const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+      fireEvent.click(screen.getByRole("button", { name: /check now/i }));
+
+      const manualChecks = dispatchSpy.mock.calls.filter(
+        ([event]) =>
+          event instanceof CustomEvent && event.type === MANUAL_UPDATE_CHECK_EVENT,
+      );
+      expect(manualChecks).toHaveLength(1);
     });
   });
 });

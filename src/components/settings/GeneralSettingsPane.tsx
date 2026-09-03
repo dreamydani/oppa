@@ -1,5 +1,6 @@
 import React from "react";
 import { useTerminalStore } from "../../store/terminalStore";
+import { MANUAL_UPDATE_CHECK_EVENT } from "../UpdateBanner";
 import type {
   DefaultCwdMode,
   StartupBehavior,
@@ -58,6 +59,19 @@ export function GeneralSettingsPane(): React.ReactElement {
 
   const setHomePage = (url: string) => {
     updateSettings({ general: { browserHomePage: url } });
+  };
+
+  // Absent in old saves means enabled (opt-out switch).
+  const autoCheckUpdates = general.autoCheckUpdates !== false;
+
+  const toggleAutoCheckUpdates = () => {
+    updateSettings({ general: { autoCheckUpdates: !autoCheckUpdates } });
+  };
+
+  const handleCheckNow = () => {
+    // The update card owns the check (native-first, legacy fallback) and
+    // shows the outcome; this only requests it, bypassing the 6h floor.
+    window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
   };
 
   return (
@@ -354,6 +368,52 @@ export function GeneralSettingsPane(): React.ReactElement {
                 value={general.browserHomePage}
                 onChange={(e) => setHomePage(e.target.value)}
               />
+            </div>
+          </div>
+        </section>
+
+        {/* Updates */}
+        <section className="settings-card" aria-labelledby="heading-updates">
+          <h3 id="heading-updates" className="settings-card-title">
+            Updates
+          </h3>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <span className="settings-row-label">Automatically check for updates</span>
+              <span className="settings-row-desc">
+                Check for new stable releases on launch and daily. Dev builds never check.
+              </span>
+            </div>
+            <div className="settings-row-control">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoCheckUpdates}
+                aria-label="Automatically check for updates"
+                className={`settings-switch ${autoCheckUpdates ? "checked" : ""}`}
+                onClick={toggleAutoCheckUpdates}
+              >
+                <span className="settings-switch-thumb" />
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <span className="settings-row-label">Check for updates now</span>
+              <span className="settings-row-desc">
+                Run an immediate check, bypassing the daily schedule.
+              </span>
+            </div>
+            <div className="settings-row-control">
+              <button
+                type="button"
+                className="settings-segmented-btn"
+                onClick={handleCheckNow}
+              >
+                Check now
+              </button>
             </div>
           </div>
         </section>
