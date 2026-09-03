@@ -93,7 +93,7 @@ export interface SessionSlice {
   ) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
-  ackSession: (id: string, chars: number) => Promise<void>;
+  ackSession: (id: string, bytes: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   dismissSessionRestoredBanner: (sessionId: string) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
@@ -283,8 +283,8 @@ export function createSessionsSlice(
       ptyResize(id, cols, rows).catch(() => {});
     },
 
-    ackSession: async (id, chars) => {
-      await ptyAck(id, chars);
+    ackSession: async (id, bytes) => {
+      await ptyAck(id, bytes);
     },
 
     setSessionStatus: (id, status) => {

@@ -584,7 +584,7 @@ mod tests {
         // 5. Ack
         let resp = server.handle_request(DaemonRequest::Ack {
             session_id: "req-test-1".into(),
-            chars: 100,
+            bytes: 100,
         });
         assert_eq!(resp, DaemonResponse::Ok);
 
@@ -944,7 +944,7 @@ mod tests {
         // Send ACK over stream
         let ack_msg = serde_json::to_string(&DaemonRequest::Ack {
             session_id: "ack-srv-test".into(),
-            chars: 50,
+            bytes: 50,
         })
         .unwrap()
             + "\n";

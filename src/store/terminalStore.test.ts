@@ -424,7 +424,7 @@ describe("terminalStore", () => {
     expect(session.rows).toBe(40);
   });
 
-  it("ackSession forwards the char count to the transport", () => {
+  it("ackSession forwards the byte count to the transport", () => {
     const ptyAckMock = vi.mocked(ptyTransport.ptyAck);
     useTerminalStore.getState().ackSession("abc", 128);
     expect(ptyAckMock).toHaveBeenCalledWith("abc", 128);

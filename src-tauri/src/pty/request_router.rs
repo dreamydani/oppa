@@ -198,10 +198,10 @@ impl DaemonServer {
                     DaemonResponse::Error(format!("session {session_id} not found"))
                 }
             }
-            DaemonRequest::Ack { session_id, chars } => {
+            DaemonRequest::Ack { session_id, bytes } => {
                 let session = self.sessions.lock().get(&session_id).cloned();
                 if let Some(session) = session {
-                    match session.ack(chars) {
+                    match session.ack(bytes) {
                         Ok(()) => DaemonResponse::Ok,
                         Err(e) => DaemonResponse::Error(e),
                     }

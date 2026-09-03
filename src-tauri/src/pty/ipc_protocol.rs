@@ -137,7 +137,8 @@ pub enum DaemonRequest {
     },
     Ack {
         session_id: String,
-        chars: usize,
+        #[serde(alias = "chars")]
+        bytes: usize,
     },
     Kill {
         session_id: String,
@@ -511,7 +512,7 @@ mod tests {
             },
             DaemonRequest::Ack {
                 session_id: "s1".into(),
-                chars: 1024,
+                bytes: 1024,
             },
             DaemonRequest::Kill {
                 session_id: "s1".into(),
@@ -533,6 +534,18 @@ mod tests {
             let decoded: DaemonRequest = serde_json::from_str(&json).expect("deserialize request");
             assert_eq!(req, decoded);
         }
+
+        // Legacy wire compat: pre-rename clients send `chars`; alias accepts it.
+        let legacy: DaemonRequest =
+            serde_json::from_str(r#"{"type":"Ack","payload":{"session_id":"s1","chars":1024}}"#)
+                .expect("legacy ack with chars");
+        assert_eq!(
+            legacy,
+            DaemonRequest::Ack {
+                session_id: "s1".into(),
+                bytes: 1024,
+            }
+        );
     }
 
     #[test]

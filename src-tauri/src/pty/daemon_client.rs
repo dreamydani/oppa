@@ -540,13 +540,13 @@ impl DaemonClient {
     }
 
     /// Acknowledge processed output bytes for backpressure release.
-    pub fn ack(&self, session_id: &str, chars: usize) -> Result<(), String> {
+    pub fn ack(&self, session_id: &str, bytes: usize) -> Result<(), String> {
         Self::queue_request(
             &self.write_tx,
             &self.connected,
             DaemonRequest::Ack {
                 session_id: session_id.to_string(),
-                chars,
+                bytes,
             },
             "ack",
         )

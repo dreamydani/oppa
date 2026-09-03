@@ -288,8 +288,8 @@ pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String
 }
 
 #[tauri::command(async)]
-pub fn pty_ack(manager: State<'_, PtyManager>, id: String, chars: usize) -> Result<(), String> {
-    manager.ack(&id, chars)
+pub fn pty_ack(manager: State<'_, PtyManager>, id: String, bytes: usize) -> Result<(), String> {
+    manager.ack(&id, bytes)
 }
 
 #[tauri::command(async)]

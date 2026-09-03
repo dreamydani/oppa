@@ -114,8 +114,8 @@ export function ptyKill(id: string): Promise<void> {
   return invoke("pty_kill", { id });
 }
 
-export function ptyAck(id: string, chars: number): Promise<void> {
-  return invoke("pty_ack", { id, chars });
+export function ptyAck(id: string, bytes: number): Promise<void> {
+  return invoke("pty_ack", { id, bytes });
 }
 
 export function ptyList(): Promise<string[]> {

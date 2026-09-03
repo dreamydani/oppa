@@ -249,9 +249,9 @@ impl PtyManager {
     }
 
     /// Acknowledge processed bytes to release backpressure.
-    pub fn ack(&self, id: &str, chars: usize) -> Result<(), String> {
+    pub fn ack(&self, id: &str, bytes: usize) -> Result<(), String> {
         let client = self.get_client()?;
-        client.ack(id, chars)
+        client.ack(id, bytes)
     }
 
     /// List all active session IDs.
