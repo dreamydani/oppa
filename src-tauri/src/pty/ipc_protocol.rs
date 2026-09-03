@@ -136,12 +136,10 @@ pub enum DaemonRequest {
     },
     Ack {
         session_id: String,
-        // Single-key wire shape (NOT dual-emit): serde rejects a payload
-        // carrying both `bytes` and `chars` ("duplicate field `bytes`"), so a
-        // dual-key Ack would be unparseable by v6 daemons AND by this struct.
-        // The `chars` alias keeps pre-rename senders readable; every current
-        // sender emits `bytes` only, which all versions parse identically.
-        #[serde(alias = "chars")]
+        /// Wire key stays `chars`: pre-v7 daemons (0.2.2 and earlier) parse only
+        /// this key, v6/v7 parse it via the alias — our senders emit `chars`
+        /// universally so a GUI update never wedges a surviving old daemon.
+        #[serde(rename(serialize = "chars"), alias = "chars")]
         bytes: usize,
     },
     Kill {
@@ -553,10 +551,10 @@ mod tests {
     }
 
     #[test]
-    fn test_ack_cross_version_shapes_share_one_bytes_key() {
-        // Matrix (real tagged envelope): pre-rename `{chars:N}` reads via the
-        // alias and current `{bytes:N}` reads directly — both ack N on every
-        // daemon version, old or new.
+    fn test_ack_cross_version_shapes_share_one_chars_key() {
+        // Matrix (real tagged envelope): legacy `{chars:N}` reads via the
+        // alias and any stray new-shape `{bytes:N}` reads via the field name
+        // — both ack N. Emission is always the legacy `chars` key (see below).
         for wire in [
             r#"{"type":"Ack","payload":{"session_id":"s","chars":7}}"#,
             r#"{"type":"Ack","payload":{"session_id":"s","bytes":7}}"#,
@@ -570,20 +568,21 @@ mod tests {
             }
         }
 
-        // Single-key invariant: new senders must emit `bytes` ONLY. A payload
-        // carrying both keys is unparseable ("duplicate field `bytes`") on v6
-        // daemons and on this struct, so dual-emit would break cross-version
-        // acks instead of fixing them.
+        // Emission-shape invariant: Ack{bytes:7} serializes as `"chars":7`
+        // with NO `"bytes"` key — the one key every daemon ever shipped
+        // parses (0.2.2-era daemons know only `chars`, with no alias).
         let wire = serde_json::to_value(DaemonRequest::Ack {
             session_id: "s".into(),
             bytes: 7,
         })
         .unwrap();
-        assert_eq!(wire["payload"]["bytes"], 7);
+        assert_eq!(wire["payload"]["chars"], 7);
         assert!(
-            wire["payload"].get("chars").is_none(),
-            "daemon-wire Ack must stay single-key: {wire}"
+            wire["payload"].get("bytes").is_none(),
+            "daemon-wire Ack must emit only the legacy chars key: {wire}"
         );
+        // A dual-key payload still hits one field twice ("duplicate field"),
+        // so it stays unparseable by design — our senders never emit it.
         let dual: Result<DaemonRequest, _> = serde_json::from_value(serde_json::json!({
             "type": "Ack",
             "payload": {"session_id": "s", "bytes": 7, "chars": 7},
