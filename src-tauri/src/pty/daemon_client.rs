@@ -541,6 +541,10 @@ impl DaemonClient {
 
     /// Acknowledge processed output bytes for backpressure release.
     pub fn ack(&self, session_id: &str, bytes: usize) -> Result<(), String> {
+        // WHY bytes-only (never dual-emit `chars` here): serde treats the
+        // `chars` alias as the same field as `bytes`, so a dual-key payload
+        // fails to parse on v6 daemons with "duplicate field `bytes`".
+        // Single-key `bytes` parses identically on every version.
         Self::queue_request(
             &self.write_tx,
             &self.connected,

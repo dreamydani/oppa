@@ -83,10 +83,10 @@ describe("pty transport", () => {
     expect(invokeMock).toHaveBeenCalledWith("pty_kill", { id: "abc" });
   });
 
-  it("ptyAck invokes pty_ack with bytes", async () => {
+  it("ptyAck invokes pty_ack with bytes and chars for cross-version compat", async () => {
     const { ptyAck } = await import("./transport");
     await ptyAck("abc", 42);
-    expect(invokeMock).toHaveBeenCalledWith("pty_ack", { id: "abc", bytes: 42 });
+    expect(invokeMock).toHaveBeenCalledWith("pty_ack", { id: "abc", bytes: 42, chars: 42 });
   });
 
   it("ptyList invokes pty_list and resolves session ids", async () => {

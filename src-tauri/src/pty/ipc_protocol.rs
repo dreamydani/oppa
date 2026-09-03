@@ -11,17 +11,16 @@ use crate::git::worktrees::WorktreeListEntry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const DAEMON_PROTOCOL_VERSION: u32 = 6;
+pub const DAEMON_PROTOCOL_VERSION: u32 = 7;
 
 /// Floor for backward-compatible attach: a client/daemon speaking at least
 /// this protocol version may talk to a peer built from newer code, even when
 /// the versions differ. Versions below this floor are genuinely too old to
 /// serve the current build and are rejected at the Hello handshake.
 ///
-/// Today MIN_SUPPORTED == DAEMON_PROTOCOL_VERSION == 6, so the current
-/// single-build world still accepts each other exactly as before; the
-/// constant only widens the window once a future build bumps
-/// DAEMON_PROTOCOL_VERSION without breaking the wire.
+/// MIN_SUPPORTED stays 6 while DAEMON_PROTOCOL_VERSION is 7, so v6 and v7
+/// pairs still connect across the update transition; only pre-v6 builds are
+/// rejected.
 pub const MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION: u32 = 6;
 
 /// How a cold-restored session's foreground work will be brought back.
@@ -137,6 +136,11 @@ pub enum DaemonRequest {
     },
     Ack {
         session_id: String,
+        // Single-key wire shape (NOT dual-emit): serde rejects a payload
+        // carrying both `bytes` and `chars` ("duplicate field `bytes`"), so a
+        // dual-key Ack would be unparseable by v6 daemons AND by this struct.
+        // The `chars` alias keeps pre-rename senders readable; every current
+        // sender emits `bytes` only, which all versions parse identically.
         #[serde(alias = "chars")]
         bytes: usize,
     },
@@ -546,6 +550,54 @@ mod tests {
                 bytes: 1024,
             }
         );
+    }
+
+    #[test]
+    fn test_ack_cross_version_shapes_share_one_bytes_key() {
+        // Matrix (real tagged envelope): pre-rename `{chars:N}` reads via the
+        // alias and current `{bytes:N}` reads directly — both ack N on every
+        // daemon version, old or new.
+        for wire in [
+            r#"{"type":"Ack","payload":{"session_id":"s","chars":7}}"#,
+            r#"{"type":"Ack","payload":{"session_id":"s","bytes":7}}"#,
+        ] {
+            match serde_json::from_str::<DaemonRequest>(wire).expect("ack shape") {
+                DaemonRequest::Ack { session_id, bytes } => {
+                    assert_eq!(session_id, "s");
+                    assert_eq!(bytes, 7, "wire: {wire}");
+                }
+                other => panic!("expected Ack, got {other:?}"),
+            }
+        }
+
+        // Single-key invariant: new senders must emit `bytes` ONLY. A payload
+        // carrying both keys is unparseable ("duplicate field `bytes`") on v6
+        // daemons and on this struct, so dual-emit would break cross-version
+        // acks instead of fixing them.
+        let wire = serde_json::to_value(DaemonRequest::Ack {
+            session_id: "s".into(),
+            bytes: 7,
+        })
+        .unwrap();
+        assert_eq!(wire["payload"]["bytes"], 7);
+        assert!(
+            wire["payload"].get("chars").is_none(),
+            "daemon-wire Ack must stay single-key: {wire}"
+        );
+        let dual: Result<DaemonRequest, _> = serde_json::from_value(serde_json::json!({
+            "type": "Ack",
+            "payload": {"session_id": "s", "bytes": 7, "chars": 7},
+        }));
+        assert!(
+            dual.is_err(),
+            "dual-key Ack must stay unparseable by design, else old daemons break silently"
+        );
+    }
+
+    #[test]
+    fn test_daemon_protocol_v7_still_accepts_v6() {
+        assert_eq!(DAEMON_PROTOCOL_VERSION, 7);
+        assert_eq!(MIN_SUPPORTED_DAEMON_PROTOCOL_VERSION, 6);
     }
 
     #[test]

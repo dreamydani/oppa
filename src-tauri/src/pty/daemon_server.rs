@@ -635,6 +635,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ack_cross_version_wire_shapes_are_handled() {
+        let server = DaemonServer::new();
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "ack-xver".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+        });
+        assert!(matches!(resp, DaemonResponse::SessionAttached(_)));
+
+        // Old (pre-rename `{chars:N}`) and current (`{bytes:N}`) wire shapes
+        // must both ack through the real tagged envelope on the new daemon.
+        for wire in [
+            r#"{"type":"Ack","payload":{"session_id":"ack-xver","chars":9}}"#,
+            r#"{"type":"Ack","payload":{"session_id":"ack-xver","bytes":9}}"#,
+        ] {
+            let req: DaemonRequest = serde_json::from_str(wire).expect("ack wire shape");
+            assert_eq!(server.handle_request(req), DaemonResponse::Ok, "wire: {wire}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_daemon_server_socket_ipc_roundtrip() {
         let server = Arc::new(DaemonServer::new());
         let cancel_token = CancellationToken::new();

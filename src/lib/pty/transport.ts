@@ -115,7 +115,10 @@ export function ptyKill(id: string): Promise<void> {
 }
 
 export function ptyAck(id: string, bytes: number): Promise<void> {
-  return invoke("pty_ack", { id, bytes });
+  // WHY dual-emit: old backends take `(id, bytes)` and ignore the unknown
+  // `chars` key, while a new backend prefers `bytes` with `chars` fallback —
+  // sending both keeps every GUI/backend combination working.
+  return invoke("pty_ack", { id, bytes, chars: bytes });
 }
 
 export function ptyList(): Promise<string[]> {

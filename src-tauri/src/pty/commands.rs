@@ -288,8 +288,22 @@ pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String
 }
 
 #[tauri::command(async)]
-pub fn pty_ack(manager: State<'_, PtyManager>, id: String, bytes: usize) -> Result<(), String> {
-    manager.ack(&id, bytes)
+pub fn pty_ack(
+    manager: State<'_, PtyManager>,
+    id: String,
+    bytes: Option<usize>,
+    chars: Option<usize>,
+) -> Result<(), String> {
+    manager.ack(&id, ack_len(bytes, chars))
+}
+
+/// Effective acked byte count from the dual-optional Tauri params.
+// WHY downgrade-safe: an old GUI sends only `{id, chars}` (pre-rename) or
+// only `{id, bytes}`; accept either so a new backend keeps serving old
+// frontends across the update transition. `bytes` wins when both ride along
+// (the new TS dual-emits equal values, so both arms agree).
+fn ack_len(bytes: Option<usize>, chars: Option<usize>) -> usize {
+    bytes.or(chars).unwrap_or(0)
 }
 
 #[tauri::command(async)]
@@ -416,6 +430,15 @@ mod tests {
             session_count: 0,
             unknown: true,
         }
+    }
+
+    #[test]
+    fn ack_len_prefers_bytes_falls_back_to_chars() {
+        // New TS dual-emits equal values; old GUIs send exactly one key.
+        assert_eq!(ack_len(Some(42), Some(42)), 42);
+        assert_eq!(ack_len(Some(42), None), 42);
+        assert_eq!(ack_len(None, Some(7)), 7);
+        assert_eq!(ack_len(None, None), 0);
     }
 
     #[test]
