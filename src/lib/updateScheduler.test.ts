@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { resolveChannel } from "./channel";
+import { downloadNativeUpdate } from "./updater";
 import { useTerminalStore } from "../store/terminalStore";
 import {
   startUpdateScheduler,
@@ -313,6 +314,64 @@ describe("updateScheduler", () => {
     requestManualCheck();
     await vi.advanceTimersByTimeAsync(0);
     expect(lastAvailability()).toMatchObject({ version: null, phase: null });
+  });
+
+  it("automatic failure preserves a staged download (no clear, pending survives)", async () => {
+    const update = fakeNativeUpdate("0.3.0");
+    const pluginDownload = vi.mocked(update.download);
+    checkMock.mockResolvedValue(update);
+    stopFns.push(startUpdateScheduler());
+
+    requestManualCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lastAvailability()).toMatchObject({ version: "0.3.0", phase: "available" });
+    expect(await downloadNativeUpdate(() => {})).toEqual({ ok: true });
+    expect(pluginDownload).toHaveBeenCalledTimes(1);
+
+    // The background check fails (offline): no clear is announced…
+    checkMock.mockResolvedValue(null);
+    legacyPayload = null;
+    await vi.advanceTimersByTimeAsync(UPDATE_INITIAL_DELAY_MS);
+    expect(checkMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(UPDATE_RECHECK_FLOOR_MS);
+    expect(checkMock).toHaveBeenCalledTimes(2);
+
+    // …so the card offer stands and the staged pending is still downloadable.
+    expect(availabilityEvents().every((d) => d.version !== null)).toBe(true);
+    expect(lastAvailability()).toMatchObject({ version: "0.3.0", phase: "available" });
+    expect(await downloadNativeUpdate(() => {})).toEqual({ ok: true });
+    expect(pluginDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it("manual failure still announces a clear (resolves the checking state)", async () => {
+    checkMock.mockResolvedValue(null);
+    legacyPayload = null;
+    stopFns.push(startUpdateScheduler());
+
+    requestManualCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lastAvailability()).toMatchObject({ version: null, phase: null });
+  });
+
+  it("manual failures do not step the backoff ladder", async () => {
+    checkMock.mockResolvedValue(null);
+    legacyPayload = null;
+    stopFns.push(startUpdateScheduler());
+
+    await vi.advanceTimersByTimeAsync(UPDATE_INITIAL_DELAY_MS);
+    expect(checkMock).toHaveBeenCalledTimes(1);
+
+    requestManualCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    requestManualCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkMock).toHaveBeenCalledTimes(3);
+
+    // Still on the original 1h rung: the next background check fires on time.
+    await vi.advanceTimersByTimeAsync(UPDATE_BACKOFF_BASE_MS - 1);
+    expect(checkMock).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(checkMock).toHaveBeenCalledTimes(4);
   });
 
   it("stop removes all listeners and timers", async () => {

@@ -101,10 +101,14 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
   };
 
   // Native-first priority; the legacy fallback drives the old browser flow.
-  // Seams resolve null on failure, but guard rejections anyway.
-  const probeSeams = async (): Promise<RawOutcome> => {
+  // Seams resolve null on failure, but guard rejections anyway. Automatic
+  // checks preserve a staged pending update on empty so a failing background
+  // check can't strand a downloaded card; manual checks discard as before.
+  const probeSeams = async (preservePending: boolean): Promise<RawOutcome> => {
     try {
-      const native = await checkForNativeUpdate().catch(() => null);
+      const native = await checkForNativeUpdate(
+        preservePending ? { preservePendingOnEmpty: true } : undefined,
+      ).catch(() => null);
       if (native) return { kind: "native", version: native.version, currentVersion: native.currentVersion };
       const legacy = await checkForUpdate().catch(() => null);
       if (legacy) {
@@ -118,15 +122,17 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
 
   // Presents an outcome exactly like the card used to: resolved checks stamp
   // (empty ones never stamp, so recovery isn't suppressed), every outcome is
-  // debug-logged so a missing card stays diagnosable, and the bus always
-  // announces — including clears, so manual checking states resolve.
-  const presentOutcome = (outcome: RawOutcome): void => {
+  // debug-logged so a missing card stays diagnosable. Automatic failures only
+  // log + back off — they emit nothing, so a staged offer survives a failed
+  // background check. Manual failures and resolved negatives announce a
+  // clear, so checking states resolve and pulled releases vanish.
+  const presentOutcome = (outcome: RawOutcome, reason: CheckReason, automatic: boolean): void => {
     const channel = getChannel() ?? "unresolved";
     if (outcome.kind === "native") {
       checkedVersion = outcome.version;
       useTerminalStore.getState().updateSettings({ general: { lastCheckAt: Date.now() } });
       console.debug(
-        `[updater] channel=${channel} engine=native available=true version=${outcome.version} checkedVersion=${checkedVersion}`,
+        `[updater] channel=${channel} reason=${reason} engine=native available=true version=${outcome.version} checkedVersion=${checkedVersion}`,
       );
       emitAvailability({
         version: outcome.version,
@@ -140,7 +146,7 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
       checkedVersion = outcome.version;
       useTerminalStore.getState().updateSettings({ general: { lastCheckAt: Date.now() } });
       console.debug(
-        `[updater] channel=${channel} engine=legacy available=${outcome.available} version=${outcome.version} checkedVersion=${checkedVersion}`,
+        `[updater] channel=${channel} reason=${reason} engine=legacy available=${outcome.available} version=${outcome.version} checkedVersion=${checkedVersion}`,
       );
       if (!outcome.available) {
         emitAvailability({ version: null, phase: null });
@@ -154,11 +160,15 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
       });
       return;
     }
-    console.debug(`[updater] channel=${channel} available=false version=none`);
-    emitAvailability({ version: null, phase: null });
+    console.debug(`[updater] channel=${channel} reason=${reason} available=false version=none`);
+    // Automatic failures stay silent (a staged offer survives); manual ones
+    // must resolve the card's checking state.
+    if (!automatic) {
+      emitAvailability({ version: null, phase: null });
+    }
   };
 
-  const triggerCheck = (_reason: CheckReason, automatic: boolean): Promise<void> => {
+  const triggerCheck = (reason: CheckReason, automatic: boolean): Promise<void> => {
     if (stopped) return Promise.resolve();
     if (inFlight) return inFlight;
     const task = (async (): Promise<void> => {
@@ -174,10 +184,10 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
           return;
         }
       }
-      const outcome = await probeSeams();
+      const outcome = await probeSeams(automatic);
       if (stopped) return;
       try {
-        presentOutcome(outcome);
+        presentOutcome(outcome, reason, automatic);
       } catch {
         // A throwing bus listener must never kill the daily chain.
       }
@@ -186,11 +196,10 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
         backoffMs = backoffBaseMs;
         if (automatic) scheduleNext(dailyIntervalMs);
       } else if (automatic) {
+        // Only background failures step the ladder; manual retries never do.
         const delay = backoffMs;
         backoffMs = Math.min(backoffCapMs, backoffMs * 2);
         scheduleNext(delay);
-      } else {
-        backoffMs = Math.min(backoffCapMs, backoffMs * 2);
       }
     })().catch(() => {});
     inFlight = task;

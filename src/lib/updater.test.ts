@@ -256,6 +256,52 @@ describe("updater seam", () => {
       await expect(checkForNativeUpdate()).resolves.not.toBeNull();
     });
 
+    it("closes the displaced pending Update when a check resolves empty", async () => {
+      await setChannel("stable");
+      const first = fakeNativeUpdate();
+      const closeFirst = vi.fn().mockResolvedValue(undefined);
+      (first as unknown as { close: () => Promise<void> }).close = closeFirst;
+      checkMock.mockResolvedValue(first as unknown as Update);
+      await checkForNativeUpdate();
+
+      checkMock.mockResolvedValue(null);
+      await expect(checkForNativeUpdate()).resolves.toBeNull();
+      expect(closeFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the displaced pending Update when the check rejects", async () => {
+      await setChannel("stable");
+      const first = fakeNativeUpdate();
+      const closeFirst = vi.fn().mockResolvedValue(undefined);
+      (first as unknown as { close: () => Promise<void> }).close = closeFirst;
+      checkMock.mockResolvedValue(first as unknown as Update);
+      await checkForNativeUpdate();
+
+      checkMock.mockRejectedValue(new Error("offline"));
+      await expect(checkForNativeUpdate()).resolves.toBeNull();
+      expect(closeFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves the staged pending Update on empty when asked", async () => {
+      await setChannel("stable");
+      const first = fakeNativeUpdate();
+      const closeFirst = vi.fn().mockResolvedValue(undefined);
+      (first as unknown as { close: () => Promise<void> }).close = closeFirst;
+      checkMock.mockResolvedValue(first as unknown as Update);
+      await checkForNativeUpdate();
+
+      checkMock.mockResolvedValue(null);
+      await expect(
+        checkForNativeUpdate({ preservePendingOnEmpty: true }),
+      ).resolves.toBeNull();
+      expect(closeFirst).not.toHaveBeenCalled();
+
+      // The survivor is still staged: superseding it closes it exactly once.
+      checkMock.mockResolvedValue(fakeNativeUpdate() as unknown as Update);
+      await checkForNativeUpdate();
+      expect(closeFirst).toHaveBeenCalledTimes(1);
+    });
+
     it("download emits the progress sequence then resolves ok", async () => {
       const update = await establishPending();
       const progress: Array<[number, number?]> = [];

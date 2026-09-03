@@ -119,11 +119,32 @@ function nativeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Drops the staged native update, releasing the plugin resource when it has
+// one. Test fakes may lack close(); released resources may reject.
+async function releasePendingNativeUpdate(): Promise<void> {
+  const displaced = pendingNativeUpdate;
+  pendingNativeUpdate = null;
+  nativeUpdateDownloaded = false;
+  if (displaced) {
+    try {
+      await displaced.close?.();
+    } catch {
+      // Already released; the fresh state below is what matters.
+    }
+  }
+}
+
 // Native check behind the same stable-channel gate as `checkForUpdate`:
 // dev/unresolved → null with no plugin calls. Rejections (offline, or
 // signature verification before the H1 pubkey lands) stay fail-silent null —
 // the retry card only appears after an explicit user action fails.
-export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {
+//
+// `preservePendingOnEmpty` (scheduler automatic checks only): an empty/error
+// outcome leaves a staged download alone instead of discarding it, so a
+// failing background check can't strand a downloaded card with no pending.
+export async function checkForNativeUpdate(
+  options: { preservePendingOnEmpty?: boolean } = {},
+): Promise<NativeUpdateInfo | null> {
   const channel = getChannel() ?? (await resolveChannel().catch(() => null));
   if (channel !== "stable") {
     return null;
@@ -131,8 +152,9 @@ export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {
   try {
     const update = await check();
     if (!update) {
-      pendingNativeUpdate = null;
-      nativeUpdateDownloaded = false;
+      if (!options.preservePendingOnEmpty) {
+        await releasePendingNativeUpdate();
+      }
       return null;
     }
     const displaced = pendingNativeUpdate;
@@ -154,8 +176,9 @@ export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {
       body: update.body,
     };
   } catch {
-    pendingNativeUpdate = null;
-    nativeUpdateDownloaded = false;
+    if (!options.preservePendingOnEmpty) {
+      await releasePendingNativeUpdate();
+    }
     return null;
   }
 }
