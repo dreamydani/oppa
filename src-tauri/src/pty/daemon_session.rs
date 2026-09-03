@@ -481,10 +481,10 @@ impl DaemonSession {
     }
 
     /// Release backpressure by acknowledging processed bytes.
-    pub fn ack(&self, chars: usize) -> Result<(), String> {
+    pub fn ack(&self, bytes: usize) -> Result<(), String> {
         self.pending_bytes
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| {
-                Some(p.saturating_sub(chars))
+                Some(p.saturating_sub(bytes))
             })
             .unwrap_or(0);
         if self.pending_bytes.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {

@@ -113,7 +113,8 @@ pub fn run_batcher<F>(
                 flush_batch(&mut buf, &mut decoder, &mut batch_first_at, &mut emit);
                 let tail = decoder.flush();
                 if !tail.is_empty() {
-                    emit(tail, 0);
+                    let tail_bytes = tail.len();
+                    emit(tail, tail_bytes);
                 }
                 break;
             }
@@ -124,7 +125,8 @@ pub fn run_batcher<F>(
                 flush_batch(&mut buf, &mut decoder, &mut batch_first_at, &mut emit);
                 let tail = decoder.flush();
                 if !tail.is_empty() {
-                    emit(tail, 0);
+                    let tail_bytes = tail.len();
+                    emit(tail, tail_bytes);
                 }
                 break;
             }
@@ -259,6 +261,31 @@ mod tests {
             .recv_timeout(Duration::from_millis(100))
             .expect("replacement char event");
         assert_eq!(second.0, "\u{FFFD}");
+        // Never-drop accounting: non-empty tail carries its byte count.
+        assert!(second.1 > 0);
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn close_tail_emit_carries_real_byte_count() {
+        let (drain, rx, drained_tx) = new_drain();
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            run_batcher(rx, drained_tx, 60_000, move |text, bytes| {
+                let _ = event_tx.send((text, bytes));
+            });
+        });
+        // "✨" is 3 bytes in UTF-8; send first 2 bytes then close.
+        drain.send_chunk(vec![0xE2, 0x9C]);
+        drain.finish();
+        // First event: decoded "" with 2 bytes accounted.
+        let first = event_rx.recv_timeout(std::time::Duration::from_millis(200)).expect("first event");
+        assert_eq!(first.1, 2);
+        // Second event (replacement char) must carry its own byte length, never 0 with non-empty text.
+        let second = event_rx.recv_timeout(std::time::Duration::from_millis(200)).expect("tail event");
+        if !second.0.is_empty() {
+            assert!(second.1 > 0, "non-empty tail must carry byte count, got {:?}", second);
+        }
         let _ = handle.join();
     }
 
