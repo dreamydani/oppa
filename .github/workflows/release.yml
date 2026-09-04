@@ -98,7 +98,7 @@ jobs:
           node --input-type=module -e "
           import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { basename, join } from 'node:path';
-          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, targetTripleFromDir } from './scripts/release.mjs';
+          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, targetTripleFromDir, selectUpdaterBundle } from './scripts/release.mjs';
           const version = process.env.VERSION, channel = process.env.CHANNEL;
           const { latest } = manifestFilenames(channel);
           mkdirSync('release-assets', { recursive: true });
@@ -115,13 +115,35 @@ jobs:
               const sig = readFileSync(file, 'utf8').trim();
               const name = basename(asset);
               const url = 'https://github.com/dreamydani/oppa/releases/download/v' + version + '/' + encodeURIComponent(name);
-              entries.push({ target: targetTripleFromDir(dir.name), url, signature: sig });
-              copyFileSync(asset, join('release-assets', name));
-              copyFileSync(file, join('release-assets', name + '.sig'));
-              assets.push(join('release-assets', name), join('release-assets', name + '.sig'));
+              entries.push({ dir: dir.name, file, asset, sig, url });
             }
           }
-          const feed = mergeLatestJson({ version, pubDate: new Date().toISOString(), entries });
+          import { selectUpdaterBundle } from './scripts/release.mjs';
+          // WHY one bundle per triple: an OS dir holds several signed files but
+          // the feed takes exactly one — group by matrix dir, pick explicitly.
+          const byTriple = new Map();
+          for (const e of entries) {
+            const target = targetTripleFromDir(e.dir);
+            if (!byTriple.has(target)) byTriple.set(target, []);
+            byTriple.get(target).push(e);
+          }
+          const picked = [];
+          for (const [target, group] of byTriple) {
+            const names = group.map((e) => basename(e.asset));
+            const winner = selectUpdaterBundle(names, target);
+            picked.push({ target, ...group.find((e) => basename(e.asset) === winner) });
+          }
+          for (const e of picked) {
+            const name = basename(e.asset);
+            copyFileSync(e.asset, join('release-assets', name));
+            copyFileSync(e.file, join('release-assets', name + '.sig'));
+            assets.push(join('release-assets', name), join('release-assets', name + '.sig'));
+          }
+          const feedEntries = picked.map((e) => {
+            const triple = targetTripleFromDir(e.dir);
+            return { target: triple, url: e.url, signature: e.sig };
+          });
+          const feed = mergeLatestJson({ version, pubDate: new Date().toISOString(), entries: feedEntries });
           writeFileSync(join('release-assets', latest), JSON.stringify(feed, null, 2) + '\n');
           assets.push(join('release-assets', latest));
           writeFileSync('gh-args.json', JSON.stringify(buildGhReleaseArgsMulti(version, assets, channel === 'rc')));

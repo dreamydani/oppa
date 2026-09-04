@@ -646,6 +646,39 @@ export function targetTripleFromDir(dirname) {
   return triple;
 }
 
+// Updater-bundle picker for the CI finalize job: each OS dir may contain
+// several `.sig` files (installer + updater bundles, per-format artifacts)
+// but the feed takes exactly ONE bundle per target triple.
+// WHY explicit priority instead of first-match: a layout change must throw
+// with the candidate list (diagnosable in CI logs), never silently feed the
+// wrong bundle (e.g. an MSI where NSIS is primary).
+const UPDATER_BUNDLE_PRIORITY = [
+  { triple: "windows-x86_64", suffixes: [".nsis.zip", ".msi.zip"] },
+  { triple: "darwin-aarch64", suffixes: [".app.tar.gz"] },
+  { triple: "darwin-x86_64", suffixes: [".app.tar.gz"] },
+  { triple: "linux-x86_64", suffixes: [".appimage.tar.gz"] },
+];
+
+export function selectUpdaterBundle(filenames, triple) {
+  const rule = UPDATER_BUNDLE_PRIORITY.find((r) => r.triple === triple);
+  if (!rule) {
+    throw new Error(`no updater bundle rule for target "${triple}"`);
+  }
+  const names = [...filenames].sort();
+  for (const suffix of rule.suffixes) {
+    const hits = names.filter((n) => n.toLowerCase().endsWith(suffix));
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) {
+      throw new Error(
+        `ambiguous updater bundle for "${triple}": ${hits.join(", ")}`,
+      );
+    }
+  }
+  throw new Error(
+    `no updater bundle for "${triple}" among: ${names.join(", ") || "(none)"}`,
+  );
+}
+
 // Bundle-filename → updater target-triple mapping for the CI finalize job.
 // WHY: unknown arch/OS throws fail-fast — never silently drop a platform.
 export function targetTripleToOs(target) {

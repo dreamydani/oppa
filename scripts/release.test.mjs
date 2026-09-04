@@ -32,6 +32,7 @@ import {
   bundleTargetTriple,
   targetTripleToOs,
   targetTripleFromDir,
+  selectUpdaterBundle,
   manifestFilenames,
   assertReleaseFlags,
   parseChannel,
@@ -779,6 +780,44 @@ describe("targetTripleFromDir", () => {
   it("throws on unknown dirs instead of dropping a platform", () => {
     expect(() => targetTripleFromDir("bundle-plan9-mips")).toThrow(/unknown bundle dir/);
     expect(() => targetTripleFromDir("dist-bundles")).toThrow(/unknown bundle dir/);
+  });
+});
+
+describe("selectUpdaterBundle", () => {
+  // WHY: the Linux dir that broke the first finalize held several signed
+  // files for one triple — the feed must take exactly one, chosen explicitly.
+  it("picks the NSIS bundle on Windows, MSI as fallback", () => {
+    expect(
+      selectUpdaterBundle(
+        ["oppa_0.2.4_x64-setup.nsis.zip", "oppa_0.2.4_x64_en-US.msi.zip"],
+        "windows-x86_64",
+      ),
+    ).toBe("oppa_0.2.4_x64-setup.nsis.zip");
+    expect(
+      selectUpdaterBundle(["oppa_0.2.4_x64_en-US.msi.zip"], "windows-x86_64"),
+    ).toBe("oppa_0.2.4_x64_en-US.msi.zip");
+  });
+  it("picks the single macOS and Linux updater bundles", () => {
+    expect(selectUpdaterBundle(["oppa.app.tar.gz"], "darwin-aarch64")).toBe(
+      "oppa.app.tar.gz",
+    );
+    expect(
+      selectUpdaterBundle(["oppa_0.2.4_amd64.AppImage.tar.gz"], "linux-x86_64"),
+    ).toBe("oppa_0.2.4_amd64.AppImage.tar.gz");
+  });
+  it("throws listing candidates on ambiguity or absence", () => {
+    expect(() =>
+      selectUpdaterBundle(["a.nsis.zip", "b.nsis.zip"], "windows-x86_64"),
+    ).toThrow(/ambiguous.*a\.nsis\.zip.*b\.nsis\.zip/);
+    expect(() => selectUpdaterBundle(["readme.txt"], "linux-x86_64")).toThrow(
+      /no updater bundle.*readme\.txt/,
+    );
+    expect(() => selectUpdaterBundle([], "windows-x86_64")).toThrow(
+      /no updater bundle/,
+    );
+    expect(() => selectUpdaterBundle(["x.nsis.zip"], "plan9-mips")).toThrow(
+      /no updater bundle rule/,
+    );
   });
 });
 
