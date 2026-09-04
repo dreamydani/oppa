@@ -786,16 +786,18 @@ describe("targetTripleFromDir", () => {
 describe("selectUpdaterBundle", () => {
   // WHY: the Linux dir that broke the first finalize held several signed
   // files for one triple — the feed must take exactly one, chosen explicitly.
-  it("picks the NSIS bundle on Windows, MSI as fallback", () => {
+  it("picks the NSIS setup itself on Windows, MSI as fallback", () => {
+    // WHY: Tauri re-uses setup.exe as the updater bundle (plus its .sig) —
+    // proven by the CI bundle listing, which has no .nsis.zip at all.
     expect(
       selectUpdaterBundle(
-        ["oppa_0.2.4_x64-setup.nsis.zip", "oppa_0.2.4_x64_en-US.msi.zip"],
+        ["oppa_0.2.4_x64-setup.exe", "oppa_0.2.4_x64_en-US.msi"],
         "windows-x86_64",
       ),
-    ).toBe("oppa_0.2.4_x64-setup.nsis.zip");
+    ).toBe("oppa_0.2.4_x64-setup.exe");
     expect(
-      selectUpdaterBundle(["oppa_0.2.4_x64_en-US.msi.zip"], "windows-x86_64"),
-    ).toBe("oppa_0.2.4_x64_en-US.msi.zip");
+      selectUpdaterBundle(["oppa_0.2.4_x64_en-US.msi"], "windows-x86_64"),
+    ).toBe("oppa_0.2.4_x64_en-US.msi");
   });
   it("picks the single macOS and Linux updater bundles", () => {
     expect(selectUpdaterBundle(["oppa.app.tar.gz"], "darwin-aarch64")).toBe(
@@ -816,15 +818,15 @@ describe("selectUpdaterBundle", () => {
   });
   it("throws listing candidates on ambiguity or absence", () => {
     expect(() =>
-      selectUpdaterBundle(["a.nsis.zip", "b.nsis.zip"], "windows-x86_64"),
-    ).toThrow(/ambiguous.*a\.nsis\.zip.*b\.nsis\.zip/);
+      selectUpdaterBundle(["a-setup.exe", "b-setup.exe"], "windows-x86_64"),
+    ).toThrow(/ambiguous.*a-setup\.exe.*b-setup\.exe/);
     expect(() => selectUpdaterBundle(["readme.txt"], "linux-x86_64")).toThrow(
       /no updater bundle.*readme\.txt/,
     );
     expect(() => selectUpdaterBundle([], "windows-x86_64")).toThrow(
       /no updater bundle/,
     );
-    expect(() => selectUpdaterBundle(["x.nsis.zip"], "plan9-mips")).toThrow(
+    expect(() => selectUpdaterBundle(["x-setup.exe"], "plan9-mips")).toThrow(
       /no updater bundle rule/,
     );
   });

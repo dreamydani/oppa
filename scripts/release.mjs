@@ -653,7 +653,7 @@ export function targetTripleFromDir(dirname) {
 // with the candidate list (diagnosable in CI logs), never silently feed the
 // wrong bundle (e.g. an MSI where NSIS is primary).
 const UPDATER_BUNDLE_PRIORITY = [
-  { triple: "windows-x86_64", suffixes: [".nsis.zip", ".msi.zip"] },
+  { triple: "windows-x86_64", suffixes: ["-setup.exe", ".msi"] },
   { triple: "darwin-aarch64", suffixes: [".app.tar.gz"] },
   { triple: "darwin-x86_64", suffixes: [".app.tar.gz"] },
   { triple: "linux-x86_64", suffixes: [".appimage.tar.gz", ".appimage"] },
