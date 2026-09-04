@@ -118,7 +118,6 @@ jobs:
               entries.push({ dir: dir.name, file, asset, sig, url });
             }
           }
-          import { selectUpdaterBundle } from './scripts/release.mjs';
           // WHY one bundle per triple: an OS dir holds several signed files but
           // the feed takes exactly one — group by matrix dir, pick explicitly.
           const byTriple = new Map();
