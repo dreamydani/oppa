@@ -31,6 +31,7 @@ import {
   mergeLatestJson,
   bundleTargetTriple,
   targetTripleToOs,
+  targetTripleFromDir,
   manifestFilenames,
   assertReleaseFlags,
   parseChannel,
@@ -763,6 +764,21 @@ describe("targetTripleToOs", () => {
     expect(targetTripleToOs("darwin-aarch64")).toBe("darwin");
     expect(targetTripleToOs("darwin-x86_64")).toBe("darwin");
     expect(targetTripleToOs("linux-x86_64")).toBe("linux");
+  });
+});
+
+describe("targetTripleFromDir", () => {
+  // WHY: macOS updater bundles (oppa.app.tar.gz) carry no arch in their
+  // filename — the CI matrix dir is the platform authority (proven by a
+  // failed finalize that threw on the arch-less name).
+  it("resolves the matrix artifact dirs to their triples", () => {
+    expect(targetTripleFromDir("bundle-windows-x86_64")).toBe("windows-x86_64");
+    expect(targetTripleFromDir("bundle-darwin-aarch64")).toBe("darwin-aarch64");
+    expect(targetTripleFromDir("bundle-linux-x86_64")).toBe("linux-x86_64");
+  });
+  it("throws on unknown dirs instead of dropping a platform", () => {
+    expect(() => targetTripleFromDir("bundle-plan9-mips")).toThrow(/unknown bundle dir/);
+    expect(() => targetTripleFromDir("dist-bundles")).toThrow(/unknown bundle dir/);
   });
 });
 

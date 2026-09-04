@@ -626,6 +626,26 @@ export function mergeLatestJson({ version, pubDate, notes, entries }) {
   return buildLatestJson({ version, pubDate, notes, platforms });
 }
 
+// Artifact-dir → updater target-triple for the CI finalize job.
+// WHY: some updater bundles carry no arch in their filename
+// (macOS `oppa.app.tar.gz`), but every file in one matrix dir shares the
+// dir's platform — so the directory (not the filename) is the authority.
+// Unknown dirs throw fail-fast instead of silently dropping a platform.
+const KNOWN_TRIPLES = new Set([
+  "windows-x86_64",
+  "darwin-aarch64",
+  "darwin-x86_64",
+  "linux-x86_64",
+]);
+
+export function targetTripleFromDir(dirname) {
+  const triple = String(dirname).replace(/^bundle-/, "");
+  if (!KNOWN_TRIPLES.has(triple)) {
+    throw new Error(`unknown bundle dir "${dirname}"`);
+  }
+  return triple;
+}
+
 // Bundle-filename → updater target-triple mapping for the CI finalize job.
 // WHY: unknown arch/OS throws fail-fast — never silently drop a platform.
 export function targetTripleToOs(target) {

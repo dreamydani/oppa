@@ -98,7 +98,7 @@ jobs:
           node --input-type=module -e "
           import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { basename, join } from 'node:path';
-          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, bundleTargetTriple, targetTripleToOs } from './scripts/release.mjs';
+          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, targetTripleFromDir } from './scripts/release.mjs';
           const version = process.env.VERSION, channel = process.env.CHANNEL;
           const { latest } = manifestFilenames(channel);
           mkdirSync('release-assets', { recursive: true });
@@ -115,7 +115,7 @@ jobs:
               const sig = readFileSync(file, 'utf8').trim();
               const name = basename(asset);
               const url = 'https://github.com/dreamydani/oppa/releases/download/v' + version + '/' + encodeURIComponent(name);
-              entries.push({ target: bundleTargetTriple(name, targetTripleToOs(dir.name.replace(/^bundle-/, ''))), url, signature: sig });
+              entries.push({ target: targetTripleFromDir(dir.name), url, signature: sig });
               copyFileSync(asset, join('release-assets', name));
               copyFileSync(file, join('release-assets', name + '.sig'));
               assets.push(join('release-assets', name), join('release-assets', name + '.sig'));
