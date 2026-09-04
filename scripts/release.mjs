@@ -656,7 +656,7 @@ const UPDATER_BUNDLE_PRIORITY = [
   { triple: "windows-x86_64", suffixes: [".nsis.zip", ".msi.zip"] },
   { triple: "darwin-aarch64", suffixes: [".app.tar.gz"] },
   { triple: "darwin-x86_64", suffixes: [".app.tar.gz"] },
-  { triple: "linux-x86_64", suffixes: [".appimage.tar.gz"] },
+  { triple: "linux-x86_64", suffixes: [".appimage.tar.gz", ".appimage"] },
 ];
 
 export function selectUpdaterBundle(filenames, triple) {

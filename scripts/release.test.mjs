@@ -801,9 +801,18 @@ describe("selectUpdaterBundle", () => {
     expect(selectUpdaterBundle(["oppa.app.tar.gz"], "darwin-aarch64")).toBe(
       "oppa.app.tar.gz",
     );
+    // WHY: Tauri signs the bare AppImage itself (plus per-format installer
+    // sigs) — the updater bundle is the AppImage binary, not a tarball.
     expect(
-      selectUpdaterBundle(["oppa_0.2.4_amd64.AppImage.tar.gz"], "linux-x86_64"),
-    ).toBe("oppa_0.2.4_amd64.AppImage.tar.gz");
+      selectUpdaterBundle(
+        [
+          "oppa-0.2.4-1.x86_64.rpm",
+          "oppa_0.2.4_amd64.AppImage",
+          "oppa_0.2.4_amd64.deb",
+        ],
+        "linux-x86_64",
+      ),
+    ).toBe("oppa_0.2.4_amd64.AppImage");
   });
   it("throws listing candidates on ambiguity or absence", () => {
     expect(() =>
