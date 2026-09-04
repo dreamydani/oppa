@@ -23,7 +23,7 @@ const invokeMock = vi.mocked(invoke);
 const checkMock = vi.mocked(check);
 const relaunchMock = vi.mocked(relaunch);
 
-async function setChannel(channel: "dev" | "stable") {
+async function setChannel(channel: "dev" | "stable" | "rc") {
   invokeMock.mockResolvedValue(channel);
   await resolveChannel();
 }
@@ -70,8 +70,31 @@ describe("updater seam", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("check_for_update");
   });
 
-  it("invokes check_for_update on stable and returns the update info", async () => {
-    await setChannel("stable");
+  it("invokes check_for_update on rc like stable", async () => {
+    await setChannel("rc");
+    const payload: UpdateInfo = {
+      version: "0.3.0-rc.1",
+      download: "https://example.com/rc.msi",
+      available: true,
+    };
+    invokeMock.mockResolvedValue(payload);
+    const result = await checkForUpdate();
+    expect(invokeMock).toHaveBeenCalledWith("check_for_update");
+    expect(result).toEqual(payload);
+  });
+
+  it("checks native updates on rc like stable", async () => {
+    await setChannel("rc");
+    checkMock.mockResolvedValue({
+      version: "0.3.0-rc.1",
+      currentVersion: "0.3.0-rc.0",
+    } as unknown as Update);
+    const info = await checkForNativeUpdate();
+    expect(checkMock).toHaveBeenCalledTimes(1);
+    expect(info?.version).toBe("0.3.0-rc.1");
+  });
+
+  it("invokes check_for_update on stable and returns the update info", async () => {    await setChannel("stable");
     const payload: UpdateInfo = {
       version: "0.2.0",
       download:

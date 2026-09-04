@@ -603,6 +603,82 @@ export function buildGhReleaseArgs(
 }
 
 /**
+ * Thin merge of per-platform updater entries into the plugin `latest.json`
+ * shape. Concats the platform maps and delegates shaping/validation to
+ * `buildLatestJson`; a duplicate target throws (never silently drop one).
+ */
+export function mergeLatestJson({ version, pubDate, notes, entries }) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new Error("mergeLatestJson needs a non-empty entries array");
+  }
+  const platforms = {};
+  for (const entry of entries) {
+    const target = entry?.target;
+    if (typeof target !== "string" || target === "") {
+      throw new Error("mergeLatestJson entry is missing a target");
+    }
+    if (Object.hasOwn(platforms, target)) {
+      throw new Error(`duplicate latest.json target "${target}"`);
+    }
+    platforms[target] = { url: entry.url, signature: entry.signature };
+  }
+  return buildLatestJson({ version, pubDate, notes, platforms });
+}
+
+// Bundle-filename → updater target-triple mapping for the CI finalize job.
+// WHY: unknown arch/OS throws fail-fast — never silently drop a platform.
+export function bundleTargetTriple(filename, os) {
+  const name = String(filename).toLowerCase();
+  const osKey = String(os).toLowerCase();
+  const arch = /aarch64|arm64/.test(name)
+    ? "aarch64"
+    : /x64|x86_64|amd64/.test(name)
+      ? "x86_64"
+      : null;
+  if (!arch) {
+    throw new Error(`unknown arch in bundle filename "${filename}"`);
+  }
+  const table = {
+    "windows:x86_64": "windows-x86_64",
+    "darwin:aarch64": "darwin-aarch64",
+    "darwin:x86_64": "darwin-x86_64",
+    "linux:x86_64": "linux-x86_64",
+  };
+  const triple = table[`${osKey}:${arch}`];
+  if (!triple) {
+    throw new Error(`unknown OS "${os}" for bundle filename "${filename}"`);
+  }
+  return triple;
+}
+
+/**
+ * Builds the `gh release create` args for a multi-asset release (CI matrix
+ * finalize: installer + latest.json + .sig assets). Pure — same array-shape
+ * discipline as `buildGhReleaseArgs` (kept untouched, pinned by its test).
+ */
+export function buildGhReleaseArgsMulti(version, assets, isPrerelease = false) {
+  if (!Array.isArray(assets) || assets.length === 0) {
+    throw new Error("buildGhReleaseArgsMulti needs a non-empty assets array");
+  }
+  const tag = `v${version}`;
+  const args = [
+    "release",
+    "create",
+    tag,
+    ...assets,
+    "--repo",
+    GITHUB_REPO,
+    "--title",
+    `oppa ${version}`,
+    "--notes",
+    `Release ${version} of oppa.`,
+  ];
+  // WHY: rc must be prerelease:true or the stable `latest` feed picks it up.
+  if (isPrerelease) args.push("--prerelease");
+  return args;
+}
+
+/**
  * Spawns `command` with an args ARRAY and no shell, resolving on exit 0 and
  * rejecting otherwise. No shell means spaced values are never split by the
  * shell; `gh` is a real executable and resolves via PATH on Windows too, so

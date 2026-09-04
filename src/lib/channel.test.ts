@@ -35,6 +35,13 @@ describe("channel identity", () => {
     expect(document.title).toBe("oppa");
   });
 
+  it("resolves rc and uses oppa title", async () => {
+    invokeMock.mockResolvedValue("rc");
+    const channel = await applyChannelIdentity();
+    expect(channel).toBe("rc");
+    expect(document.title).toBe("oppa");
+  });
+
   it("falls back to oppa title when the channel cannot be resolved", async () => {
     invokeMock.mockRejectedValue(new Error("not in tauri"));
     const channel = await applyChannelIdentity();

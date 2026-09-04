@@ -107,16 +107,16 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
         .manage(browser::manager::BrowserManager::new());
-    // The updater is stable-only: a dev build NEVER checks for updates, so the
-    // plugin (which would add its own update-check commands) is not registered
-    // on dev. `Channel::current()` is compile-time, so the registration is
-    // baked into the binary.
+    // The updater is stable+rc-only: a dev build NEVER checks for updates,
+    // so the plugin (which would add its own update-check commands) is not
+    // registered on dev. `Channel::current()` is compile-time, so the
+    // registration is baked into the binary.
     //
     // NOTE: the plugin's NATIVE check()/downloadAndInstall() become the real
     // flow in Task 5 once the H1 pubkey lands; the custom manifest check in
     // `updater.rs` stays as the fallback for one release (dual-manifest
     // transition, no flag day).
-    if channel::Channel::current() == channel::Channel::Stable {
+    if !channel::Channel::current().is_dev() {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
     builder

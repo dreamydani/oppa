@@ -1,4 +1,4 @@
-/// Build channel: `dev` | `stable`, baked in at compile time.
+/// Build channel: `dev` | `stable` | `rc`, baked in at compile time.
 ///
 /// A Developer-OPPA build and a Stable-OPPA build of the same binary must never
 /// share per-user state: the data dir, the daemon pipe/socket, and (later) the
@@ -10,26 +10,30 @@
 pub enum Channel {
     Dev,
     Stable,
+    Rc,
 }
 
 impl Channel {
-    /// Channel this binary was built for. `OPPA_CHANNEL=dev|stable` is baked in
-    /// at compile time; unset means Stable, so the current build — and every
-    /// existing test — keeps its exact behavior. Unknown values fail loudly: a
-    /// silently misread channel would collide with stable's data dir/pipe.
+    /// Channel this binary was built for. `OPPA_CHANNEL=dev|stable|rc` is
+    /// baked in at compile time; unset means Stable, so the current build —
+    /// and every existing test — keeps its exact behavior. Unknown values
+    /// fail loudly: a silently misread channel would collide with stable's
+    /// data dir/pipe.
     pub fn current() -> Channel {
         match option_env!("OPPA_CHANNEL") {
             Some("dev") => Channel::Dev,
+            Some("rc") => Channel::Rc,
             Some("stable") | None => Channel::Stable,
-            Some(other) => panic!("unsupported OPPA_CHANNEL value: {other} (expected dev|stable)"),
+            Some(other) => panic!("unsupported OPPA_CHANNEL value: {other} (expected dev|stable|rc)"),
         }
     }
 
     /// Suffix appended to the app identifier for this channel's data dir.
-    /// Stable is the base name (no suffix); dev gets `-dev` (`com.pc.oppa-dev`).
+    /// Stable is the base name (no suffix); dev gets `-dev`, rc gets `-rc`.
     pub fn data_dir_suffix(&self) -> Option<&'static str> {
         match self {
             Channel::Dev => Some("-dev"),
+            Channel::Rc => Some("-rc"),
             Channel::Stable => None,
         }
     }
@@ -38,6 +42,7 @@ impl Channel {
         match self {
             Channel::Dev => "dev",
             Channel::Stable => "stable",
+            Channel::Rc => "rc",
         }
     }
 
@@ -68,6 +73,7 @@ mod tests {
         match option_env!("OPPA_CHANNEL") {
             None | Some("stable") => assert_eq!(Channel::current(), Channel::Stable),
             Some("dev") => assert_eq!(Channel::current(), Channel::Dev),
+            Some("rc") => assert_eq!(Channel::current(), Channel::Rc),
             Some(other) => panic!("unsupported OPPA_CHANNEL value in this build: {other}"),
         }
     }
@@ -88,5 +94,17 @@ mod tests {
     fn is_dev_only_true_for_dev() {
         assert!(Channel::Dev.is_dev());
         assert!(!Channel::Stable.is_dev());
+        assert!(!Channel::Rc.is_dev());
+    }
+
+    #[test]
+    fn rc_as_str_is_rc() {
+        assert_eq!(Channel::Rc.as_str(), "rc");
+    }
+
+    #[test]
+    fn rc_data_dir_suffix_is_isolated() {
+        // WHY: rc must never share state with stable (data dir, pipe, snapshots).
+        assert_eq!(Channel::Rc.data_dir_suffix(), Some("-rc"));
     }
 }

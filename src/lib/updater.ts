@@ -43,7 +43,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   // Callers may run before applyChannelIdentity finishes; a null cache
   // must not permanently suppress the check.
   const channel = getChannel() ?? (await resolveChannel().catch(() => null));
-  if (channel !== "stable") {
+  if (channel !== "stable" && channel !== "rc") {
     return null;
   }
   try {
@@ -66,7 +66,8 @@ export async function canUpgradeSafely(): Promise<UpgradeSafety> {
 /// Same probe as `canUpgradeSafely()` but with the live session count when
 /// busy, from the same single IPC round trip.
 export async function probeUpgradeSafety(): Promise<UpgradeSafetyProbe> {
-  if (getChannel() !== "stable") {
+  const channel = getChannel();
+  if (channel !== "stable" && channel !== "rc") {
     return { status: "unknown", sessionCount: 0 };
   }
   let result: CanUpgradeDaemonResult;
@@ -146,7 +147,7 @@ export async function checkForNativeUpdate(
   options: { preservePendingOnEmpty?: boolean } = {},
 ): Promise<NativeUpdateInfo | null> {
   const channel = getChannel() ?? (await resolveChannel().catch(() => null));
-  if (channel !== "stable") {
+  if (channel !== "stable" && channel !== "rc") {
     return null;
   }
   try {

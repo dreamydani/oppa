@@ -398,11 +398,12 @@ pub fn get_daemon_socket_path() -> String {
 }
 
 /// Channel-aware variant used by tests and by callers that already know the
-/// channel: dev daemons listen on their own pipe/socket so they can never
-/// collide with (or be killed by) the stable daemon.
+/// channel: dev and rc daemons listen on their own pipe/socket so they can
+/// never collide with (or be killed by) the stable daemon.
 pub fn get_daemon_socket_path_for(channel: crate::channel::Channel) -> String {
     let suffix = match channel {
         crate::channel::Channel::Dev => "-dev",
+        crate::channel::Channel::Rc => "-rc",
         crate::channel::Channel::Stable => "",
     };
     if cfg!(windows) {
@@ -1156,6 +1157,15 @@ mod tests {
         } else {
             assert!(path.ends_with("oppa-daemon.sock"));
         }
+    }
+
+    #[test]
+    fn test_daemon_socket_path_rc_differs_from_stable() {
+        // WHY: rc must never share a pipe with stable (or a kill hits live shells).
+        let rc = get_daemon_socket_path_for(crate::channel::Channel::Rc);
+        let stable = get_daemon_socket_path_for(crate::channel::Channel::Stable);
+        assert_ne!(rc, stable);
+        assert!(rc.contains("-rc"), "rc pipe must be suffixed: {rc}");
     }
 
     #[test]

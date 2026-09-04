@@ -22,11 +22,14 @@ import {
   VERSION_FILES,
   SNAPSHOT_FILES,
   buildGhReleaseArgs,
+  buildGhReleaseArgsMulti,
   spawnChecked,
   collectInstallers,
   findInstaller,
   writeManifest,
   buildLatestJson,
+  mergeLatestJson,
+  bundleTargetTriple,
   manifestFilenames,
   assertReleaseFlags,
   parseChannel,
@@ -679,5 +682,110 @@ describe("release channel flags", () => {
     expect(stable).not.toContain("--prerelease");
     const rc = buildGhReleaseArgs("0.2.3", "setup.exe", "manifest.json", true);
     expect(rc[rc.length - 1]).toBe("--prerelease");
+  });
+});
+
+describe("mergeLatestJson", () => {
+  const entry = (target) => ({
+    target,
+    url: `https://example.com/${target}`,
+    signature: `sig-${target}`,
+  });
+
+  it("merges per-platform entries through buildLatestJson", () => {
+    const out = mergeLatestJson({
+      version: "0.2.3",
+      pubDate: "2026-09-04T00:00:00Z",
+      notes: "RC",
+      entries: [entry("windows-x86_64"), entry("darwin-aarch64")],
+    });
+    expect(out.version).toBe("0.2.3");
+    expect(Object.keys(out.platforms).sort()).toEqual([
+      "darwin-aarch64",
+      "windows-x86_64",
+    ]);
+  });
+
+  it("throws on empty entries", () => {
+    expect(() =>
+      mergeLatestJson({ version: "0.2.3", entries: [] })
+    ).toThrow(/non-empty|entries/i);
+  });
+
+  it("throws on a duplicate target", () => {
+    expect(() =>
+      mergeLatestJson({
+        version: "0.2.3",
+        entries: [entry("windows-x86_64"), entry("windows-x86_64")],
+      })
+    ).toThrow(/duplicate/i);
+  });
+
+  it("throws on a bad version via buildLatestJson", () => {
+    expect(() =>
+      mergeLatestJson({ version: "abc", entries: [entry("windows-x86_64")] })
+    ).toThrow(/semver|version/i);
+  });
+});
+
+describe("bundleTargetTriple", () => {
+  it("maps bundle filenames to target triples", () => {
+    expect(bundleTargetTriple("oppa_0.2.3_x64-setup.exe", "windows")).toBe(
+      "windows-x86_64"
+    );
+    expect(bundleTargetTriple("oppa_0.2.3_arm64.dmg", "darwin")).toBe(
+      "darwin-aarch64"
+    );
+    expect(bundleTargetTriple("oppa_0.2.3_x64.dmg", "darwin")).toBe(
+      "darwin-x86_64"
+    );
+    expect(bundleTargetTriple("oppa_0.2.3_amd64.AppImage", "linux")).toBe(
+      "linux-x86_64"
+    );
+  });
+
+  it("throws on unknown arch/OS instead of dropping a platform", () => {
+    expect(() => bundleTargetTriple("oppa_0.2.3_mips.exe", "windows")).toThrow(
+      /arch/i
+    );
+    expect(() => bundleTargetTriple("oppa_0.2.3_x64.exe", "plan9")).toThrow(
+      /os/i
+    );
+  });
+});
+
+describe("buildGhReleaseArgsMulti", () => {
+  it("builds the exact multi-asset gh args array", () => {
+    const args = buildGhReleaseArgsMulti(
+      "0.2.3",
+      ["setup.exe", "latest.json", "latest.json.sig"],
+      true
+    );
+    expect(args).toEqual([
+      "release",
+      "create",
+      "v0.2.3",
+      "setup.exe",
+      "latest.json",
+      "latest.json.sig",
+      "--repo",
+      GITHUB_REPO,
+      "--title",
+      "oppa 0.2.3",
+      "--notes",
+      "Release 0.2.3 of oppa.",
+      "--prerelease",
+    ]);
+  });
+
+  it("omits --prerelease for stable multi-asset releases", () => {
+    const args = buildGhReleaseArgsMulti("0.2.3", ["a", "b"], false);
+    expect(args).not.toContain("--prerelease");
+  });
+
+  it("requires a non-empty asset list", () => {
+    expect(() => buildGhReleaseArgsMulti("0.2.3", [], false)).toThrow(
+      /asset/i
+    );
   });
 });

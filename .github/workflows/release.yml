@@ -1,0 +1,133 @@
+# Release matrix: builds all three OSes, then one finalize job merges the
+# per-platform updater feed (`latest.json` / `latest-rc.json`) and creates
+# the GitHub release.
+#
+# Secrets required (repo Settings → Secrets → Actions):
+# - TAURI_SIGNING_PRIVATE_KEY: minisign private key for updater artifacts.
+# - TAURI_SIGNING_PRIVATE_KEY_PASSWORD: optional, only if the key has one.
+# - GITHUB_TOKEN: provided automatically by Actions (needs contents:write).
+#
+# Workflow cannot be executed locally — review is by reading + YAML discipline.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (X.Y.Z)"
+        required: true
+      channel:
+        description: "Release channel"
+        required: true
+        default: "stable"
+        type: choice
+        options:
+          - stable
+          - rc
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64
+          - os: macos-latest
+            target: darwin-aarch64
+          - os: ubuntu-22.04
+            target: linux-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+      # WHY: the channel is baked in at compile time (Channel::current reads
+      # OPPA_CHANNEL via option_env!), so the env must be set for the build.
+      - name: Build bundles
+        run: pnpm tauri build
+        env:
+          OPPA_CHANNEL: ${{ inputs.channel }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: src-tauri/target/release/bundle/
+
+  finalize:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Download all bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-bundles
+      # WHY: the feed is composed from release.mjs pure fns (mergeLatestJson,
+      # buildGhReleaseArgsMulti) — no second script to drift out of sync.
+      - name: Compose feed and release args
+        run: |
+          node --input-type=module -e "
+          import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { basename, join } from 'node:path';
+          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, bundleTargetTriple } from './scripts/release.mjs';
+          const version = process.env.VERSION, channel = process.env.CHANNEL;
+          const { latest } = manifestFilenames(channel);
+          mkdirSync('release-assets', { recursive: true });
+          const entries = [], assets = [];
+          for (const dir of readdirSync('dist-bundles', { withFileTypes: true })) {
+            if (!dir.isDirectory()) continue;
+            const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+              const p = join(d, e.name);
+              return e.isDirectory() ? walk(p) : [p];
+            });
+            for (const file of walk(join('dist-bundles', dir.name))) {
+              if (!file.endsWith('.sig')) continue;
+              const asset = file.slice(0, -'.sig'.length);
+              const sig = readFileSync(file, 'utf8').trim();
+              const name = basename(asset);
+              const url = 'https://github.com/dreamydani/oppa/releases/download/v' + version + '/' + encodeURIComponent(name);
+              entries.push({ target: bundleTargetTriple(name, dir.name.replace(/^bundle-/, '')), url, signature: sig });
+              copyFileSync(asset, join('release-assets', name));
+              copyFileSync(file, join('release-assets', name + '.sig'));
+              assets.push(join('release-assets', name), join('release-assets', name + '.sig'));
+            }
+          }
+          const feed = mergeLatestJson({ version, pubDate: new Date().toISOString(), entries });
+          writeFileSync(join('release-assets', latest), JSON.stringify(feed, null, 2) + '\n');
+          assets.push(join('release-assets', latest));
+          writeFileSync('gh-args.json', JSON.stringify(buildGhReleaseArgsMulti(version, assets, channel === 'rc')));
+          "
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+      - name: Create GitHub release
+        run: |
+          mapfile -d '' ARGS < <(jq -j '.[] | . + "\u0000"' gh-args.json)
+          gh "${ARGS[@]}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # WHY: `latest/download` only serves the stable Latest release, so the
+      # rc feed lives on a pinned moving `rc` tag the rc pipeline refreshes.
+      - name: Refresh rc feed tag
+        if: ${{ inputs.channel == 'rc' }}
+        run: |
+          gh release view rc --repo dreamydani/oppa >/dev/null 2>&1 || \
+            gh release create rc --repo dreamydani/oppa --title "oppa rc feed" \
+              --notes "Moving RC feed. Install a versioned prerelease, never this tag." --prerelease
+          gh release upload rc "release-assets/latest-rc.json" --clobber --repo dreamydani/oppa
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

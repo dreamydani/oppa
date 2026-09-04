@@ -1,7 +1,7 @@
-//! Update manifest check for the stable channel.
+//! Update manifest check for the stable and rc channels.
 //!
 //! The dev build NEVER checks for updates (confirmed user requirement): the
-//! updater plugin is registered only for stable, and `check_for_update`
+//! updater plugin is registered only for stable/rc, and `check_for_update`
 //! short-circuits to `None` on dev before any network I/O. The manifest is
 //! Task 3's `oppa-update-manifest.json` uploaded to GitHub Releases:
 //! `{ "version": "...", "download": "..." }`.
@@ -13,6 +13,21 @@ use std::time::Duration;
 /// Static update-manifest URL, matching what Task 3's `pnpm release` uploads.
 pub const MANIFEST_URL: &str =
     "https://github.com/dreamydani/oppa/releases/latest/download/oppa-update-manifest.json";
+
+/// RC manifest feed: pinned moving `rc` tag carrying `latest-rc.json`.
+// WHY: `latest/download` only serves the stable Latest release; rc needs a
+// pinned tag the rc pipeline moves.
+pub const RC_MANIFEST_URL: &str =
+    "https://github.com/dreamydani/oppa/releases/download/rc/latest-rc.json";
+
+/// Manifest endpoint for a channel: stable serves the Latest feed, rc serves
+/// the isolated pinned-tag feed. Dev never checks, so it has no URL.
+pub fn manifest_url(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Rc => RC_MANIFEST_URL,
+        _ => MANIFEST_URL,
+    }
+}
 
 /// How long a manifest fetch may take before it is abandoned.
 ///
@@ -43,7 +58,7 @@ pub struct UpdateInfo {
     pub available: bool,
 }
 
-/// Stable builds check for updates; dev builds never do.
+/// Stable and rc builds check for updates; dev builds never do.
 pub fn should_check_for_updates(channel: Channel) -> bool {
     !channel.is_dev()
 }
@@ -109,14 +124,14 @@ pub fn build_fetch_client() -> Option<reqwest::Client> {
         .ok()
 }
 
-/// Fetches and parses the remote update manifest for the stable channel.
+/// Fetches and parses the remote update manifest for this channel.
 ///
 /// Returns `None` on any failure (network down, non-2xx, bad JSON) so the app
 /// works fine offline and the frontend can swallow the result silently.
-async fn fetch_manifest() -> Option<UpdateManifest> {
+async fn fetch_manifest(channel: Channel) -> Option<UpdateManifest> {
     let client = build_fetch_client()?;
 
-    let response = client.get(MANIFEST_URL).send().await.ok()?;
+    let response = client.get(manifest_url(channel)).send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -126,8 +141,9 @@ async fn fetch_manifest() -> Option<UpdateManifest> {
 /// Checks whether a newer version is published for this app.
 ///
 /// Dev builds return `None` immediately — a dev build NEVER checks for
-/// updates. Stable builds fetch Task 3's update manifest and compare it with
-/// the compiled-in `CARGO_PKG_VERSION`. Any failure degrades to `None`.
+/// updates. Stable and rc builds fetch their channel's update manifest and
+/// compare it with the compiled-in `CARGO_PKG_VERSION`. Any failure degrades
+/// to `None`.
 #[tauri::command]
 pub async fn check_for_update() -> Option<UpdateInfo> {
     let channel = Channel::current();
@@ -135,7 +151,7 @@ pub async fn check_for_update() -> Option<UpdateInfo> {
         return None;
     }
 
-    let manifest = fetch_manifest().await?;
+    let manifest = fetch_manifest(channel).await?;
     let current = env!("CARGO_PKG_VERSION");
 
     Some(UpdateInfo {
@@ -153,6 +169,7 @@ mod tests {
     fn should_check_for_updates_is_false_for_dev_and_true_for_stable() {
         assert!(!should_check_for_updates(Channel::Dev));
         assert!(should_check_for_updates(Channel::Stable));
+        assert!(should_check_for_updates(Channel::Rc));
     }
 
     #[test]
@@ -253,6 +270,14 @@ mod tests {
         assert_eq!(json["version"], "0.2.0");
         assert_eq!(json["download"], "https://example.com/oppa.exe");
         assert_eq!(json["available"], true);
+    }
+
+    #[test]
+    fn manifest_url_is_per_channel() {
+        // WHY: `latest/download` only serves the stable Latest release.
+        assert_eq!(manifest_url(Channel::Stable), MANIFEST_URL);
+        assert_eq!(manifest_url(Channel::Rc), RC_MANIFEST_URL);
+        assert_ne!(manifest_url(Channel::Stable), manifest_url(Channel::Rc));
     }
 
     #[test]

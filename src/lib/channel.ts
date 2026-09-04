@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type AppChannel = "dev" | "stable";
+export type AppChannel = "dev" | "stable" | "rc";
 
 // The build channel, cached after the first `app_channel` resolution so later
 // tasks (updater gating, banner) can branch on it without another IPC round
@@ -14,7 +14,7 @@ export function getChannel(): AppChannel | null {
 export async function resolveChannel(): Promise<AppChannel | null> {
   try {
     const raw = await invoke<string>("app_channel");
-    const channel: AppChannel = raw === "dev" ? "dev" : "stable";
+    const channel: AppChannel = raw === "dev" ? "dev" : raw === "rc" ? "rc" : "stable";
     cachedChannel = channel;
     return channel;
   } catch {
