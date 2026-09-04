@@ -58,6 +58,9 @@ jobs:
         run: pnpm tauri build
         env:
           OPPA_CHANNEL: ${{ inputs.channel }}
+          # WHY: the frontend bundle embeds monaco's multi-MB workers; vite
+          # exceeds the default Node heap on CI runners (macOS OOMs first).
+          NODE_OPTIONS: --max-old-space-size=8192
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Upload bundles
