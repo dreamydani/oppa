@@ -256,6 +256,20 @@ describe("updateScheduler", () => {
     expect(lastAvailability()).toMatchObject({ version: "0.3.0", phase: "available" });
   });
 
+  it("opt-out parks the timer: zero timers pending after the mount check", async () => {
+    setAutoCheckUpdates(false);
+    checkMock.mockResolvedValue(null);
+    stopFns.push(startUpdateScheduler());
+
+    await vi.advanceTimersByTimeAsync(UPDATE_INITIAL_DELAY_MS);
+    fireFocus();
+    fireOnline();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkMock).not.toHaveBeenCalled();
+    // Parked: no daily/backoff wakeups remain queued while opted out.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("coalesces concurrent triggers into a single in-flight check", async () => {
     let resolveCheck!: (value: Update | null) => void;
     checkMock.mockImplementation(

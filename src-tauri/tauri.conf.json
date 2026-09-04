@@ -28,7 +28,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/dreamydani/oppa/releases/latest/download/oppa-update-manifest.json"
+        "https://github.com/dreamydani/oppa/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5RkE2NzczMDVERjBFNDMKUldSRER0OEZjMmY2MmNqczRETndySU04ZGs4NVBXaFByemE0TnZmT1k1YTgwTnhBNERtUW5MZm8K"
     }

@@ -100,6 +100,15 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
     }, delayMs);
   };
 
+  // Parked while opted out: no daily/backoff wakeups remain queued (a staged
+  // offer survives, manual checks still work, the next opt-in focus resumes).
+  const parkTimer = (): void => {
+    if (pendingTimer !== null) {
+      clearTimer(pendingTimer);
+      pendingTimer = null;
+    }
+  };
+
   // Native-first priority; the legacy fallback drives the old browser flow.
   // Seams resolve null on failure, but guard rejections anyway. Automatic
   // checks preserve a staged pending update on empty so a failing background
@@ -173,9 +182,10 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
     if (inFlight) return inFlight;
     const task = (async (): Promise<void> => {
       if (automatic) {
-        // Opt-out kills every automatic check but never manual ones.
+        // Opt-out kills every automatic check but never manual ones — and
+        // parks the timer instead of queuing no-op wakeups.
         if (!autoChecksEnabled()) {
-          scheduleNext(dailyIntervalMs);
+          parkTimer();
           return;
         }
         const remaining = floorRemainingMs();
@@ -227,10 +237,13 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
   window.addEventListener("focus", onFocus);
   window.addEventListener("online", onOnline);
   document.addEventListener("visibilitychange", onVisibilityChange);
-  pendingTimer = schedule(() => {
-    pendingTimer = null;
-    void triggerCheck("mount", true);
-  }, initialDelayMs);
+  // Opted out at start: park immediately — no mount wakeup that would no-op.
+  if (autoChecksEnabled()) {
+    pendingTimer = schedule(() => {
+      pendingTimer = null;
+      void triggerCheck("mount", true);
+    }, initialDelayMs);
+  }
 
   return () => {
     stopped = true;

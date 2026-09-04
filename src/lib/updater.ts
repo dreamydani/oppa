@@ -66,7 +66,7 @@ export async function canUpgradeSafely(): Promise<UpgradeSafety> {
 /// Same probe as `canUpgradeSafely()` but with the live session count when
 /// busy, from the same single IPC round trip.
 export async function probeUpgradeSafety(): Promise<UpgradeSafetyProbe> {
-  const channel = getChannel();
+  const channel = getChannel() ?? (await resolveChannel().catch(() => null));
   if (channel !== "stable" && channel !== "rc") {
     return { status: "unknown", sessionCount: 0 };
   }
@@ -135,10 +135,12 @@ async function releasePendingNativeUpdate(): Promise<void> {
   }
 }
 
-// Native check behind the same stable-channel gate as `checkForUpdate`:
-// dev/unresolved → null with no plugin calls. Rejections (offline, or
-// signature verification before the H1 pubkey lands) stay fail-silent null —
-// the retry card only appears after an explicit user action fails.
+// Native check is stable-only: tauri.conf.json endpoints is a single static
+// URL (stable latest.json) with no per-channel feed, so rc keeps the legacy
+// custom flow via Rust manifest_url() exactly like pre-H1. Dev/unresolved →
+// null with no plugin calls. Rejections (offline, or signature verification
+// before the H1 pubkey lands) stay fail-silent null — the retry card only
+// appears after an explicit user action fails.
 //
 // `preservePendingOnEmpty` (scheduler automatic checks only): an empty/error
 // outcome leaves a staged download alone instead of discarding it, so a
@@ -147,7 +149,7 @@ export async function checkForNativeUpdate(
   options: { preservePendingOnEmpty?: boolean } = {},
 ): Promise<NativeUpdateInfo | null> {
   const channel = getChannel() ?? (await resolveChannel().catch(() => null));
-  if (channel !== "stable" && channel !== "rc") {
+  if (channel !== "stable") {
     return null;
   }
   try {
@@ -159,8 +161,16 @@ export async function checkForNativeUpdate(
       return null;
     }
     const displaced = pendingNativeUpdate;
+    const sameVersion =
+      displaced !== null &&
+      displaced.version === update.version &&
+      displaced.currentVersion === update.currentVersion;
     pendingNativeUpdate = update;
-    nativeUpdateDownloaded = false;
+    // A same-version re-check re-stages the plugin resource but must keep
+    // the downloaded flag — the bytes are already on disk.
+    if (!sameVersion) {
+      nativeUpdateDownloaded = false;
+    }
     if (displaced && displaced !== update) {
       // A newer check superseded the staged update: release the displaced
       // plugin resource instead of leaking it. Test fakes may lack close().

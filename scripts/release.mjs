@@ -361,7 +361,7 @@ export function collectInstallers(dir) {
       const full = join(d, entry.name);
       if (entry.isDirectory()) {
         walk(full);
-      } else if (INSTALLER_EXTS.some((ext) => entry.name.endsWith(ext))) {
+      } else if (INSTALLER_EXTS.some((ext) => entry.name.toLowerCase().endsWith(ext))) {
         found.push(full);
       }
     }
@@ -512,8 +512,9 @@ export function manifestFilenames(channel) {
   );
 }
 
-// Accepts an optional leading `v` (Tauri does) on top of strict X.Y.Z.
-const LOOSE_SEMVER_RE = /^v?\d+\.\d+\.\d+$/;
+// Accepts an optional leading `v` (Tauri does) plus prerelease (`-rc.1`)
+// and build metadata (`+build.5`) on top of strict X.Y.Z.
+const LOOSE_SEMVER_RE = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 // RFC3339 timestamps as emitted by `new Date().toISOString()`.
 const RFC3339_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -627,6 +628,11 @@ export function mergeLatestJson({ version, pubDate, notes, entries }) {
 
 // Bundle-filename → updater target-triple mapping for the CI finalize job.
 // WHY: unknown arch/OS throws fail-fast — never silently drop a platform.
+export function targetTripleToOs(target) {
+  // The matrix target's first segment is the OS family (windows/darwin/linux).
+  return String(target).split("-")[0];
+}
+
 export function bundleTargetTriple(filename, os) {
   const name = String(filename).toLowerCase();
   const osKey = String(os).toLowerCase();

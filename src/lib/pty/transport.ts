@@ -118,6 +118,8 @@ export function ptyAck(id: string, bytes: number): Promise<void> {
   // WHY dual-emit: old backends take `(id, bytes)` and ignore the unknown
   // `chars` key, while a new backend prefers `bytes` with `chars` fallback —
   // sending both keeps every GUI/backend combination working.
+  // Tauri invoke dual-key is OK (serde ignores unknowns); the daemon-wire
+  // Ack must stay single-key or every version fails to parse it.
   return invoke("pty_ack", { id, bytes, chars: bytes });
 }
 

@@ -34,6 +34,17 @@ describe("updater seam", () => {
   });
 
   afterEach(async () => {
+    // Module-level singletons leak across tests: the staged native update
+    // (plus its downloaded flag) must be released, or a same-version
+    // re-check in the next test would inherit the previous test's flag.
+    try {
+      invokeMock.mockResolvedValue("stable");
+      await resolveChannel();
+      checkMock.mockResolvedValue(null);
+      await checkForNativeUpdate();
+    } catch {
+      // Release path is fail-silent by design; teardown must never throw.
+    }
     // The channel cache is module-level; force a failed resolve to clear it
     // so tests don't leak a cached channel into each other (see channel.ts).
     invokeMock.mockRejectedValue(new Error("reset"));
@@ -83,15 +94,18 @@ describe("updater seam", () => {
     expect(result).toEqual(payload);
   });
 
-  it("checks native updates on rc like stable", async () => {
+  it("rc native check falls back to the legacy path (native is stable-only)", async () => {
+    // WHY: tauri.conf.json endpoints is a single static URL (stable
+    // latest.json); the plugin has no per-channel feed, so rc keeps the
+    // legacy custom flow via Rust manifest_url() exactly like pre-H1.
     await setChannel("rc");
     checkMock.mockResolvedValue({
       version: "0.3.0-rc.1",
       currentVersion: "0.3.0-rc.0",
     } as unknown as Update);
     const info = await checkForNativeUpdate();
-    expect(checkMock).toHaveBeenCalledTimes(1);
-    expect(info?.version).toBe("0.3.0-rc.1");
+    expect(info).toBeNull();
+    expect(checkMock).not.toHaveBeenCalled();
   });
 
   it("invokes check_for_update on stable and returns the update info", async () => {    await setChannel("stable");
@@ -159,6 +173,25 @@ describe("updater seam", () => {
       await setChannel("stable");
       invokeMock.mockRejectedValue(new Error("daemon unreachable"));
       expect(await canUpgradeSafely()).toBe("unknown");
+    });
+
+    it("probe self-resolves an uncached stable channel then probes the daemon", async () => {
+      // Same getChannel() ?? resolveChannel().catch() pattern as the checks:
+      // uncached + stable must still reach can_upgrade_daemon.
+      invokeMock.mockResolvedValueOnce("stable");
+      invokeMock.mockResolvedValue({ safe: true, sessionCount: 0, unknown: false });
+      const probe = await probeUpgradeSafety();
+      expect(invokeMock).toHaveBeenCalledWith("app_channel");
+      expect(invokeMock).toHaveBeenCalledWith("can_upgrade_daemon");
+      expect(probe).toEqual({ status: "idle", sessionCount: 0 });
+    });
+
+    it("probe returns unknown without invoke when the uncached channel is dev", async () => {
+      invokeMock.mockResolvedValueOnce("dev");
+      const probe = await probeUpgradeSafety();
+      expect(invokeMock).toHaveBeenCalledWith("app_channel");
+      expect(invokeMock).not.toHaveBeenCalledWith("can_upgrade_daemon");
+      expect(probe).toEqual({ status: "unknown", sessionCount: 0 });
     });
   });
 
@@ -426,6 +459,31 @@ describe("updater seam", () => {
       expect(outcome).toEqual({ proceeded: true });
       expect(update.download).toHaveBeenCalledTimes(1);
       expect(update.install).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps nativeUpdateDownloaded=true on a same-version re-check", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue({ safe: true, sessionCount: 0, unknown: false });
+      expect(await downloadNativeUpdate(() => {})).toEqual({ ok: true });
+      expect(update.download).toHaveBeenCalledTimes(1);
+      // Same version re-check (new plugin resource, same version string).
+      const sameVersion = fakeNativeUpdate();
+      checkMock.mockResolvedValue(sameVersion as unknown as Update);
+      const info = await checkForNativeUpdate();
+      expect(info?.version).toBe("0.3.0");
+      // Still downloaded: no second plugin download.
+      expect(await downloadNativeUpdate(() => {})).toEqual({ ok: true });
+      expect(update.download).toHaveBeenCalledTimes(1);
+      expect(sameVersion.download).not.toHaveBeenCalled();
+    });
+
+    it("install returns an error value (no throw) when install ok but relaunch rejects", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(IDLE);
+      relaunchMock.mockRejectedValue(new Error("relaunch denied"));
+      const outcome = await installNativeUpdateAndRelaunch(() => {});
+      expect(update.install).toHaveBeenCalledTimes(1);
+      expect(outcome).toEqual({ proceeded: false, reason: "error", error: "relaunch denied" });
     });
   });
 });

@@ -30,6 +30,7 @@ import {
   buildLatestJson,
   mergeLatestJson,
   bundleTargetTriple,
+  targetTripleToOs,
   manifestFilenames,
   assertReleaseFlags,
   parseChannel,
@@ -751,6 +752,43 @@ describe("bundleTargetTriple", () => {
     expect(() => bundleTargetTriple("oppa_0.2.3_x64.exe", "plan9")).toThrow(
       /os/i
     );
+  });
+});
+
+describe("targetTripleToOs", () => {
+  // Pins the helper the workflow uses conceptually: YAML can't import in
+  // test, so the exact matrix triple strings are pinned here.
+  it("derives the bare OS from the matrix target triple", () => {
+    expect(targetTripleToOs("windows-x86_64")).toBe("windows");
+    expect(targetTripleToOs("darwin-aarch64")).toBe("darwin");
+    expect(targetTripleToOs("darwin-x86_64")).toBe("darwin");
+    expect(targetTripleToOs("linux-x86_64")).toBe("linux");
+  });
+});
+
+describe("buildLatestJson prerelease versions", () => {
+  const sigPlatforms = {
+    "windows-x86_64": { url: "https://example.com/setup.exe", signature: "s" },
+  };
+  it("accepts prerelease and build metadata", () => {
+    for (const version of ["0.2.3-rc.1", "1.0.0-beta.1+build.5", "2.0.0+build", "v0.3.0-rc.1"]) {
+      expect(() => buildLatestJson({ version, platforms: sigPlatforms })).not.toThrow();
+    }
+    expect(buildLatestJson({ version: "0.2.3-rc.1", platforms: sigPlatforms }).version).toBe(
+      "0.2.3-rc.1"
+    );
+  });
+});
+
+describe("collectInstallers case-insensitive discovery", () => {
+  it("discovers uppercase extensions", async () => {
+    const tmp = await makeTempDir("oppa-case-");
+    const { fs, path } = tmp;
+    fs.writeFileSync(path.join(tmp.dir, "oppa-0.2.3.MSI"), "msi");
+    fs.writeFileSync(path.join(tmp.dir, "oppa-0.2.3-SETUP.EXE"), "exe");
+    const found = collectInstallers(tmp.dir).map((f) => path.basename(f));
+    expect(found).toContain("oppa-0.2.3.MSI");
+    expect(found).toContain("oppa-0.2.3-SETUP.EXE");
   });
 });
 
