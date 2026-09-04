@@ -281,6 +281,36 @@ mod tests {
     }
 
     #[test]
+    fn baked_updater_pubkey_is_a_real_minisign_key_not_the_dummy() {
+        use base64::Engine as _;
+        // WHY: the native updater verifies every artifact against this key;
+        // a placeholder here silently disables real updates. This reads the
+        // actual baked config (not a copied constant) through the plugin's
+        // exact parse chain: base64 → UTF-8 → minisign PublicKey::decode.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json"))
+                .expect("tauri.conf.json must parse");
+        let pubkey = conf["plugins"]["updater"]["pubkey"]
+            .as_str()
+            .expect("plugins.updater.pubkey must exist");
+        // The pre-H1 placeholder this test guards against ever returning to.
+        // NOTE: it parses as minisign fine (it is key-shaped) — only its
+        // private half is gone, which is exactly why it must never come back.
+        const RETIRED_DUMMY_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5RkE2NzczMDVERjBFNDMKUldSRER0OEZjMmY2MmNqczRETndySU04ZGs4NVBXaFByemE0TnZmT1k1YTgwTnhBNERtUW5MZm8K";
+        assert_ne!(
+            pubkey, RETIRED_DUMMY_PUBKEY,
+            "baked pubkey is still the retired placeholder whose private half is lost"
+        );
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(pubkey)
+            .expect("pubkey must be base64");
+        let text =
+            std::str::from_utf8(&decoded).expect("pubkey must decode to UTF-8");
+        minisign_verify::PublicKey::decode(text)
+            .expect("baked pubkey must parse as a minisign public key");
+    }
+
+    #[test]
     fn fetch_client_has_bounded_timeouts() {
         // reqwest defaults to NO timeout (a hung network would stall the check
         // for minutes). The constants below are what `build_fetch_client`

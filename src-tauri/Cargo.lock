@@ -2654,6 +2654,7 @@ dependencies = [
  "clap",
  "dirs",
  "libc",
+ "minisign-verify",
  "parking_lot",
  "portable-pty",
  "reqwest",
