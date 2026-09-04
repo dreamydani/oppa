@@ -50,15 +50,16 @@ fn editor_candidates() -> &'static [(&'static str, &'static str)] {
 }
 
 fn find_in_path(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
-    // Windows resolves commands through PATHEXT, so `code` matches code.cmd shims
-    let candidates: Vec<String> = if cfg!(windows) {
-        EXECUTABLE_EXTENSIONS
-            .iter()
-            .map(|ext| format!("{command}{ext}"))
-            .collect()
-    } else {
-        vec![command.to_string()]
-    };
+    // Windows resolves commands through PATHEXT, so `code` matches code.cmd shims.
+    // cfg-gated (not `cfg!`): EXECUTABLE_EXTENSIONS exists on Windows only,
+    // so the reference must not compile on other platforms either.
+    #[cfg(windows)]
+    let candidates: Vec<String> = EXECUTABLE_EXTENSIONS
+        .iter()
+        .map(|ext| format!("{command}{ext}"))
+        .collect();
+    #[cfg(not(windows))]
+    let candidates: Vec<String> = vec![command.to_string()];
 
     for dir in path_dirs {
         for candidate in &candidates {
