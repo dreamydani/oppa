@@ -150,7 +150,7 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
-  /* Unfolds downward from the kebab that opened it (see motion.css
+  /* Unfolds downward from the button that opened it (see motion.css
      [data-motion="menu"]); a centre-origin scale reads as materialising from
      no particular place. */
   transform-origin: top right;
@@ -183,21 +183,69 @@
   background-color: var(--tint-active);
 }
 
-/* Split chooser: icon + caret combo per direction; popover reuses menu styles */
-.terminal-pane-header-split-group {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
+/* Undetected CLI rows stay launchable (daemon PATH can disagree with the
+   shell), but read as unavailable until hovered. */
+.terminal-pane-header-menu-item--missing {
+  color: var(--text-muted);
 }
 
-.terminal-pane-header-split-caret {
-  width: 13px;
-  margin-left: -5px;
-  padding: 0;
+.terminal-pane-header-menu-item--missing:hover {
+  color: var(--text-primary);
 }
 
-.terminal-pane-header-split-popover {
-  min-width: 150px;
+/* Plus popover: right-anchored to the button cluster at the pane's right
+   edge so it always opens inside the pane (a left-anchored menu here
+   rendered half-clipped by the leaf's overflow:hidden). Width is capped to
+   the pane itself via cqi (.pane-leaf is a query container), so even a
+   tiny dragged pane shows a whole menu, never half of one. */
+.terminal-pane-header-plus-popover {
+  right: 0;
+  left: auto;
+  transform-origin: top right;
+  min-width: 200px;
+  max-width: 260px;
+  max-width: min(260px, 94cqi);
+}
+
+.terminal-pane-header-menu-separator {
+  height: 1px;
+  background-color: var(--border);
+  margin: 4px 6px;
+}
+
+.terminal-pane-header-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-pane-header-menu-subtext {
+  flex-shrink: 0;
+  margin-left: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+
+.terminal-pane-header-custom-input {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  background-color: var(--bg-overlay-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.terminal-pane-header-custom-input:focus {
+  border-color: var(--accent-blue);
 }
 
 /* Terminal switcher dropdown (project-title ▾): lists every tab's session

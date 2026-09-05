@@ -72,6 +72,9 @@ export type PtySpawnOptions = {
   rows?: number;
   resumeAgents?: boolean;
   worktreeId?: string;
+  // Launch command injected by the daemon once the shell reports ready
+  // (oppa-ready marker, timed fallback) — never typed blind from the GUI.
+  initialCommand?: string;
 };
 
 export interface SessionTitleChangedPayload {

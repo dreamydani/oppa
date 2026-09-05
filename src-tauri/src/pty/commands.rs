@@ -162,6 +162,7 @@ pub struct PtySpawnResultPayload {
 /// The emitter closures capture the `AppHandle` and forward output, exit, and
 /// cwd signals to the frontend as `pty:data` / `pty:exit` / `pty:cwd` events.
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn pty_spawn(
     manager: State<'_, PtyManager>,
     app: AppHandle,
@@ -172,6 +173,7 @@ pub fn pty_spawn(
     rows: Option<u16>,
     resume_agents: Option<bool>,
     worktree_id: Option<String>,
+    initial_command: Option<String>,
 ) -> Result<PtySpawnResultPayload, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -227,6 +229,7 @@ pub fn pty_spawn(
         Some(on_cwd),
         resume_agents.unwrap_or(true),
         worktree_id,
+        initial_command,
     )?;
 
     let (is_warm, cold_scrollback) = if !attach_res.is_new {

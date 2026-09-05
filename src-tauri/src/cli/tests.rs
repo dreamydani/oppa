@@ -667,6 +667,7 @@ fn terminal_create_builder_defaults_size_and_maps_flags() {
             resume_agents,
             worktree_id,
             extra_env,
+            initial_command,
         } => {
             assert_eq!(session_id, "abc");
             assert_eq!((cols, rows), (80, 24));
@@ -675,6 +676,7 @@ fn terminal_create_builder_defaults_size_and_maps_flags() {
             assert!(!resume_agents);
             assert_eq!(worktree_id.as_deref(), Some("wt-1"));
             assert!(extra_env.is_empty());
+            assert_eq!(initial_command, None);
         }
         other => panic!("expected CreateOrAttach, got {other:?}"),
     }

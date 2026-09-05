@@ -321,7 +321,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       });
     };
     const downgradeToCanvas = () => {
-      if (activeRenderer !== "webgl") return;
+      if (disposed || activeRenderer !== "webgl") return;
       try {
         webglAddon?.dispose();
       } catch {}
@@ -334,7 +334,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       } catch {}
     };
     const ensureWebgl = (): void => {
-      if (activeRenderer === "webgl") return;
+      if (disposed || activeRenderer === "webgl") return;
       const upgradedFromCanvas = activeRenderer === "canvas";
       acquireGlSlot(id, downgradeToCanvas);
       try {
@@ -358,6 +358,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           refitAfterRendererSwap();
         }
       } catch {
+        // Already on Canvas (mount + focus both miss WebGL): creating another
+        // would leak the loaded one — and its later dispose would rebuild the
+        // DOM renderer off a dead linkifier (the same unmount crash).
+        if (activeRenderer === "canvas") return;
         try {
           canvasAddon = new CanvasAddon();
           term.loadAddon(canvasAddon);
@@ -672,6 +676,19 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       disposed = true;
       ro.disconnect();
       unsubs.forEach((u) => u());
+      // Renderer addons must go before term.dispose(): xterm clears the
+      // linkifier first while renderer-addon disposal rebuilds the DOM
+      // renderer off it — the reverse order throws "reading
+      // 'onShowLinkUnderline'" on every pane close. Double-dispose is safe
+      // (xterm's AddonManager skips already-disposed addons).
+      try {
+        webglAddon?.dispose();
+      } catch {}
+      webglAddon = null;
+      try {
+        canvasAddon?.dispose();
+      } catch {}
+      canvasAddon = null;
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;

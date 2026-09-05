@@ -84,6 +84,15 @@ export interface PaneLayoutSlice {
   setRatio: (path: Path, ratio: number) => void;
   setSplitRatio?: (path: Path, ratio: number) => void;
   splitPane: (dir: "h" | "v", path?: Path) => Promise<void>;
+  // Split like splitPane, then title the new pane and launch a command in
+  // it (coding-agent picker). The write is delayed: a fresh shell needs a
+  // beat before it reads stdin or the launch line is lost.
+  splitPaneWithCommand: (
+    dir: "h" | "v",
+    path: Path | undefined,
+    command: string,
+    title?: string,
+  ) => Promise<void>;
   closePane: (path?: Path) => Promise<void>;
   toggleMaximizePane: (id?: string) => void;
   focusPane: (path: Path) => void;
@@ -438,6 +447,48 @@ export function createPaneLayoutSlice(
           focusedPath: nextFocusedPath,
         });
       }
+      triggerDebouncedSaveLayout(get);
+    },
+
+    // Agent-launch split: same cwd inheritance + focus contract as splitPane.
+    // The launch command travels WITH the spawn: the daemon injects it once
+    // the shell reports ready, so slow PowerShell startups can't eat bytes.
+    splitPaneWithCommand: async (dir, path, command, title) => {
+      const state = get();
+      const activeTab = getActiveTab(state);
+      const tree = activeTab ? activeTab.layout : state.layout;
+      const target = path ?? (activeTab ? activeTab.focusedPath : state.focusedPath);
+      const focusedId = focus(tree, target);
+      const focusedSession = get().sessions[focusedId];
+      const currentCwd = focusedSession?.cwd;
+      const launchLine = command.trim();
+      const id = await get().spawnSession(
+        currentCwd,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        launchLine || undefined,
+      );
+      const nextLayout = split(dir, tree, target, id);
+      const nextFocusedPath = [...target, 1];
+      if (activeTab) {
+        const activeId = state.activeTabId || activeTab.id;
+        const tabs = getSyncedTabs(state).map((t) =>
+          t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
+        );
+        set({
+          tabs,
+          layout: nextLayout,
+          focusedPath: nextFocusedPath,
+        });
+      } else {
+        set({
+          layout: nextLayout,
+          focusedPath: nextFocusedPath,
+        });
+      }
+      if (title) get().renameSession(id, title);
       triggerDebouncedSaveLayout(get);
     },
 

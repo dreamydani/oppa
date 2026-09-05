@@ -4,7 +4,8 @@ import { useTerminalStore } from "../store/terminalStore";
 import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
 import type { DropZone } from "../lib/pane-manager/layout";
-import type { RepoRecord } from "../lib/worktree/transport";
+import type { RepoRecord, AgentProfile } from "../lib/worktree/transport";
+import { agentProfiles } from "../lib/worktree/transport";
 import { focus as focusLeaf } from "../lib/pane-manager/layout";
 import { AgentStatusPill } from "./agent/AgentStatusPill";
 import {
@@ -31,30 +32,11 @@ function IconMore() {
   );
 }
 
-function IconGlobe() {
+function IconPlus() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6" />
-      <line x1="2" y1="8" x2="14" y2="8" />
-      <path d="M8 2a9.4 9.4 0 0 0 0 12 9.4 9.4 0 0 0 0-12z" />
-    </svg>
-  );
-}
-
-function IconSplitRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <rect x="2" y="2.75" width="12" height="10.5" rx="2" strokeWidth="1.5" />
-      <rect x="8.5" y="4.25" width="4" height="7.5" rx="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function IconSplitDown() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <rect x="2" y="2.75" width="12" height="10.5" rx="2" strokeWidth="1.5" />
-      <rect x="4.25" y="8.5" width="7.5" height="4" rx="1" fill="currentColor" stroke="none" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+      <line x1="8" y1="3.5" x2="8" y2="12.5" />
+      <line x1="3.5" y1="8" x2="12.5" y2="8" />
     </svg>
   );
 }
@@ -119,6 +101,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
+  const splitPaneWithCommand = useTerminalStore((s) => s.splitPaneWithCommand);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
   const repos = useTerminalStore((s) => s.repos);
   const closePane = useTerminalStore((s) => s.closePane);
@@ -140,17 +123,25 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
   const [isDraggingLocal, setIsDraggingLocal] = useState(false);
-  // Direction of the open split chooser popover ("h" right / "v" down), if any.
-  const [splitChooserDir, setSplitChooserDir] = useState<"h" | "v" | null>(null);
+  // New-terminal plus menu (plain splits + agent catalog + custom cmd).
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
+  const [isMissingOpen, setIsMissingOpen] = useState(false);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [customCommand, setCustomCommand] = useState("");
+
+  // Detected CLIs list directly; undetected ones hide behind the expander.
+  // `available === undefined` (stale daemon) fail-opens into the main list
+  // so the menu never blanks against an old backend.
+  const visibleProfiles = profiles.filter((p) => p.id !== "generic" && p.available !== false);
+  const missingProfiles = profiles.filter((p) => p.id !== "generic" && p.available === false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const switcherBtnRef = useRef<HTMLButtonElement>(null);
   const switcherPanelRef = useRef<HTMLDivElement>(null);
-  const splitChooserPanelRef = useRef<HTMLDivElement>(null);
-  const splitRightCaretRef = useRef<HTMLButtonElement>(null);
-  const splitDownCaretRef = useRef<HTMLButtonElement>(null);
+  const plusPanelRef = useRef<HTMLDivElement>(null);
+  const plusBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -316,24 +307,22 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
     };
   }, [isSwitcherOpen]);
 
-  // Split chooser: same close contract as the switcher (outside mousedown + Esc).
+  // Plus menu: same close contract as the switcher (outside mousedown + Esc).
   useEffect(() => {
-    if (!splitChooserDir) return;
-    const chooserCaretRef =
-      splitChooserDir === "h" ? splitRightCaretRef : splitDownCaretRef;
+    if (!isPlusOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
-        splitChooserPanelRef.current &&
-        !splitChooserPanelRef.current.contains(target) &&
-        chooserCaretRef.current &&
-        !chooserCaretRef.current.contains(target)
+        plusPanelRef.current &&
+        !plusPanelRef.current.contains(target) &&
+        plusBtnRef.current &&
+        !plusBtnRef.current.contains(target)
       ) {
-        setSplitChooserDir(null);
+        setIsPlusOpen(false);
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSplitChooserDir(null);
+      if (e.key === "Escape") setIsPlusOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
@@ -341,24 +330,46 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [splitChooserDir]);
+  }, [isPlusOpen]);
 
-  const toggleSplitChooser = useCallback((dir: "h" | "v") => {
-    setSplitChooserDir((prev) => (prev === dir ? null : dir));
-  }, []);
+  // Agent catalog loads lazily: the plus menu is its only consumer, and an
+  // IPC miss (e.g. web dev) degrades to plain splits + custom command.
+  useEffect(() => {
+    if (!isPlusOpen) return;
+    let cancelled = false;
+    setIsMissingOpen(false);
+    void agentProfiles()
+      .then((list) => {
+        if (!cancelled) setProfiles(list);
+      })
+      .catch(() => {
+        if (!cancelled) setProfiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlusOpen]);
 
-  const splitSameDirectory = useCallback(
-    (dir: "h" | "v") => {
-      setSplitChooserDir(null);
-      void splitPane(dir, path);
+  const launchAgent = useCallback(
+    (profile: AgentProfile) => {
+      setIsPlusOpen(false);
+      void splitPaneWithCommand("h", path, profile.command ?? profile.id, profile.displayName);
     },
-    [path, splitPane],
+    [path, splitPaneWithCommand],
   );
+
+  const runCustomCommand = useCallback(() => {
+    const cmd = customCommand.trim();
+    if (!cmd) return;
+    setCustomCommand("");
+    setIsPlusOpen(false);
+    void splitPaneWithCommand("h", path, cmd, undefined);
+  }, [customCommand, path, splitPaneWithCommand]);
 
   // New branch…: opens the worktree create modal prefilled with this pane's
   // owning repo when resolvable.
   const splitNewBranch = useCallback(() => {
-    setSplitChooserDir(null);
+    setIsMenuOpen(false);
     const repo = resolveRepoForCwd(session?.cwd, repos);
     openWorktreeCreate(repo ? { repoPath: repo.path } : undefined);
   }, [openWorktreeCreate, repos, session?.cwd]);
@@ -454,7 +465,10 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
           className={`terminal-pane-header-btn ${isMenuOpen ? "active" : ""}`}
           title="More Options"
           aria-label="More Options"
-          onClick={() => setIsMenuOpen((prev) => !prev)}
+          onClick={() => {
+            setIsPlusOpen(false);
+            setIsMenuOpen((prev) => !prev);
+          }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <IconMore />
@@ -489,23 +503,10 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             </button>
             <button
               className="terminal-pane-header-menu-item"
-              onClick={() => {
-                setIsMenuOpen(false);
-                void splitPane("h", path);
-              }}
+              onClick={splitNewBranch}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              Split Right
-            </button>
-            <button
-              className="terminal-pane-header-menu-item"
-              onClick={() => {
-                setIsMenuOpen(false);
-                void splitPane("v", path);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              Split Down
+              New branch…
             </button>
             <button
               className="terminal-pane-header-menu-item"
@@ -521,78 +522,121 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         )}
 
         <button
-          className="terminal-pane-header-btn"
-          title="Open in Browser"
-          aria-label="Open in Browser"
-          onClick={handleOpenInBrowser}
+          ref={plusBtnRef}
+          type="button"
+          className={`terminal-pane-header-btn${isPlusOpen ? " active" : ""}`}
+          title="New Terminal"
+          aria-label="New Terminal"
+          aria-expanded={isPlusOpen}
+          aria-haspopup="menu"
+          onClick={() => {
+            setIsMenuOpen(false);
+            setIsPlusOpen((prev) => !prev);
+          }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <IconGlobe />
+          <IconPlus />
         </button>
-
-        <span className="terminal-pane-header-split-group">
-          <button
-            className="terminal-pane-header-btn"
-            title="Split Down"
-            aria-label="Split Down"
-            onClick={() => void splitPane("v", path)}
+        {isPlusOpen && (
+          <div
+            ref={plusPanelRef}
+            className="terminal-pane-header-menu terminal-pane-header-plus-popover"
+            role="menu"
+            data-motion="menu"
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <IconSplitDown />
-          </button>
-          <button
-            ref={splitDownCaretRef}
-            type="button"
-            className="terminal-pane-header-btn terminal-pane-header-split-caret"
-            title="Split Down Options"
-            aria-label="Split Down Options"
-            aria-expanded={splitChooserDir === "v"}
-            aria-haspopup="menu"
-            onClick={() => toggleSplitChooser("v")}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <ChevronDown size={9} strokeWidth={2.6} />
-          </button>
-          {splitChooserDir === "v" && (
-            <SplitChooserPopover
-              panelRef={splitChooserPanelRef}
-              onSameDirectory={() => splitSameDirectory("v")}
-              onNewBranch={splitNewBranch}
+            <button
+              type="button"
+              role="menuitem"
+              className="terminal-pane-header-menu-item"
+              onClick={() => {
+                setIsPlusOpen(false);
+                void splitPane("h", path);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              Split Right
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="terminal-pane-header-menu-item"
+              onClick={() => {
+                setIsPlusOpen(false);
+                void splitPane("v", path);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              Split Down
+            </button>
+              <div className="terminal-pane-header-menu-separator" role="separator" />
+              {visibleProfiles.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="menuitem"
+                  className="terminal-pane-header-menu-item"
+                  onClick={() => launchAgent(p)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <span className="terminal-pane-header-menu-label">{p.displayName}</span>
+                  <span className="terminal-pane-header-menu-subtext">
+                    {p.command ?? p.id}
+                  </span>
+                </button>
+              ))}
+              {missingProfiles.length > 0 && (
+                <>
+                  <div className="terminal-pane-header-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    className="terminal-pane-header-menu-item"
+                    aria-expanded={isMissingOpen}
+                    onClick={() => setIsMissingOpen((prev) => !prev)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="terminal-pane-header-menu-label">
+                      Not detected ({missingProfiles.length})
+                    </span>
+                    <ChevronDown size={10} strokeWidth={2.4} />
+                  </button>
+                  {isMissingOpen &&
+                    missingProfiles.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        role="menuitem"
+                        className="terminal-pane-header-menu-item terminal-pane-header-menu-item--missing"
+                        onClick={() => launchAgent(p)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="terminal-pane-header-menu-label">{p.displayName}</span>
+                        <span className="terminal-pane-header-menu-subtext">not installed</span>
+                      </button>
+                    ))}
+                </>
+              )}
+              <div className="terminal-pane-header-menu-separator" role="separator" />
+            <input
+              aria-label="Custom command"
+              className="terminal-pane-header-custom-input"
+              placeholder="Custom command…"
+              value={customCommand}
+              onChange={(e) => setCustomCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runCustomCommand();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setIsPlusOpen(false);
+                }
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             />
-          )}
-        </span>
-
-        <span className="terminal-pane-header-split-group">
-          <button
-            className="terminal-pane-header-btn"
-            title="Split Right"
-            aria-label="Split Right"
-            onClick={() => void splitPane("h", path)}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <IconSplitRight />
-          </button>
-          <button
-            ref={splitRightCaretRef}
-            type="button"
-            className="terminal-pane-header-btn terminal-pane-header-split-caret"
-            title="Split Right Options"
-            aria-label="Split Right Options"
-            aria-expanded={splitChooserDir === "h"}
-            aria-haspopup="menu"
-            onClick={() => toggleSplitChooser("h")}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <ChevronDown size={9} strokeWidth={2.6} />
-          </button>
-          {splitChooserDir === "h" && (
-            <SplitChooserPopover
-              panelRef={splitChooserPanelRef}
-              onSameDirectory={() => splitSameDirectory("h")}
-              onNewBranch={splitNewBranch}
-            />
-          )}
-        </span>
+          </div>
+        )}
 
         <button
           className={`terminal-pane-header-btn${isMaximized ? " active" : ""}`}
@@ -618,45 +662,6 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       {isSwitcherOpen && (
         <TerminalSwitcherMenu onClose={() => setIsSwitcherOpen(false)} panelRef={switcherPanelRef} />
       )}
-    </div>
-  );
-}
-
-function SplitChooserPopover({
-  panelRef,
-  onSameDirectory,
-  onNewBranch,
-}: {
-  panelRef: React.RefObject<HTMLDivElement | null>;
-  onSameDirectory: () => void;
-  onNewBranch: () => void;
-}) {
-  return (
-    <div
-      ref={panelRef}
-      className="terminal-pane-header-menu terminal-pane-header-split-popover"
-      role="menu"
-      data-motion="menu"
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        className="terminal-pane-header-menu-item"
-        onClick={onSameDirectory}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        Same directory
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="terminal-pane-header-menu-item"
-        onClick={onNewBranch}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        New branch…
-      </button>
     </div>
   );
 }

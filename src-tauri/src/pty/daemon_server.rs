@@ -555,6 +555,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -607,6 +608,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -646,6 +648,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         assert!(matches!(resp, DaemonResponse::SessionAttached(_)));
 
@@ -757,6 +760,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         };
         let mut create_str = serde_json::to_string(&create_req).unwrap();
         create_str.push('\n');
@@ -849,6 +853,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         };
         let mut reattach_str = serde_json::to_string(&reattach_req).unwrap();
         reattach_str.push('\n');
@@ -961,6 +966,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         })
         .unwrap()
             + "\n";
@@ -1009,6 +1015,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1029,6 +1036,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1072,6 +1080,7 @@ mod tests {
             resume_agents: true,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1159,6 +1168,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1215,6 +1225,7 @@ mod tests {
             resume_agents: true,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1236,6 +1247,7 @@ mod tests {
             resume_agents: true,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => {
@@ -1275,6 +1287,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
@@ -1310,6 +1323,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match resp {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
@@ -1478,6 +1492,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         assert!(matches!(attach, DaemonResponse::SessionAttached(_)));
         let blocked = server.handle_request(DaemonRequest::WorktreeRemove {
@@ -1829,6 +1844,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         }) {
             DaemonResponse::SessionAttached(_) => {}
             other => panic!("expected SessionAttached, got {other:?}"),
@@ -1988,6 +2004,7 @@ mod tests {
                 resume_agents: false,
                 worktree_id: None,
                 extra_env: Vec::new(),
+                initial_command: None,
             })
             .as_bytes())
             .await
@@ -2111,6 +2128,7 @@ mod tests {
             resume_agents: false,
             worktree_id: Some(created.id.clone()),
             extra_env: vec![("MY_TOOL_FLAG".to_string(), "verbose".to_string())],
+            initial_command: None,
         }) {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
             other => panic!("expected SessionAttached, got {other:?}"),
@@ -2197,6 +2215,7 @@ mod tests {
             resume_agents: false,
             worktree_id: Some(created.id.clone()),
             extra_env: Vec::new(),
+            initial_command: None,
         }) {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
             other => panic!("expected SessionAttached, got {other:?}"),
@@ -2240,6 +2259,7 @@ mod tests {
             resume_agents: false,
             worktree_id: Some("repo::C:/ws/ghost".into()),
             extra_env: Vec::new(),
+            initial_command: None,
         }) {
             DaemonResponse::Error(e) => {
                 assert!(e.contains("worktree not found"), "got: {e}");
@@ -2294,6 +2314,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         }) {
             DaemonResponse::SessionAttached(res) => assert!(res.is_new),
             other => panic!("expected SessionAttached, got {other:?}"),

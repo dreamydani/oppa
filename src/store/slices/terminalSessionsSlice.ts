@@ -90,6 +90,7 @@ export interface SessionSlice {
     existingId?: string,
     geometry?: { cols?: number; rows?: number },
     worktreeId?: string,
+    initialCommand?: string,
   ) => Promise<string>;
   killSession: (id: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
@@ -147,7 +148,7 @@ export function createSessionsSlice(
         return { restoredScrollbacks };
       }),
 
-    spawnSession: async (cwd, shell, existingId, geometry, worktreeId) => {
+    spawnSession: async (cwd, shell, existingId, geometry, worktreeId, initialCommand) => {
       try {
         const targetCwd = cwd ?? (existingId ? undefined : get().resolveDefaultCwd());
         const opts: PtySpawnOptions = {};
@@ -157,6 +158,7 @@ export function createSessionsSlice(
         if (geometry?.cols !== undefined) opts.cols = geometry.cols;
         if (geometry?.rows !== undefined) opts.rows = geometry.rows;
         if (worktreeId) opts.worktreeId = worktreeId;
+        if (initialCommand) opts.initialCommand = initialCommand;
         // Rust defaults to resume-on; only ever send the explicit opt-out
         const autoResume = get().settings.general.autoResumeAgents;
         if (autoResume === false) opts.resumeAgents = false;

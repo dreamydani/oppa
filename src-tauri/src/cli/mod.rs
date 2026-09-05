@@ -339,6 +339,7 @@ pub fn build_terminal_create(
         resume_agents: false,
         worktree_id: worktree_id.map(Into::into),
         extra_env: Vec::new(),
+        initial_command: None,
     }
 }
 

@@ -202,6 +202,7 @@ impl PtyManager {
         on_cwd: Option<OnCwd>,
         resume_agents: bool,
         worktree_id: Option<String>,
+        initial_command: Option<String>,
     ) -> Result<CreateOrAttachResult, String> {
         let client = self.get_client()?;
         client.register_callbacks(session_id, on_data, on_exit, on_cwd);
@@ -214,6 +215,7 @@ impl PtyManager {
             shell,
             resume_agents,
             worktree_id,
+            initial_command,
         )
     }
 
@@ -380,7 +382,7 @@ pub(crate) mod tests {
 
         let id = manager.next_id();
         manager
-            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None)
+            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None, None)
             .expect("create_or_attach");
 
         let rx = manager.take_output(&id).expect("output channel");
@@ -415,6 +417,7 @@ pub(crate) mod tests {
                 None,
                 false,
                 None,
+                None,
             )
             .expect("create");
         assert!(res.is_new);
@@ -442,6 +445,7 @@ pub(crate) mod tests {
                 None,
                 None,
                 false,
+                None,
                 None,
             )
             .expect("reattach");
@@ -485,6 +489,7 @@ pub(crate) mod tests {
                 None,
                 false,
                 None,
+                None,
             )
             .expect("create_or_attach");
 
@@ -517,7 +522,7 @@ pub(crate) mod tests {
 
         let id = manager.next_id();
         manager
-            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None)
+            .create_or_attach(&id, 80, 24, None, Some(sh), None, None, None, false, None, None)
             .expect("create_or_attach");
 
         manager.resize(&id, 120, 40).expect("resize");
