@@ -1,7 +1,7 @@
 [package]
 name = "oppa"
 default-run = "oppa"
-version = "0.2.4"
+version = "0.2.5"
 description = "Fast, low-memory desktop terminal with persistent daemon sessions"
 authors = ["dreamydani"]
 edition = "2021"
