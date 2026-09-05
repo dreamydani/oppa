@@ -52,7 +52,7 @@ const addonState = vi.hoisted(() => ({
   serializeInstances: [] as { serialize: ReturnType<typeof vi.fn> }[],
   webLinksInstances: [] as { handler?: (event: MouseEvent, uri: string) => void }[],
   webglInstances: [] as { onContextLoss: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; contextLossCallback?: () => void }[],
-  canvasInstances: [] as unknown[],
+  canvasInstances: [] as { dispose: ReturnType<typeof vi.fn> }[],
   // When true the WebglAddon constructor throws (simulates no-GL context),
   // forcing the Canvas fallback so focus-upgrade paths can be exercised.
   webglShouldThrow: false,
@@ -170,6 +170,7 @@ vi.mock("@xterm/addon-webgl", () => {
 
 vi.mock("@xterm/addon-canvas", () => {
   class MockCanvasAddon {
+    dispose = vi.fn();
     constructor() {
       addonState.canvasInstances.push(this);
     }
@@ -516,6 +517,51 @@ describe("TerminalPane", () => {
     unmount();
     expect(term().dispose).toHaveBeenCalled();
     expect(ptyKillMock).not.toHaveBeenCalled();
+  });
+
+  it("disposes the WebGL addon before the terminal on unmount", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const webgl = addonState.webglInstances[0]!;
+    unmount();
+
+    expect(webgl.dispose).toHaveBeenCalledTimes(1);
+    expect(term().dispose).toHaveBeenCalledTimes(1);
+    // xterm clears the linkifier during term.dispose() while renderer-addon
+    // disposal rebuilds the DOM renderer off it — addons must go first or
+    // unmount throws "reading 'onShowLinkUnderline'".
+    expect(webgl.dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      term().dispose.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("disposes the Canvas addon before the terminal on unmount", async () => {
+    addonState.webglShouldThrow = true;
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const canvas = addonState.canvasInstances[0]!;
+    expect(addonState.canvasInstances.length).toBe(1);
+    unmount();
+
+    expect(canvas.dispose).toHaveBeenCalledTimes(1);
+    expect(term().dispose).toHaveBeenCalledTimes(1);
+    expect(canvas.dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      term().dispose.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("ignores renderer context loss after unmount instead of touching the dead terminal", async () => {
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const webgl = addonState.webglInstances[0]!;
+    const loadsBefore = term().loadAddon.mock.calls.length;
+    unmount();
+
+    expect(() => webgl.contextLossCallback!()).not.toThrow();
+    expect(term().loadAddon.mock.calls.length).toBe(loadsBefore);
   });
 
   it("does not ack when onWriteParsed fires with nothing written", async () => {
