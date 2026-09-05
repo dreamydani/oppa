@@ -1,0 +1,201 @@
+/* Update card — floating surface beside its component (see STYLEGUIDE). */
+
+.update-card {
+  position: fixed;
+  bottom: 40px;
+  right: 16px;
+  z-index: 1000;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg, 8px);
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+  border: 1px solid var(--border-divider);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  animation: update-card-pop var(--dur-base) var(--ease-out) both;
+}
+
+.update-card-error {
+  border-color: color-mix(in srgb, var(--destructive) 45%, transparent);
+}
+
+.update-card-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  word-break: break-word;
+}
+
+.update-card-sub {
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.update-card-notes {
+  color: var(--text-primary);
+  opacity: 0.85;
+  word-break: break-word;
+}
+
+.update-card-link {
+  color: var(--accent-blue);
+  text-decoration: none;
+  opacity: 1;
+}
+
+.update-card-link:hover {
+  text-decoration: underline;
+}
+
+.update-card-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-card-row-start {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.update-card-grow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.update-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.update-card-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    filter var(--dur-micro) var(--ease-out),
+    background-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.update-card-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+.update-card-btn-primary {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.update-card-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.update-card-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.update-card-btn-secondary:hover:not(:disabled) {
+  background: var(--tint-hover);
+  color: var(--text-primary);
+}
+
+.update-card-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.update-card-icon-btn:hover:not(:disabled) {
+  background: var(--tint-hover);
+  color: var(--text-primary);
+}
+
+.update-card-icon-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale-icon));
+}
+
+.update-card-progress-track {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 15%, transparent);
+  overflow: hidden;
+}
+
+.update-card-progress-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--accent-blue);
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+@keyframes update-card-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translate3d(0, 4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-card {
+    animation: update-card-fade var(--dur-base) var(--ease-out) both;
+  }
+
+  @keyframes update-card-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}

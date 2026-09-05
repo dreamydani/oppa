@@ -21,6 +21,7 @@ import {
   type UpdateAvailabilityDetail,
 } from "../lib/updateScheduler";
 import { useTerminalStore } from "../store/terminalStore";
+import "./UpdateBanner.css";
 
 // The scheduler owns the event bus; re-exported so existing importers
 // (Settings, status segment) keep working untouched.
@@ -400,62 +401,53 @@ export function UpdateBanner() {
   const errorKind = error ? classifyUpdateError(error, errorOrigin) : null;
   const hint = error && errorKind ? errorHint(errorKind, errorOrigin) : null;
 
+  // Card shell follows the overlay pattern (bg-overlay + border-divider);
+  // only the error phase tints its border destructive.
   return (
     <div
       role="complementary"
       aria-label={ARIA_LABELS[phase]}
       aria-live="polite"
       data-testid="update-banner"
-      style={{
-        position: "fixed",
-        bottom: 40,
-        right: 16,
-        zIndex: 1000,
-        width: 360,
-        maxWidth: "calc(100vw - 32px)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        padding: "12px 14px",
-        borderRadius: 10,
-        background: "var(--bg-secondary, #2a2a2a)",
-        color: "var(--text-primary, #ddd)",
-        border: "1px solid rgba(120, 180, 255, 0.35)",
-        fontSize: 12,
-        lineHeight: 1.5,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-      }}
+      data-motion="pop"
+      data-state="open"
+      className={phase === "error" ? "update-card update-card-error" : "update-card"}
     >
       {busySessionCount !== null ? (
-        <div
-          role="alert"
-          style={{ display: "flex", alignItems: "center", gap: 12 }}
-        >
-          <span style={{ wordBreak: "break-word", flex: 1 }}>
+        <div role="alert" className="update-card-column">
+          <span className="update-card-sub">
             {busySessionCount} {busySessionCount === 1 ? "session is" : "sessions are"} still
             running. Updating will close {busySessionCount === 1 ? "it" : "them"}.
           </span>
-          <button type="button" onClick={() => void handleUpdateAnyway()}>
-            Update anyway
-          </button>
-          <button type="button" onClick={() => setBusySessionCount(null)}>
-            Not now
-          </button>
+          <div className="update-card-actions">
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-primary"
+              onClick={() => void handleUpdateAnyway()}
+            >
+              Update anyway
+            </button>
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-secondary"
+              onClick={() => setBusySessionCount(null)}
+            >
+              Not now
+            </button>
+          </div>
         </div>
       ) : phase === "checking" ? (
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="update-card-row">
           <Loader2 size={13} aria-hidden="true" />
           Checking for updates…
         </span>
       ) : phase === "not-available" ? (
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          You&apos;re on the latest version.
-        </span>
+        <span className="update-card-row">You&apos;re on the latest version.</span>
       ) : phase === "downloading" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="update-card-column">
+          <div className="update-card-row">
             <Loader2 size={13} aria-hidden="true" />
-            <span style={{ flex: 1 }}>
+            <span className="update-card-grow">
               Downloading update{percent !== null ? `… ${percent}%` : "…"}
             </span>
             <button
@@ -463,7 +455,7 @@ export function UpdateBanner() {
               aria-label="Collapse update card"
               title="Collapse"
               onClick={handleCollapse}
-              style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit" }}
+              className="update-card-icon-btn"
             >
               <Minus size={14} aria-hidden="true" />
             </button>
@@ -474,29 +466,18 @@ export function UpdateBanner() {
             aria-valuemin={0}
             aria-valuemax={100}
             {...(percent !== null ? { "aria-valuenow": percent } : {})}
-            style={{
-              display: "block",
-              width: "100%",
-              height: 6,
-              borderRadius: 3,
-              background: "rgba(255,255,255,0.15)",
-              overflow: "hidden",
-            }}
+            className="update-card-progress-track"
           >
             <span
-              style={{
-                display: "block",
-                height: "100%",
-                width: percent !== null ? `${percent}%` : "30%",
-                background: "var(--text-primary, #ddd)",
-              }}
+              className="update-card-progress-fill"
+              style={{ transform: `scaleX(${percent !== null ? percent / 100 : 0.3})` }}
             />
           </span>
         </div>
       ) : phase === "downloaded" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ wordBreak: "break-word", flex: 1 }}>
+        <div className="update-card-column">
+          <div className="update-card-row">
+            <span className="update-card-title update-card-grow">
               {`v${version} downloaded. Restart to update.`}
             </span>
             <button
@@ -504,34 +485,46 @@ export function UpdateBanner() {
               aria-label="Collapse update card"
               title="Collapse"
               onClick={handleCollapse}
-              style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit" }}
+              className="update-card-icon-btn"
             >
               <Minus size={14} aria-hidden="true" />
             </button>
           </div>
-          <span style={{ opacity: 0.75 }}>Sessions restore after restart.</span>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={() => void handleRestartNow()}>
+          <span className="update-card-sub">Sessions restore after restart.</span>
+          <div className="update-card-actions">
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-primary"
+              onClick={() => void handleRestartNow()}
+            >
               Restart now
             </button>
-            <button type="button" onClick={handleLater}>
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-secondary"
+              onClick={handleLater}
+            >
               Later
             </button>
           </div>
         </div>
       ) : phase === "browser" ? (
-        <>
-          <span style={{ wordBreak: "break-word" }}>
-            Downloading update… opening in your browser.
-          </span>
-          <button type="button" onClick={handleNotNow}>
-            Not now
-          </button>
-        </>
+        <div className="update-card-column">
+          <span className="update-card-sub">Downloading update… opening in your browser.</span>
+          <div className="update-card-actions">
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-secondary"
+              onClick={handleNotNow}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
       ) : phase === "error" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span role="alert" style={{ wordBreak: "break-word", flex: 1 }}>
+        <div className="update-card-column">
+          <div className="update-card-row">
+            <span role="alert" className="update-card-title update-card-grow">
               {errorKind === "signature"
                 ? `Update blocked: ${error ?? "signature check failed"}`
                 : `Update failed: ${error ?? "unknown error"}`}
@@ -541,45 +534,51 @@ export function UpdateBanner() {
               aria-label="Collapse update card"
               title="Collapse"
               onClick={handleCollapse}
-              style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit" }}
+              className="update-card-icon-btn"
             >
               <Minus size={14} aria-hidden="true" />
             </button>
           </div>
-          {hint ? <span style={{ opacity: 0.8 }}>{hint}</span> : null}
+          {hint ? <span className="update-card-sub">{hint}</span> : null}
           {errorKind === "signature" && releaseUrl ? (
-            <a href={releaseUrl} target="_blank" rel="noreferrer">
+            <a href={releaseUrl} target="_blank" rel="noreferrer" className="update-card-link">
               Download from GitHub releases
             </a>
           ) : null}
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="update-card-actions">
             {errorKind !== "signature" ? (
-              <button type="button" onClick={() => void handleRetry()}>
+              <button
+                type="button"
+                className="update-card-btn update-card-btn-primary"
+                onClick={() => void handleRetry()}
+              >
                 Retry
               </button>
             ) : null}
-            <button type="button" onClick={handleNotNow}>
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-secondary"
+              onClick={handleNotNow}
+            >
               Dismiss
             </button>
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ wordBreak: "break-word", fontWeight: 600 }}>
+        <div className="update-card-column">
+          <div className="update-card-row-start">
+            <div className="update-card-grow">
+              <span className="update-card-title">
                 {engine === "native"
                   ? `Oppa v${version} is ready.`
                   : `A new version of OPPA is available (v${version}).`}
               </span>
-              <span style={{ opacity: 0.75 }}>Sessions restore after restart.</span>
+              <span className="update-card-sub">Sessions restore after restart.</span>
               {releaseBody ? (
-                <span style={{ opacity: 0.85, wordBreak: "break-word" }}>
-                  {releaseBody.slice(0, 220)}
-                </span>
+                <span className="update-card-notes">{releaseBody.slice(0, 220)}</span>
               ) : null}
               {releaseUrl ? (
-                <a href={releaseUrl} target="_blank" rel="noreferrer" style={{ opacity: 0.85 }}>
+                <a href={releaseUrl} target="_blank" rel="noreferrer" className="update-card-link">
                   Release notes
                 </a>
               ) : null}
@@ -589,22 +588,34 @@ export function UpdateBanner() {
               aria-label="Dismiss update card"
               title="Dismiss"
               onClick={handleNotNow}
-              style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit" }}
+              className="update-card-icon-btn"
             >
               <X size={14} aria-hidden="true" />
             </button>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="update-card-actions">
             {engine === "native" ? (
-              <button type="button" onClick={() => void handleDownloadNow()}>
+              <button
+                type="button"
+                className="update-card-btn update-card-btn-primary"
+                onClick={() => void handleDownloadNow()}
+              >
                 Download now
               </button>
             ) : (
-              <button type="button" onClick={() => void handleUpdateNow()}>
+              <button
+                type="button"
+                className="update-card-btn update-card-btn-primary"
+                onClick={() => void handleUpdateNow()}
+              >
                 Update now
               </button>
             )}
-            <button type="button" onClick={handleNotNow}>
+            <button
+              type="button"
+              className="update-card-btn update-card-btn-secondary"
+              onClick={handleNotNow}
+            >
               Not now
             </button>
           </div>
