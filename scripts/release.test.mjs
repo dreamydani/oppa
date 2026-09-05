@@ -545,6 +545,22 @@ describe("writeManifest signature slot", () => {
     expect(manifest).toHaveProperty("signature");
     expect(manifest.signature).toBe("");
   });
+
+  it("points the legacy manifest at the picked updater bundle with its signature", () => {
+    // WHY: old binaries (0.2.2/0.2.3) read only this shape; the CI finalize
+    // must feed it the NSIS primary, or those installs never see the update.
+    const { manifest } = writeManifest(
+      "0.2.4",
+      "oppa_0.2.4_x64-setup.exe",
+      "sig-windows"
+    );
+    expect(manifest).toEqual({
+      version: "0.2.4",
+      download:
+        "https://github.com/dreamydani/oppa/releases/download/v0.2.4/oppa_0.2.4_x64-setup.exe",
+      signature: "sig-windows",
+    });
+  });
 });
 
 describe("NSIS-primary installer ranking", () => {

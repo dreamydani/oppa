@@ -98,9 +98,9 @@ jobs:
           node --input-type=module -e "
           import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { basename, join } from 'node:path';
-          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, targetTripleFromDir, selectUpdaterBundle } from './scripts/release.mjs';
+          import { mergeLatestJson, buildGhReleaseArgsMulti, manifestFilenames, targetTripleFromDir, selectUpdaterBundle, writeManifest } from './scripts/release.mjs';
           const version = process.env.VERSION, channel = process.env.CHANNEL;
-          const { latest } = manifestFilenames(channel);
+          const { latest, manifest } = manifestFilenames(channel);
           mkdirSync('release-assets', { recursive: true });
           const entries = [], assets = [];
           for (const dir of readdirSync('dist-bundles', { withFileTypes: true })) {
@@ -145,6 +145,13 @@ jobs:
           const feed = mergeLatestJson({ version, pubDate: new Date().toISOString(), entries: feedEntries });
           writeFileSync(join('release-assets', latest), JSON.stringify(feed, null, 2) + '\n');
           assets.push(join('release-assets', latest));
+          // WHY: pre-native binaries (0.2.2/0.2.3) read only the legacy
+          // custom shape — without this file their card never appears and
+          // the one-hop migration to the native flow cannot start.
+          const win = picked.find((e) => targetTripleFromDir(e.dir) === 'windows-x86_64') ?? picked[0];
+          const { manifestPath } = writeManifest(version, basename(win.asset), win.sig, manifest);
+          copyFileSync(manifestPath, join('release-assets', manifest));
+          assets.push(join('release-assets', manifest));
           writeFileSync('gh-args.json', JSON.stringify(buildGhReleaseArgsMulti(version, assets, channel === 'rc')));
           "
         env:
