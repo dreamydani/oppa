@@ -1,139 +1,95 @@
-# OPPA ⚡
+<h1 align="center">Oppa ⚡</h1>
 
-**OPPA** is a fast, low-memory desktop terminal and developer workbench built with **Tauri 2 + Rust** (backend) and **React 19 + TypeScript + Vite** (frontend).
+<p align="center">
+  <a href="https://github.com/dreamydani/oppa/releases/latest"><img src="https://img.shields.io/github/v/release/dreamydani/oppa?style=flat" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat-square" alt="Supported platforms: macOS, Windows, and Linux" />
+</p>
 
----
+<p align="center">
+  <strong>A fast, low-memory terminal that never loses your shell.</strong><br />
+  Detached daemon sessions, instant reattachment, and zero-drop flow control.
+</p>
 
-## Key Features
+<h3 align="center"><a href="https://github.com/dreamydani/oppa/releases/latest"><ins>Download Oppa</ins></a></h3>
 
-- **Detached Background Daemon & Session Persistence**: Terminal sessions run inside a detached Rust daemon. Shells, active long-running jobs, and process trees stay alive across GUI window closes and app restarts.
-- **Warm Reattachment & Screen Mirroring**: Reopening OPPA instantly reattaches to running daemon sessions. An in-memory VT100 screen mirror restores full terminal formatting, text, and cursor state without resetting the shell.
-- **Split Panes & Workspaces**: Flexible pane splitting, tabbed layouts, and workspace presets for multi-project workflows.
-- **Built-in Browser Hub**: Embedded webview browser viewport for local development servers, documentation, and previewing web applications side-by-side with your terminal.
-- **Code Editor Workbench**: Built-in editor pane with syntax highlighting, Markdown preview, and diff inspection.
-- **Robust ACK-based Backpressure**: Flow-control system prevents memory bloat during massive terminal output streams while guaranteeing zero dropped bytes.
+<p align="center">
+  <img src="docs/assets/hero.png" alt="Oppa home — workspaces, split terminal panes, and editor side by side" width="960" />
+</p>
 
----
+## Why Oppa
 
-## Architecture & Detached Daemon
+- **Sessions survive restarts.** Shells and long-running jobs live in a detached Rust daemon, not in the window. Close the GUI and everything keeps running.
+- **Reopening is instant.** Each session keeps an in-memory screen mirror, so reattachment restores full text, formatting, and cursor state without restarting the shell.
+- **Massive output stays bounded.** ACK-based backpressure pauses the reader under load instead of buffering unboundedly — and never drops a byte.
 
-OPPA uses a unified binary architecture:
+## Features
+
+- Detached background daemon with persistent PTY sessions across GUI restarts.
+- Warm reattachment with VT100 screen mirroring for instant UI hydration.
+- Split panes, tabs, and workspace layouts for multi-project work.
+- Browser viewport for local development servers and documentation.
+- Editor pane with syntax highlighting, Markdown preview, and diff inspection.
+- ACK-based flow control (pause above 256 KB, resume below 32 KB).
+
+## How it works
+
+Oppa ships as one binary with two roles:
 
 ```
-                  ┌─────────────────────────────────┐
-                  │        OPPA GUI Process         │
-                  │   (Tauri 2 + React 19 Frontend) │
-                  └───────────────┬─────────────────┘
-                                  │
-                  IPC (Named Pipe / Unix Domain Socket)
-                  Newline-delimited JSON-RPC
-                                  │
-                                  ▼
-                  ┌─────────────────────────────────┐
-                  │    OPPA Daemon Process (--daemon)│
-                  │  ┌───────────────────────────┐  │
-                  │  │       DaemonServer        │  │
-                  │  ├───────────────────────────┤  │
-                  │  │ Session Registry (PTYs)   │  │
-                  │  │ ScreenMirror (vt100 state)│  │
-                  │  │ Flow Control / ACKs       │  │
-                  │  └───────────────────────────┘  │
-                  └─────────────────────────────────┘
+            ┌──────────────────────────────┐
+            │          Oppa GUI            │
+            │  (Tauri 2 + React 19 UI)     │
+            └──────────────┬───────────────┘
+                           │  named pipe / Unix socket
+                           │  newline-delimited JSON-RPC
+                           ▼
+            ┌──────────────────────────────┐
+            │     Oppa Daemon (--daemon)   │
+            │  Session registry (PTYs)     │
+            │  ScreenMirror (vt100 state)  │
+            │  Flow control / ACKs         │
+            └──────────────────────────────┘
 ```
 
-### Detached Daemon Mode (`--daemon`)
-- Starting the binary with `--daemon` boots the headless Tokio runtime hosting `DaemonServer`.
-- If no daemon is active when the GUI launches, OPPA automatically spawns a background daemon.
-- Closing the GUI window issues a `Disconnect` RPC call; the daemon and all child shells continue running in the background.
-- Closing an individual terminal pane sends a `Kill` command, terminating the process group and freeing session resources.
+- On launch the GUI connects to the daemon, spawning one in the background when absent.
+- `CreateOrAttach` returns `is_new: false` plus an ANSI snapshot for existing sessions; the frontend paints the snapshot into xterm and live streaming resumes.
+- Closing the window disconnects; closing a pane sends `Kill`, which terminates the process group and frees the session.
+- See `docs/ARCHITECTURE.md` for the full design.
 
-### IPC Protocol
-Communication between GUI and daemon occurs over:
-- **Windows**: Named pipes (`\\.\pipe\oppa-daemon`)
-- **macOS / Linux**: Unix domain sockets (`/tmp/oppa-daemon.sock` or `$XDG_RUNTIME_DIR/oppa-daemon.sock`)
+## Install
 
-Messages are newline-delimited JSON objects supporting bi-directional requests (`DaemonRequest`), responses (`DaemonResponse`), and streaming events (`DaemonEvent::Data`, `DaemonEvent::Exit`, `DaemonEvent::Cwd`).
+Download the installer for your platform from [GitHub Releases](https://github.com/dreamydani/oppa/releases/latest).
 
-### Warm Reattachment & Screen Snapshots
-When a session is created or reattached via `CreateOrAttach`:
-1. If the session exists (`is_new: false`), the daemon captures the current screen contents using its in-memory `ScreenMirror` (`vt100::Parser`) and returns an ANSI snapshot string.
-2. The frontend writes the snapshot directly to the xterm terminal instance, immediately restoring visual state.
-3. Live streaming of output and input resumes seamlessly.
+To run from source:
 
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js**: v18+ (recommended: v20+)
-- **pnpm**: `corepack enable pnpm` or `npm install -g pnpm`
-- **Rust**: 1.77+ (`rustup`)
-
-### Development
-
-Install dependencies:
 ```bash
 pnpm install
-```
-
-Run desktop application in development mode:
-```bash
 pnpm tauri dev
 ```
 
-Run web-only UI development server:
+Web-only UI preview (no PTY backend):
+
 ```bash
 pnpm dev
 ```
 
----
+Prerequisites: Node.js 18+ (20+ recommended) with `pnpm`, and Rust 1.77+ via `rustup`.
 
-## Release & Updates
-
-### Build channels
-
-OPPA is one codebase with two build channels, baked in at compile time via `OPPA_CHANNEL` (unset = `stable`):
-
-- **Stable** (`oppa`) — the app you use daily. Uses `com.pc.oppa` data dir, the base daemon pipe, the "oppa" title, and checks for updates on startup.
-- **Developer OPPA** (`OPPA_CHANNEL=dev pnpm tauri dev`) — a one-to-one copy for dogfooding. Isolated data dir (`com.pc.oppa-dev`) and daemon pipe, "Developer OPPA" window title, and **never checks for updates**.
-
-### Releasing a new stable version
+## Developing
 
 ```bash
-pnpm release
+pnpm tauri dev        # desktop app
+pnpm vitest run       # renderer tests
+cargo test -p oppa --lib  # Rust unit tests (run in src-tauri)
 ```
 
-Prompts for the version (manual), bumps `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`, builds the installer, and publishes it plus an update manifest (`{ "version": "...", "download": "..." }`) to GitHub Releases (`dreamydani/oppa`).
+Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and the pre-PR checklist.
 
-### How stable updates work (v1)
+## Community & Support
 
-On startup, stable OPPA checks the release manifest. If a newer version exists, it shows **"Update now / Not now"**. If terminal sessions are running, "Update now" first warns "N sessions are still running" — the interruption is always your informed choice.
-
-**v1 behavior:** "Update now" opens the installer in your browser (the seamless in-app install + versioned-folder installer layout is the next milestone — the daemon-side seams — min-version protocol attach, lazy daemon upgrade, daemon-path resolver — are already in place).
-
----
-
-## Testing & Verification
-
-Run all test suites:
-
-```bash
-# Rust unit tests
-cargo test -p oppa --lib
-
-# Rust daemon end-to-end integration tests
-cargo test -p oppa --test daemon_integration_test
-
-# Frontend test suite
-pnpm vitest run
-
-# Production type check & frontend build
-pnpm build
-```
-
----
+- Issues and feature requests: [github.com/dreamydani/oppa/issues](https://github.com/dreamydani/oppa/issues)
 
 ## License
 
-MIT
+Oppa is free and open source under the [MIT License](LICENSE). Third-party attributions are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
