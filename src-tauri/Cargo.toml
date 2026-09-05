@@ -2,8 +2,8 @@
 name = "oppa"
 default-run = "oppa"
 version = "0.2.4"
-description = "A Tauri App"
-authors = ["you"]
+description = "Fast, low-memory desktop terminal with persistent daemon sessions"
+authors = ["dreamydani"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

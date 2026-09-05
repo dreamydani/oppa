@@ -1,7 +1,15 @@
 {
   "name": "oppa",
-  "private": true,
   "version": "0.2.4",
+  "description": "Fast, low-memory desktop terminal with persistent daemon sessions",
+  "author": "dreamydani",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dreamydani/oppa.git"
+  },
+  "homepage": "https://github.com/dreamydani/oppa",
+  "private": false,
   "type": "module",
   "scripts": {
     "dev": "vite",
