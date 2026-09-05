@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import * as transport from "../lib/pty/transport";
-import type { WorktreeRecord, RepoRecord } from "../lib/worktree/transport";
+import * as worktreeTransport from "../lib/worktree/transport";
+import type { WorktreeRecord, RepoRecord, AgentProfile } from "../lib/worktree/transport";
 import { TerminalPaneHeader, resolveRepoForCwd } from "./TerminalPaneHeader";
 
 vi.mock("../lib/pty/transport", () => ({
@@ -97,16 +98,19 @@ describe("TerminalPaneHeader", () => {
     });
   });
 
-  it("renders session title and all action buttons", () => {
+  it("renders session title and the simplified action buttons", () => {
     render(<TerminalPaneHeader id="s1" path={[]} />);
 
     expect(screen.getByText("Terminal 1")).toBeTruthy();
+    expect(screen.getByTitle("New Terminal")).toBeTruthy();
+    expect(screen.getByTitle("New Terminal Options")).toBeTruthy();
     expect(screen.getByTitle("More Options")).toBeTruthy();
-    expect(screen.getByTitle("Open in Browser")).toBeTruthy();
     expect(screen.getByTitle("Solo / Maximize Pane")).toBeTruthy();
-    expect(screen.getByTitle("Split Right")).toBeTruthy();
-    expect(screen.getByTitle("Split Down")).toBeTruthy();
     expect(screen.getByTitle("Close Pane")).toBeTruthy();
+    // Removed in the simplify pass: dedicated split + browser buttons.
+    expect(screen.queryByTitle("Split Right")).toBeNull();
+    expect(screen.queryByTitle("Split Down")).toBeNull();
+    expect(screen.queryByTitle("Open in Browser")).toBeNull();
   });
 
   it("renders branch badge when session is bound to a worktree", () => {
@@ -261,32 +265,16 @@ describe("TerminalPaneHeader", () => {
     expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
   });
 
-  it("splits pane horizontally when Split Right is clicked", async () => {
+  it("splits pane right when New Terminal is clicked", async () => {
     render(<TerminalPaneHeader id="s1" path={[]} />);
 
-    const splitRightBtn = screen.getByTitle("Split Right");
-    fireEvent.click(splitRightBtn);
+    fireEvent.click(screen.getByTitle("New Terminal"));
 
     await vi.waitFor(() => {
       const layout = useTerminalStore.getState().layout;
       expect(layout.type).toBe("split");
       if (layout.type === "split") {
         expect(layout.dir).toBe("h");
-      }
-    });
-  });
-
-  it("splits pane vertically when Split Down is clicked", async () => {
-    render(<TerminalPaneHeader id="s1" path={[]} />);
-
-    const splitDownBtn = screen.getByTitle("Split Down");
-    fireEvent.click(splitDownBtn);
-
-    await vi.waitFor(() => {
-      const layout = useTerminalStore.getState().layout;
-      expect(layout.type).toBe("split");
-      if (layout.type === "split") {
-        expect(layout.dir).toBe("v");
       }
     });
   });
@@ -327,8 +315,10 @@ describe("TerminalPaneHeader", () => {
 
     expect(screen.getByText("Clear Scrollback")).toBeTruthy();
     expect(screen.getByText("Rename Pane")).toBeTruthy();
-    expect(screen.getByText("Split Right")).toBeTruthy();
-    expect(screen.getByText("Split Down")).toBeTruthy();
+    expect(screen.getByText("New branch…")).toBeTruthy();
+    expect(screen.getByText("Open in Browser")).toBeTruthy();
+    expect(screen.queryByText("Split Right")).toBeNull();
+    expect(screen.queryByText("Split Down")).toBeNull();
 
     fireEvent.click(screen.getByText("Clear Scrollback"));
     expect(onClear).toHaveBeenCalledTimes(1);
@@ -359,17 +349,7 @@ describe("TerminalPaneHeader", () => {
     expect(screen.queryByText("Clear Scrollback")).toBeNull();
   });
 
-  it("switches to browser mode when Open in Browser button is clicked without detected ports", () => {
-    useTerminalStore.setState({ activeAppMode: "terminal", detectedPorts: [] });
-    render(<TerminalPaneHeader id="s1" path={[]} />);
-
-    const openBrowserBtn = screen.getByTitle("Open in Browser");
-    fireEvent.click(openBrowserBtn);
-
-    expect(useTerminalStore.getState().activeAppMode).toBe("browser");
-  });
-
-  it("navigates to detected port URL and switches to browser mode when Open in Browser button is clicked", () => {
+  it("navigates to detected port URL when Open in Browser is picked from More menu", () => {
     useTerminalStore.setState({
       activeAppMode: "terminal",
       detectedPorts: [
@@ -378,8 +358,8 @@ describe("TerminalPaneHeader", () => {
     });
     render(<TerminalPaneHeader id="s1" path={[]} />);
 
-    const openBrowserBtn = screen.getByTitle("Open in Browser");
-    fireEvent.click(openBrowserBtn);
+    fireEvent.click(screen.getByTitle("More Options"));
+    fireEvent.click(screen.getByText("Open in Browser"));
 
     expect(useTerminalStore.getState().activeAppMode).toBe("browser");
     expect(useTerminalStore.getState().browserUrl).toBe("http://localhost:5173");
@@ -710,10 +690,12 @@ describe("TerminalPaneHeader", () => {
     });
   });
 
-  describe("Split Chooser Popover", () => {
+  describe("New Terminal Plus Menu", () => {
     beforeEach(() => {
       useTerminalStore.setState({ repos: [] });
     });
+
+    const agentProfilesMock = vi.mocked(worktreeTransport.agentProfiles);
 
     function repoRecord(overrides: Partial<RepoRecord> = {}): RepoRecord {
       return {
@@ -737,39 +719,95 @@ describe("TerminalPaneHeader", () => {
       expect(resolveRepoForCwd(undefined, repos)).toBeNull();
     });
 
-    it("opens the chooser from the split caret while main split buttons stay instant", () => {
+    it("opens the plus menu from the caret while the main button stays instant", async () => {
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      expect(screen.queryByText("Same directory")).toBeNull();
+      expect(screen.queryByText("Split Down")).toBeNull();
 
-      fireEvent.click(screen.getByTitle("Split Right Options"));
-      expect(screen.getByText("Same directory")).toBeTruthy();
-      expect(screen.getByText("New branch…")).toBeTruthy();
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      expect(screen.getByText("Split Right")).toBeTruthy();
+      expect(screen.getByText("Split Down")).toBeTruthy();
 
       // Main button still executes its split immediately (no popover needed).
-      fireEvent.click(screen.getByTitle("Split Down"));
-      void vi.waitFor(() => {
+      fireEvent.click(screen.getByTitle("New Terminal"));
+      await vi.waitFor(() => {
         expect(useTerminalStore.getState().layout.type).toBe("split");
       });
     });
 
-    it("choosing Same directory invokes splitPane once with the expected args and closes", async () => {
+    it("choosing Split Down from the plus menu invokes splitPane once and closes", async () => {
       const splitSpy = vi
         .spyOn(useTerminalStore.getState(), "splitPane")
         .mockResolvedValue(undefined);
-      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[0]} />);
 
-      fireEvent.click(screen.getByTitle("Split Down Options"));
-      fireEvent.click(screen.getByText("Same directory"));
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByText("Split Down"));
 
       expect(splitSpy).toHaveBeenCalledTimes(1);
       expect(splitSpy).toHaveBeenCalledWith("v", [0]);
-      expect(openModalSpy).not.toHaveBeenCalled();
-      expect(screen.queryByText("Same directory")).toBeNull();
+      expect(screen.queryByText("Split Down")).toBeNull();
     });
 
-    it("choosing New branch… opens the worktree create modal without splitting", async () => {
+    it("lists agent profiles with their launch command and launches on click", async () => {
+      const profiles: AgentProfile[] = [
+        { id: "opencode", displayName: "OpenCode", command: "opencode", promptDelivery: "arg" },
+        { id: "cursor", displayName: "Cursor Agent", command: "cursor-agent", promptDelivery: "arg" },
+      ];
+      agentProfilesMock.mockResolvedValue(profiles);
+      const launchSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPaneWithCommand")
+        .mockResolvedValue(undefined);
+      render(<TerminalPaneHeader id="s1" path={[0]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+
+      expect(await screen.findByText("OpenCode")).toBeTruthy();
+      expect(screen.getByText("cursor-agent")).toBeTruthy();
+
+      fireEvent.click(screen.getByText("OpenCode"));
+
+      expect(launchSpy).toHaveBeenCalledTimes(1);
+      expect(launchSpy).toHaveBeenCalledWith("h", [0], "opencode", "OpenCode");
+      expect(screen.queryByText("OpenCode")).toBeNull();
+    });
+
+    it("falls back to the profile id when the daemon predates the command field", async () => {
+      agentProfilesMock.mockResolvedValue([
+        { id: "codex", displayName: "Codex", promptDelivery: "arg" },
+      ]);
+      const launchSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPaneWithCommand")
+        .mockResolvedValue(undefined);
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+
+      expect(await screen.findByText("Codex")).toBeTruthy();
+      fireEvent.click(screen.getByText("Codex"));
+
+      expect(launchSpy).toHaveBeenCalledWith("h", [], "codex", "Codex");
+    });
+
+    it("runs a custom command from the inline input on Enter", async () => {
+      agentProfilesMock.mockResolvedValue([]);
+      const launchSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPaneWithCommand")
+        .mockResolvedValue(undefined);
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+
+      const input = await screen.findByLabelText("Custom command");
+      fireEvent.change(input, { target: { value: "btop" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(launchSpy).toHaveBeenCalledTimes(1);
+      expect(launchSpy).toHaveBeenCalledWith("h", [], "btop", undefined);
+      expect(screen.queryByLabelText("Custom command")).toBeNull();
+    });
+
+    it("choosing New branch… from More menu opens the worktree create modal without splitting", async () => {
       useTerminalStore.setState({
         sessions: {
           s1: {
@@ -792,7 +830,7 @@ describe("TerminalPaneHeader", () => {
       const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("Split Right Options"));
+      fireEvent.click(screen.getByTitle("More Options"));
       fireEvent.click(screen.getByText("New branch…"));
 
       expect(openModalSpy).toHaveBeenCalledTimes(1);
@@ -800,7 +838,7 @@ describe("TerminalPaneHeader", () => {
       expect(screen.queryByText("New branch…")).toBeNull();
     });
 
-    it("choosing New branch… without a resolvable repo still opens the modal", () => {
+    it("choosing New branch… from More menu without a resolvable repo still opens the modal", () => {
       useTerminalStore.setState({
         sessions: {
           s1: {
@@ -817,30 +855,32 @@ describe("TerminalPaneHeader", () => {
       const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("Split Right Options"));
+      fireEvent.click(screen.getByTitle("More Options"));
       fireEvent.click(screen.getByText("New branch…"));
 
       expect(openModalSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("closes the chooser on Escape without side effects", () => {
+    it("closes the plus menu on Escape without side effects", () => {
       const splitSpy = vi
         .spyOn(useTerminalStore.getState(), "splitPane")
         .mockResolvedValue(undefined);
-      const openModalSpy = vi.spyOn(useTerminalStore.getState(), "openWorktreeCreate");
+      const launchSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPaneWithCommand")
+        .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("Split Right Options"));
-      expect(screen.getByText("Same directory")).toBeTruthy();
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      expect(screen.getByText("Split Right")).toBeTruthy();
 
       fireEvent.keyDown(document, { key: "Escape" });
 
-      expect(screen.queryByText("Same directory")).toBeNull();
+      expect(screen.queryByText("Split Right")).toBeNull();
       expect(splitSpy).not.toHaveBeenCalled();
-      expect(openModalSpy).not.toHaveBeenCalled();
+      expect(launchSpy).not.toHaveBeenCalled();
     });
 
-    it("closes the chooser on outside click", () => {
+    it("closes the plus menu on outside click", () => {
       render(
         <div>
           <div data-testid="outside">Outside</div>
@@ -848,11 +888,11 @@ describe("TerminalPaneHeader", () => {
         </div>,
       );
 
-      fireEvent.click(screen.getByTitle("Split Right Options"));
-      expect(screen.getByText("Same directory")).toBeTruthy();
+      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      expect(screen.getByText("Split Right")).toBeTruthy();
 
       fireEvent.mouseDown(screen.getByTestId("outside"));
-      expect(screen.queryByText("Same directory")).toBeNull();
+      expect(screen.queryByText("Split Right")).toBeNull();
     });
   });
 });

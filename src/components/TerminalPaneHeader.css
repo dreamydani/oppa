@@ -200,6 +200,62 @@
   min-width: 150px;
 }
 
+/* New-terminal plus group: same icon + caret combo pattern as the old
+   split groups; the caret class is shared so hover/active stay identical. */
+.terminal-pane-header-plus-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.terminal-pane-header-plus-popover {
+  left: 0;
+  right: auto;
+  transform-origin: top left;
+  min-width: 200px;
+}
+
+.terminal-pane-header-menu-separator {
+  height: 1px;
+  background-color: var(--border);
+  margin: 4px 6px;
+}
+
+.terminal-pane-header-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-pane-header-menu-subtext {
+  flex-shrink: 0;
+  margin-left: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+
+.terminal-pane-header-custom-input {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  background-color: var(--bg-overlay-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.terminal-pane-header-custom-input:focus {
+  border-color: var(--accent-blue);
+}
+
 /* Terminal switcher dropdown (project-title ▾): lists every tab's session
    with working/idle dot + worktree branch chip. */
 .terminal-pane-header-switcher-btn {

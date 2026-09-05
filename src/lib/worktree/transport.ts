@@ -63,6 +63,9 @@ export type PromptDelivery = "arg" | "stdin" | "paste-on-ready";
 export interface AgentProfile {
   id: string;
   displayName: string;
+  // Launch binary (differs from id only for cursor → cursor-agent).
+  // Optional: old daemons predate the field, callers fall back to id.
+  command?: string;
   promptDelivery: PromptDelivery;
 }
 

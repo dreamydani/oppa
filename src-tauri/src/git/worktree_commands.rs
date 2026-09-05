@@ -57,6 +57,7 @@ pub fn worktree_list(manager: State<'_, PtyManager>) -> Result<Vec<WorktreeListE
 pub struct AgentProfileDto {
     pub id: String,
     pub display_name: String,
+    pub command: String,
     pub prompt_delivery: PromptDelivery,
 }
 
@@ -66,6 +67,7 @@ fn agent_profiles_impl() -> Vec<AgentProfileDto> {
         .map(|p| AgentProfileDto {
             id: p.id.to_string(),
             display_name: p.display_name.to_string(),
+            command: p.command.to_string(),
             prompt_delivery: p.prompt_delivery,
         })
         .collect()
@@ -197,6 +199,8 @@ mod tests {
         assert_eq!(dtos.len(), crate::agents::catalog::profiles().len());
         let json = serde_json::to_string(&dtos).unwrap();
         assert!(json.contains("\"displayName\":\"Claude Code\""));
+        assert!(json.contains("\"command\":\"claude\""));
+        assert!(json.contains("\"command\":\"cursor-agent\""));
         assert!(json.contains("\"promptDelivery\":\"arg\""));
         assert!(json.contains("\"promptDelivery\":\"stdin\""));
         assert!(!json.contains("display_name"), "must not leak snake_case");
