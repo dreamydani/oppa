@@ -1,0 +1,3 @@
+# Keep line endings stable for bundled resources.
+# Exclude private working history from published archives; local git history is unaffected.
+docs/superpowers/ export-ignore
