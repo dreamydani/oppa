@@ -7,6 +7,7 @@ pub mod cli;
 pub mod extensions;
 mod fs;
 pub mod git;
+pub mod launch_mode;
 pub mod layout;
 pub mod pty;
 pub mod settings;
