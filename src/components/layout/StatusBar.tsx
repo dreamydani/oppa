@@ -5,11 +5,16 @@ import { focus } from "../../lib/pane-manager/layout";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { getGitStatus, GitStatusResult } from "../../lib/git/transport";
-import { requestManualCheck } from "../../lib/updateScheduler";
 import {
+  requestExpandUpdateCard,
+  requestManualCheck,
   UPDATE_AVAILABILITY_EVENT,
+  UPDATE_CARD_COLLAPSE_EVENT,
+  UPDATE_DOWNLOAD_PROGRESS_EVENT,
   type UpdateAvailabilityDetail,
-} from "../UpdateBanner";
+  type UpdateCardCollapseDetail,
+  type UpdateDownloadProgressDetail,
+} from "../../lib/updateScheduler";
 import "./StatusBar.css";
 
 // Attention order for the fleet aggregate click: what needs a human first.
@@ -83,38 +88,71 @@ function FleetAggregate(): React.ReactElement | null {
   );
 }
 
-// Update segment: dot + version, visible only while the update card holds an
-// available/downloaded update. The scheduler announces transitions via
-// availability events; the segment never checks itself. Click runs Check-now
-// through the scheduler (the card owns the outcome).
+// Update segment: dot + version (+ progress/ready when collapsed), visible
+// while the update card holds an available/downloaded update. Orca parity:
+// when the card collapses, the segment owns the state — click expands the
+// card instead of re-checking.
 function UpdateSegment(): React.ReactElement | null {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [progress, setProgress] = useState<{ downloaded: number; total?: number } | null>(null);
   const dismissedUpdateVersion = useTerminalStore((s) => s.settings.general.dismissedUpdateVersion);
 
   useEffect(() => {
     const onAvailability = (event: Event) => {
-      setUpdateVersion((event as CustomEvent<UpdateAvailabilityDetail>).detail.version);
+      const detail = (event as CustomEvent<UpdateAvailabilityDetail>).detail;
+      setUpdateVersion(detail.version);
+      setUpdatePhase(detail.phase);
+      if (detail.version === null) {
+        setProgress(null);
+        setCollapsed(false);
+      }
+    };
+    const onCollapse = (event: Event) => {
+      setCollapsed((event as CustomEvent<UpdateCardCollapseDetail>).detail.collapsed);
+    };
+    const onProgress = (event: Event) => {
+      const detail = (event as CustomEvent<UpdateDownloadProgressDetail>).detail;
+      setProgress({ downloaded: detail.downloaded, total: detail.total });
     };
     window.addEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
+    window.addEventListener(UPDATE_CARD_COLLAPSE_EVENT, onCollapse);
+    window.addEventListener(UPDATE_DOWNLOAD_PROGRESS_EVENT, onProgress);
     return () => {
       window.removeEventListener(UPDATE_AVAILABILITY_EVENT, onAvailability);
+      window.removeEventListener(UPDATE_CARD_COLLAPSE_EVENT, onCollapse);
+      window.removeEventListener(UPDATE_DOWNLOAD_PROGRESS_EVENT, onProgress);
     };
   }, []);
 
   if (!updateVersion || dismissedUpdateVersion === updateVersion) return null;
+  const percent =
+    progress?.total != null && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null;
+  const statusSuffix =
+    updatePhase === "downloaded" ? " • ready" : percent !== null ? ` • ${percent}%` : "";
+  const title = collapsed
+    ? `Update v${updateVersion} collapsed — click to expand`
+    : `Update to v${updateVersion} is ready — check now`;
   return (
     <button
       type="button"
       className="status-bar-item update-segment"
       data-testid="update-segment"
-      title={`Update to v${updateVersion} is ready — check now`}
+      title={title}
       onClick={() => {
-        requestManualCheck();
+        if (collapsed) {
+          requestExpandUpdateCard();
+        } else {
+          requestManualCheck();
+        }
       }}
     >
       <span className="status-indicator-dot update-available" aria-hidden="true" />
       <Download size={13} />
-      <span>{`v${updateVersion}`}</span>
+      <span>{`v${updateVersion}${statusSuffix}`}</span>
     </button>
   );
 }

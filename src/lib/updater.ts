@@ -135,26 +135,40 @@ async function releasePendingNativeUpdate(): Promise<void> {
   }
 }
 
-// Native check is stable-only: tauri.conf.json endpoints is a single static
-// URL (stable latest.json) with no per-channel feed, so rc keeps the legacy
-// custom flow via Rust manifest_url() exactly like pre-H1. Dev/unresolved →
-// null with no plugin calls. Rejections (offline, or signature verification
-// before the H1 pubkey lands) stay fail-silent null — the retry card only
-// appears after an explicit user action fails.
+// Native check is stable+rc: tauri.conf.json endpoints lists the stable
+// Latest feed first plus the pinned rc feed (releases/download/rc/latest-rc.json).
+// Dev/unresolved → null with no plugin calls. Stable ignores prerelease
+// versions (a -rc tag from the rc feed must never offer to stable users);
+// rc accepts stable promotions and rc builds. Rejections (offline, signature
+// failure) stay fail-silent null — the retry card only appears after an
+// explicit user action fails.
 //
 // `preservePendingOnEmpty` (scheduler automatic checks only): an empty/error
 // outcome leaves a staged download alone instead of discarding it, so a
 // failing background check can't strand a downloaded card with no pending.
+export function isNativeVersionForChannel(version: string, channel: string): boolean {
+  if (channel === "stable") {
+    return !version.includes("-");
+  }
+  return true;
+}
+
 export async function checkForNativeUpdate(
   options: { preservePendingOnEmpty?: boolean } = {},
 ): Promise<NativeUpdateInfo | null> {
   const channel = getChannel() ?? (await resolveChannel().catch(() => null));
-  if (channel !== "stable") {
+  if (channel !== "stable" && channel !== "rc") {
     return null;
   }
   try {
     const update = await check();
     if (!update) {
+      if (!options.preservePendingOnEmpty) {
+        await releasePendingNativeUpdate();
+      }
+      return null;
+    }
+    if (!isNativeVersionForChannel(update.version, channel)) {
       if (!options.preservePendingOnEmpty) {
         await releasePendingNativeUpdate();
       }
@@ -229,11 +243,49 @@ export async function downloadNativeUpdate(
   return { ok: true };
 }
 
+// Orca-parity error taxonomy for the card: signature blocks offer no retry
+// (the feed is untrusted), network/offline suggests re-check, install
+// failures suggest retry, everything else is generic.
+export type UpdateErrorKind = "signature" | "network" | "install" | "generic";
+
+export function classifyUpdateError(
+  message: string,
+  origin: "download" | "install" | null,
+): UpdateErrorKind {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("signature") ||
+    normalized.includes("untrusted") ||
+    normalized.includes("not signed") ||
+    normalized.includes("verification failed")
+  ) {
+    return "signature";
+  }
+  if (
+    normalized.includes("network") ||
+    normalized.includes("offline") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout") ||
+    normalized.includes("unreachable") ||
+    normalized.includes("err_")
+  ) {
+    return "network";
+  }
+  if (origin === "install") {
+    return "install";
+  }
+  return "generic";
+}
+
 // Guarded install: the daemon-busy probe runs first and blocks without
 // touching the plugin; idle/unknown proceed (unknown never claims safe —
 // downloading itself cannot kill sessions, and the user chose to update).
+// `onBeforeInstall` flushes layout + scrollbacks (Orca-style restore) before
+// the plugin replaces files; flush failures never block the install.
 export async function installNativeUpdateAndRelaunch(
   onProgress: NativeProgressCallback = () => {},
+  options: { onBeforeInstall?: () => Promise<unknown> } = {},
 ): Promise<NativeInstallOutcome> {
   // probeUpgradeSafety swallows invoke rejections but not a malformed
   // resolved payload — a throwing probe must degrade to unknown, never reject.
@@ -252,6 +304,14 @@ export async function installNativeUpdateAndRelaunch(
     const download = await downloadNativeUpdate(onProgress);
     if (!download.ok) {
       return { proceeded: false, reason: "error", error: download.error };
+    }
+  }
+  if (options.onBeforeInstall) {
+    try {
+      await options.onBeforeInstall();
+    } catch {
+      // A failed save must not trap the update: the daemon checkpoints every
+      // 3s and the installer still replaces files.
     }
   }
   try {

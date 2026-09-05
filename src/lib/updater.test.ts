@@ -9,8 +9,10 @@ import {
   canUpgradeSafely,
   probeUpgradeSafety,
   checkForNativeUpdate,
+  classifyUpdateError,
   downloadNativeUpdate,
   installNativeUpdateAndRelaunch,
+  isNativeVersionForChannel,
   type UpdateInfo,
   type CanUpgradeDaemonResult,
 } from "./updater";
@@ -94,18 +96,37 @@ describe("updater seam", () => {
     expect(result).toEqual(payload);
   });
 
-  it("rc native check falls back to the legacy path (native is stable-only)", async () => {
-    // WHY: tauri.conf.json endpoints is a single static URL (stable
-    // latest.json); the plugin has no per-channel feed, so rc keeps the
-    // legacy custom flow via Rust manifest_url() exactly like pre-H1.
+  it("rc native check uses the plugin feed (stable+rc native)", async () => {
+    // WHY: tauri.conf.json endpoints lists stable latest.json plus the pinned
+    // rc feed; rc builds use the native flow like stable.
     await setChannel("rc");
     checkMock.mockResolvedValue({
       version: "0.3.0-rc.1",
       currentVersion: "0.3.0-rc.0",
     } as unknown as Update);
     const info = await checkForNativeUpdate();
+    expect(checkMock).toHaveBeenCalled();
+    expect(info?.version).toBe("0.3.0-rc.1");
+  });
+
+  it("stable native check ignores prerelease versions from the rc feed", async () => {
+    await setChannel("stable");
+    checkMock.mockResolvedValue({
+      version: "0.3.0-rc.1",
+      currentVersion: "0.2.5",
+    } as unknown as Update);
+    const info = await checkForNativeUpdate();
     expect(info).toBeNull();
-    expect(checkMock).not.toHaveBeenCalled();
+  });
+
+  it("rc native check accepts stable promotions", async () => {
+    await setChannel("rc");
+    checkMock.mockResolvedValue({
+      version: "0.2.6",
+      currentVersion: "0.2.6-rc.1",
+    } as unknown as Update);
+    const info = await checkForNativeUpdate();
+    expect(info?.version).toBe("0.2.6");
   });
 
   it("invokes check_for_update on stable and returns the update info", async () => {    await setChannel("stable");
@@ -484,6 +505,53 @@ describe("updater seam", () => {
       const outcome = await installNativeUpdateAndRelaunch(() => {});
       expect(update.install).toHaveBeenCalledTimes(1);
       expect(outcome).toEqual({ proceeded: false, reason: "error", error: "relaunch denied" });
+    });
+
+    it("install runs onBeforeInstall flush before plugin install", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(IDLE);
+      relaunchMock.mockResolvedValue(undefined);
+      const order: string[] = [];
+      update.install = vi.fn().mockImplementation(() => {
+        order.push("install");
+        return Promise.resolve();
+      });
+      const onBeforeInstall = vi.fn().mockImplementation(() => {
+        order.push("flush");
+        return Promise.resolve();
+      });
+      const outcome = await installNativeUpdateAndRelaunch(() => {}, { onBeforeInstall });
+      expect(outcome).toEqual({ proceeded: true });
+      expect(onBeforeInstall).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["flush", "install"]);
+    });
+
+    it("install proceeds when onBeforeInstall flush rejects (restore is best-effort)", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(IDLE);
+      relaunchMock.mockResolvedValue(undefined);
+      const onBeforeInstall = vi.fn().mockRejectedValue(new Error("disk full"));
+      const outcome = await installNativeUpdateAndRelaunch(() => {}, { onBeforeInstall });
+      expect(outcome).toEqual({ proceeded: true });
+      expect(update.install).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("channel version gate + error taxonomy", () => {
+    it("stable rejects prerelease, rc accepts both", () => {
+      expect(isNativeVersionForChannel("0.3.0", "stable")).toBe(true);
+      expect(isNativeVersionForChannel("0.3.0-rc.1", "stable")).toBe(false);
+      expect(isNativeVersionForChannel("0.3.0-rc.1", "rc")).toBe(true);
+      expect(isNativeVersionForChannel("0.2.6", "rc")).toBe(true);
+    });
+
+    it("classifies signature / network / install / generic", () => {
+      expect(classifyUpdateError("signature verification failed", "download")).toBe("signature");
+      expect(classifyUpdateError("not signed by owner", "download")).toBe("signature");
+      expect(classifyUpdateError("network unreachable", "download")).toBe("network");
+      expect(classifyUpdateError("failed to fetch", "download")).toBe("network");
+      expect(classifyUpdateError("install failed", "install")).toBe("install");
+      expect(classifyUpdateError("boom", "download")).toBe("generic");
     });
   });
 });

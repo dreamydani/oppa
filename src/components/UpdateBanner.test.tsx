@@ -19,13 +19,17 @@ import { useTerminalStore } from "../store/terminalStore";
 // NEVER call the check seams (checkForNativeUpdate/checkForUpdate — the
 // scheduler owns every check); it only uses the action seams
 // (download/install/probe) plus the availability event bus.
-vi.mock("../lib/updater", () => ({
-  checkForUpdate: vi.fn(),
-  probeUpgradeSafety: vi.fn(),
-  checkForNativeUpdate: vi.fn(),
-  downloadNativeUpdate: vi.fn(),
-  installNativeUpdateAndRelaunch: vi.fn(),
-}));
+vi.mock("../lib/updater", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/updater")>();
+  return {
+    checkForUpdate: vi.fn(),
+    probeUpgradeSafety: vi.fn(),
+    checkForNativeUpdate: vi.fn(),
+    downloadNativeUpdate: vi.fn(),
+    installNativeUpdateAndRelaunch: vi.fn(),
+    classifyUpdateError: actual.classifyUpdateError,
+  };
+});
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
@@ -426,8 +430,11 @@ describe("UpdateBanner", () => {
     });
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
     expect(screen.getByText(/50%/)).toBeInTheDocument();
-    // No cancel button during download.
-    expect(screen.queryByRole("button")).toBeNull();
+    // Orca parity: collapse is allowed during download, but no cancel /
+    // Download / Restart actions.
+    expect(screen.queryByRole("button", { name: "Download now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart now" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Collapse update card" })).toBeInTheDocument();
 
     await act(async () => {
       progressCb(100, 100);
@@ -439,7 +446,7 @@ describe("UpdateBanner", () => {
 
   it("surfaces a download failure as an error card; Retry re-downloads", async () => {
     downloadNativeUpdateMock
-      .mockResolvedValueOnce({ ok: false, error: "signature verification failed" })
+      .mockResolvedValueOnce({ ok: false, error: "network unreachable" })
       .mockResolvedValue({ ok: true });
     render(<UpdateBanner />);
     await act(async () => {});
@@ -447,13 +454,27 @@ describe("UpdateBanner", () => {
     await screen.findByRole("button", { name: "Download now" });
 
     fireEvent.click(screen.getByRole("button", { name: "Download now" }));
-    expect(await screen.findByText(/signature verification failed/)).toBeInTheDocument();
+    expect(await screen.findByText(/network unreachable/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("button", { name: "Restart now" })).toBeInTheDocument();
     expect(downloadNativeUpdateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks retry on signature failures and links GitHub releases", async () => {
+    downloadNativeUpdateMock.mockResolvedValue({ ok: false, error: "signature verification failed" });
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    expect(await screen.findByText(/signature verification failed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(screen.getAllByText(/Download from GitHub releases/).length).toBeGreaterThan(0);
   });
 
   it("shows Restart without re-checking (installs what was checked)", async () => {
@@ -622,5 +643,67 @@ describe("UpdateBanner", () => {
       expect(openUrlMock).toHaveBeenCalledWith("https://example.com/oppa-0.2.0.exe"),
     );
     expect(clearedAvailabilityCount(dispatchSpy)).toBe(clearedBefore);
+  });
+
+  it("renders Orca-parity rich card: version, restore copy, and release notes", async () => {
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announce({
+      version: "0.3.0",
+      phase: "available",
+      engine: "native",
+      currentVersion: "0.2.5",
+      body: "Fixes terminals",
+      releaseUrl: "https://github.com/dreamydani/oppa/releases/tag/v0.3.0",
+    });
+    expect(await screen.findByText(/Oppa v0\.3\.0 is ready/)).toBeInTheDocument();
+    expect(screen.getByText(/Sessions restore after restart/)).toBeInTheDocument();
+    expect(screen.getByText(/Fixes terminals/)).toBeInTheDocument();
+    expect(screen.getByText(/Release notes/)).toBeInTheDocument();
+    expect(screen.getByTestId("update-banner")).toHaveAttribute("aria-label", "Update available");
+  });
+
+  it("collapse hides the card without clearing availability (segment owns it)", async () => {
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+    const clearedBefore = clearedAvailabilityCount(dispatchSpy);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse update card" }));
+    await waitFor(() => expect(screen.queryByTestId("update-banner")).toBeNull());
+    expect(clearedAvailabilityCount(dispatchSpy)).toBe(clearedBefore);
+  });
+
+  it("manual check with no update shows transient latest card", async () => {
+    render(<UpdateBanner />);
+    await act(async () => {});
+    dispatchManualCheck();
+    expect(await screen.findByText(/Checking for updates/)).toBeInTheDocument();
+    announce({ version: null, phase: null });
+    // presentAvailability flips checking → not-available synchronously.
+    expect(await screen.findByText(/latest version/)).toBeInTheDocument();
+  });
+
+  it("Restart now passes a layout flush to the install seam (Orca-style restore)", async () => {
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    expect(await screen.findByRole("button", { name: "Restart now" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+    await waitFor(() => expect(installNativeUpdateAndRelaunchMock).toHaveBeenCalledTimes(1));
+    const [, options] = installNativeUpdateAndRelaunchMock.mock.calls[0] as unknown as [
+      unknown,
+      { onBeforeInstall?: () => Promise<unknown> }?,
+    ];
+    expect(typeof options?.onBeforeInstall).toBe("function");
   });
 });

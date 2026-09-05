@@ -7,6 +7,11 @@ import { useTerminalStore } from "../store/terminalStore";
 // availability events and dispatch manual requests through requestManualCheck.
 export const MANUAL_UPDATE_CHECK_EVENT = "oppa:manual-update-check";
 export const UPDATE_AVAILABILITY_EVENT = "oppa:update-availability";
+// Card collapse contract (Orca parity): the banner owns `collapsed` and
+// announces it; the status segment toggles via expand requests.
+export const UPDATE_CARD_COLLAPSE_EVENT = "oppa:update-card-collapse";
+export const UPDATE_CARD_EXPAND_REQUEST_EVENT = "oppa:expand-update-card";
+export const UPDATE_DOWNLOAD_PROGRESS_EVENT = "oppa:update-download-progress";
 
 export interface UpdateAvailabilityDetail {
   version: string | null;
@@ -17,6 +22,20 @@ export interface UpdateAvailabilityDetail {
   // Legacy installer URL (v1 browser flow); native offers carry no URL.
   download?: string;
   currentVersion?: string;
+  // Native release notes (plugin Update.body/date) for the rich card.
+  body?: string;
+  date?: string;
+  releaseUrl?: string;
+}
+
+export interface UpdateCardCollapseDetail {
+  collapsed: boolean;
+}
+
+export interface UpdateDownloadProgressDetail {
+  version: string;
+  downloaded: number;
+  total?: number;
 }
 
 // First check is deferred past window-ready so cold startup stays fast.
@@ -45,15 +64,37 @@ export interface UpdateSchedulerOptions {
 type CheckReason = "mount" | "daily" | "focus" | "resume" | "online" | "manual";
 
 type RawOutcome =
-  | { kind: "native"; version: string; currentVersion?: string }
+  | { kind: "native"; version: string; currentVersion?: string; body?: string; date?: string }
   | { kind: "legacy"; version: string; download: string; available: boolean }
   | { kind: "empty" };
+
+export function getReleaseNotesUrl(version: string): string {
+  return `https://github.com/dreamydani/oppa/releases/tag/v${version}`;
+}
 
 // Manual Check-now (Settings, status segment): bypasses the floor and the
 // opt-out but stays channel-gated inside the seam fns. The scheduler performs
 // the check; the card shows its checking state off this same event.
 export function requestManualCheck(): void {
   window.dispatchEvent(new CustomEvent(MANUAL_UPDATE_CHECK_EVENT));
+}
+
+export function announceCardCollapsed(collapsed: boolean): void {
+  window.dispatchEvent(
+    new CustomEvent<UpdateCardCollapseDetail>(UPDATE_CARD_COLLAPSE_EVENT, {
+      detail: { collapsed },
+    }),
+  );
+}
+
+export function requestExpandUpdateCard(): void {
+  window.dispatchEvent(new CustomEvent(UPDATE_CARD_EXPAND_REQUEST_EVENT));
+}
+
+export function announceDownloadProgress(detail: UpdateDownloadProgressDetail): void {
+  window.dispatchEvent(
+    new CustomEvent<UpdateDownloadProgressDetail>(UPDATE_DOWNLOAD_PROGRESS_EVENT, { detail }),
+  );
 }
 
 // Starts the centralized check loop; the returned stop removes ALL
@@ -118,7 +159,14 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
       const native = await checkForNativeUpdate(
         preservePending ? { preservePendingOnEmpty: true } : undefined,
       ).catch(() => null);
-      if (native) return { kind: "native", version: native.version, currentVersion: native.currentVersion };
+      if (native)
+        return {
+          kind: "native",
+          version: native.version,
+          currentVersion: native.currentVersion,
+          body: native.body,
+          date: native.date,
+        };
       const legacy = await checkForUpdate().catch(() => null);
       if (legacy) {
         return { kind: "legacy", version: legacy.version, download: legacy.download, available: legacy.available };
@@ -148,6 +196,9 @@ export function startUpdateScheduler(options: UpdateSchedulerOptions = {}): () =
         phase: "available",
         engine: "native",
         currentVersion: outcome.currentVersion,
+        body: outcome.body,
+        date: outcome.date,
+        releaseUrl: getReleaseNotesUrl(outcome.version),
       });
       return;
     }

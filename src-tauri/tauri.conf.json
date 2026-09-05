@@ -28,7 +28,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/dreamydani/oppa/releases/latest/download/latest.json"
+        "https://github.com/dreamydani/oppa/releases/latest/download/latest.json",
+        "https://github.com/dreamydani/oppa/releases/download/rc/latest-rc.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYzMTg1Q0E2MkIzODIyNkIKUldScklqZ3JwbHdZODBZQnlVNFY1SEM2TjJJekNoVmJZRW85RlMrOGNjb29tVHJpNnJza2lrZ2sK"
     }
