@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible problem in Oppa
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Oppa version
+      description: Release version or commit, for example 0.2.4
+      placeholder: "0.2.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      description: For example powershell.exe, cmd.exe, zsh, bash
+      placeholder: "powershell.exe"
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, starting from a clean launch
+      placeholder: |
+        1. Open Oppa
+        2. Split a pane
+        3. Paste 5 MB of output
+        4. Observe freeze
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+      description: What should happen, and what happens instead
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Redact secrets, tokens, and hostnames before attaching
+      placeholder: Attach terminal output, screenshots, or session logs
+    validations:
+      required: false
