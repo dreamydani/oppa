@@ -469,6 +469,7 @@ impl DaemonClient {
         shell: Option<String>,
         resume_agents: bool,
         worktree_id: Option<String>,
+        initial_command: Option<String>,
     ) -> Result<CreateOrAttachResult, String> {
         let req = DaemonRequest::CreateOrAttach {
             session_id: session_id.to_string(),
@@ -479,6 +480,7 @@ impl DaemonClient {
             resume_agents,
             worktree_id,
             extra_env: Vec::new(),
+            initial_command,
         };
         match self.send_request(req)? {
             DaemonResponse::SessionAttached(res) => Ok(res),
@@ -1221,7 +1223,7 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("client-session-1", 80, 24, None, Some(sh), false, None)
+            .create_or_attach("client-session-1", 80, 24, None, Some(sh), false, None, None)
             .expect("create_or_attach");
 
         assert!(attach_res.is_new);
@@ -1258,7 +1260,7 @@ mod tests {
 
         // 5. Reattach to session
         let reattach_res = client
-            .create_or_attach("client-session-1", 100, 30, None, None, false, None)
+            .create_or_attach("client-session-1", 100, 30, None, None, false, None, None)
             .expect("reattach");
         assert!(!reattach_res.is_new);
         assert!(reattach_res.snapshot.is_some());
@@ -1315,7 +1317,7 @@ mod tests {
 
         let sh = test_sh_path();
         let attach_res = client
-            .create_or_attach("ack-test-session", 80, 24, None, Some(sh), false, None)
+            .create_or_attach("ack-test-session", 80, 24, None, Some(sh), false, None, None)
             .expect("create_or_attach");
         assert!(attach_res.is_new);
 
@@ -1773,7 +1775,7 @@ mod tests {
         // One live session: the daemon reports busy and the probe reads false.
         let sh = test_sh_path();
         client
-            .create_or_attach("upgrade-busy-session", 80, 24, None, Some(sh), false, None)
+            .create_or_attach("upgrade-busy-session", 80, 24, None, Some(sh), false, None, None)
             .expect("create session");
         let verdict = client.daemon_can_upgrade().expect("busy upgrade probe");
         assert_eq!(verdict, false, "a live session must make the daemon busy");

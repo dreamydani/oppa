@@ -73,7 +73,7 @@ fn test_e2e_burst_output_batching_and_ordering() {
     );
 
     client
-        .create_or_attach(session_id, 120, 40, None, None, false, None)
+        .create_or_attach(session_id, 120, 40, None, None, false, None, None)
         .expect("create_or_attach failed");
 
     // ~84KB of ASCII: at least three 32KB batch windows' worth.
@@ -178,7 +178,7 @@ fn test_e2e_tail_output_precedes_exit() {
     );
 
     client
-        .create_or_attach(session_id, 100, 30, None, None, false, None)
+        .create_or_attach(session_id, 100, 30, None, None, false, None, None)
         .expect("create_or_attach failed");
 
     client

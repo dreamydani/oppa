@@ -124,6 +124,10 @@ pub enum DaemonRequest {
         worktree_id: Option<String>,
         #[serde(default)]
         extra_env: Vec<(String, String)>,
+        // GUI-requested launch command (plus-menu agents): injected at spawn
+        // on the shell-ready marker, never typed blind. Absent on legacy wire.
+        #[serde(default)]
+        initial_command: Option<String>,
     },
     Write {
         session_id: String,
@@ -433,6 +437,7 @@ mod tests {
             resume_agents: true,
             worktree_id: Some("repo::C:/ws/feat-a".into()),
             extra_env: vec![("MY_TOOL_FLAG".into(), "verbose".into())],
+            initial_command: Some("opencode".into()),
         };
         let encoded = serde_json::to_string(&req).expect("serialize");
         let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
@@ -453,13 +458,15 @@ mod tests {
                 ("OPPA_CUSTOM".into(), "1".into()),
                 ("MY_TOOL_FLAG".into(), "verbose".into()),
             ],
+            initial_command: None,
         };
         let encoded = serde_json::to_string(&req).expect("serialize");
         let decoded: DaemonRequest = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(req, decoded);
         match decoded {
-            DaemonRequest::CreateOrAttach { worktree_id, extra_env, .. } => {
+            DaemonRequest::CreateOrAttach { worktree_id, extra_env, initial_command, .. } => {
                 assert_eq!(worktree_id.as_deref(), Some("repo::C:/ws/feat-b"));
+                assert_eq!(initial_command, None);
                 assert_eq!(
                     extra_env,
                     vec![
@@ -477,10 +484,12 @@ mod tests {
             DaemonRequest::CreateOrAttach {
                 worktree_id,
                 extra_env,
+                initial_command,
                 ..
             } => {
                 assert_eq!(worktree_id, None);
                 assert!(extra_env.is_empty());
+                assert_eq!(initial_command, None);
             }
             other => panic!("expected CreateOrAttach, got {other:?}"),
         }
@@ -503,6 +512,7 @@ mod tests {
                 resume_agents: false,
                 worktree_id: None,
                 extra_env: Vec::new(),
+                initial_command: None,
             },
             DaemonRequest::Write {
                 session_id: "s1".into(),

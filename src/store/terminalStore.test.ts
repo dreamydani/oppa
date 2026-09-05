@@ -532,34 +532,46 @@ describe("terminalStore", () => {
     expect(focusedPath).toEqual([1]);
   });
 
-  it("splitPaneWithCommand splits, titles the pane, and writes the launch command", async () => {
-    vi.useFakeTimers();
-    try {
-      ptySpawnMock.mockResolvedValue(spawnRes("s-agent"));
-      useTerminalStore.setState({
-        sessions: {
-          root: { id: "root", title: "root", status: "running", cwd: "D:\\oppa\\project", cols: 80, rows: 24 },
-        },
-        layout: { type: "leaf", id: "root" },
-        focusedPath: [],
-      });
-      await useTerminalStore.getState().splitPaneWithCommand("h", [], "opencode", "OpenCode");
-      expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\oppa\\project" });
-      const state = useTerminalStore.getState();
-      expect(state.layout).toEqual({
-        type: "split",
-        dir: "h",
-        ratio: 0.5,
-        a: { type: "leaf", id: "root" },
-        b: { type: "leaf", id: "s-agent" },
-      });
-      expect(state.focusedPath).toEqual([1]);
-      expect(state.sessions["s-agent"].title).toBe("OpenCode");
-      await vi.advanceTimersByTimeAsync(400);
-      expect(ptyWriteMock).toHaveBeenCalledWith("s-agent", "opencode\n");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("splitPaneWithCommand delivers the launch command at spawn, never via timed write", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s-agent"));
+    useTerminalStore.setState({
+      sessions: {
+        root: { id: "root", title: "root", status: "running", cwd: "D:\\oppa\\project", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "root" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().splitPaneWithCommand("h", [], "opencode", "OpenCode");
+    // The daemon injects this on shell-readiness: no wall-clock write race.
+    expect(ptySpawnMock).toHaveBeenCalledWith({
+      cwd: "D:\\oppa\\project",
+      initialCommand: "opencode",
+    });
+    const state = useTerminalStore.getState();
+    expect(state.layout).toEqual({
+      type: "split",
+      dir: "h",
+      ratio: 0.5,
+      a: { type: "leaf", id: "root" },
+      b: { type: "leaf", id: "s-agent" },
+    });
+    expect(state.focusedPath).toEqual([1]);
+    expect(state.sessions["s-agent"].title).toBe("OpenCode");
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+  });
+
+  it("splitPaneWithCommand omits initialCommand for blank commands", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s-blank"));
+    useTerminalStore.setState({
+      sessions: {
+        root: { id: "root", title: "root", status: "running", cwd: "D:\\oppa\\project", cols: 80, rows: 24 },
+      },
+      layout: { type: "leaf", id: "root" },
+      focusedPath: [],
+    });
+    await useTerminalStore.getState().splitPaneWithCommand("h", [], "   ", undefined);
+    expect(ptySpawnMock).toHaveBeenCalledWith({ cwd: "D:\\oppa\\project" });
+    expect(ptyWriteMock).not.toHaveBeenCalled();
   });
 
   it("splitPane splits at an explicit path and inherits that leaf's cwd", async () => {

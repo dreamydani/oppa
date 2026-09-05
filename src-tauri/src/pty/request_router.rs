@@ -78,6 +78,7 @@ impl DaemonServer {
                 resume_agents,
                 worktree_id,
                 extra_env,
+                initial_command,
             } => {
                 let mut sessions = self.sessions.lock();
                 if let Some(session) = sessions.get(&session_id) {
@@ -111,12 +112,18 @@ impl DaemonServer {
                             .ok()
                             .flatten()
                     });
-                    let (resume, declined, initial_command) = if resume_agents {
+                    let (resume, declined, resume_command) = if resume_agents {
                         let planned = Self::plan_resume_from_checkpoint(&checkpoint);
                         Self::finalize_resume_plan(&planned, &checkpoint, &self.resumed_agent_ids)
                     } else {
                         (None, None, None)
                     };
+                    // Explicit GUI launch commands (plus-menu agents) win over
+                    // checkpoint resume plans; blanks degrade to no command,
+                    // never a bare Enter into a fresh shell.
+                    let initial_command = initial_command
+                        .filter(|cmd| !cmd.trim().is_empty())
+                        .or(resume_command);
                     let spawn_cwd = cwd.or_else(|| {
                         checkpoint
                             .as_ref()
@@ -926,6 +933,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         match server.handle_request(DaemonRequest::UpgradeIfIdle) {
             DaemonResponse::Busy(count) => assert_eq!(count, 1, "one live session"),
@@ -958,6 +966,7 @@ mod tests {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         });
         assert!(
             matches!(resp, DaemonResponse::SessionAttached(_)),
@@ -988,6 +997,57 @@ mod tests {
             }),
             DaemonResponse::Ok
         );
+    }
+
+    #[test]
+    fn explicit_initial_command_reaches_session_and_blank_degrades_to_none() {
+        let server = DaemonServer::new();
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "explicit-cmd-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+            initial_command: Some("opencode".into()),
+        });
+        assert!(
+            matches!(resp, DaemonResponse::SessionAttached(_)),
+            "setup spawn failed: {resp:?}"
+        );
+        let session = server
+            .sessions
+            .lock()
+            .get("explicit-cmd-test")
+            .cloned()
+            .expect("session registered");
+        assert_eq!(session.initial_command.as_deref(), Some("opencode"));
+
+        // A blank command must not become a bare Enter into a fresh shell.
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "blank-cmd-test".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+            initial_command: Some("   ".into()),
+        });
+        assert!(
+            matches!(resp, DaemonResponse::SessionAttached(_)),
+            "setup spawn failed: {resp:?}"
+        );
+        let blank = server
+            .sessions
+            .lock()
+            .get("blank-cmd-test")
+            .cloned()
+            .expect("session registered");
+        assert_eq!(blank.initial_command, None);
     }
 
     fn fleet_request(

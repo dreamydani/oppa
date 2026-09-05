@@ -21,7 +21,6 @@ import {
   deleteScrollback,
   cleanupStaleScrollbacks,
 } from "../../lib/layout/transport";
-import { ptyWrite } from "../../lib/pty/transport";
 import { getSavedWindowState, applyWindowState } from "../../lib/window/transport";
 import type { WindowState } from "../../lib/window/transport";
 import type { EditorTab, EditorViewMode } from "./codeEditorSlice";
@@ -64,10 +63,6 @@ export interface TabState {
 
 // One in-flight wake per tab so rapid re-selection cannot double-spawn.
 const pendingWakeTabs = new Map<string, Promise<void>>();
-
-// Shell settle time before feeding a fresh pane its agent launch command;
-// without it the line can land before the shell reads stdin and is lost.
-const AGENT_LAUNCH_DELAY_MS = 350;
 
 export interface PaneLayoutSlice {
   tabs: TabState[];
@@ -455,9 +450,9 @@ export function createPaneLayoutSlice(
       triggerDebouncedSaveLayout(get);
     },
 
-    // Agent-launch split: same cwd inheritance + focus contract as splitPane,
-    // then title the pane and feed the shell its start command on a timer.
-    // Fire-and-forget write: a dead session must not reject the split.
+    // Agent-launch split: same cwd inheritance + focus contract as splitPane.
+    // The launch command travels WITH the spawn: the daemon injects it once
+    // the shell reports ready, so slow PowerShell startups can't eat bytes.
     splitPaneWithCommand: async (dir, path, command, title) => {
       const state = get();
       const activeTab = getActiveTab(state);
@@ -466,7 +461,15 @@ export function createPaneLayoutSlice(
       const focusedId = focus(tree, target);
       const focusedSession = get().sessions[focusedId];
       const currentCwd = focusedSession?.cwd;
-      const id = await get().spawnSession(currentCwd);
+      const launchLine = command.trim();
+      const id = await get().spawnSession(
+        currentCwd,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        launchLine || undefined,
+      );
       const nextLayout = split(dir, tree, target, id);
       const nextFocusedPath = [...target, 1];
       if (activeTab) {
@@ -486,12 +489,6 @@ export function createPaneLayoutSlice(
         });
       }
       if (title) get().renameSession(id, title);
-      const launchLine = command.trim();
-      if (launchLine) {
-        window.setTimeout(() => {
-          void ptyWrite(id, `${launchLine}\n`).catch(() => {});
-        }, AGENT_LAUNCH_DELAY_MS);
-      }
       triggerDebouncedSaveLayout(get);
     },
 

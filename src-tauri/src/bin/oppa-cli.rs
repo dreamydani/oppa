@@ -399,6 +399,7 @@ fn attach_existing(id: &str, timeout: Duration) -> Result<oppa_lib::pty::ipc_pro
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         },
         timeout,
     )?)?;

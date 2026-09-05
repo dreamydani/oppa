@@ -359,6 +359,7 @@ fn tombstone_lifecycle_with_dup_name_and_blocked_remove() {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         })
         .expect("attach roundtrip");
     assert!(matches!(attach, DaemonResponse::SessionAttached(_)));
@@ -441,6 +442,7 @@ fn attach_request(session_id: &str) -> DaemonRequest {
         resume_agents: false,
         worktree_id: None,
         extra_env: Vec::new(),
+        initial_command: None,
     }
 }
 
@@ -456,6 +458,7 @@ fn cmd_attach_request(session_id: &str) -> DaemonRequest {
         resume_agents: false,
         worktree_id: None,
         extra_env: Vec::new(),
+        initial_command: None,
     }
 }
 
@@ -770,6 +773,7 @@ fn split_inherits_cwd_over_pipe() {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         })
         .expect("create source"),
     )
@@ -787,6 +791,7 @@ fn split_inherits_cwd_over_pipe() {
             resume_agents: false,
             worktree_id: None,
             extra_env: Vec::new(),
+            initial_command: None,
         })
         .expect("attach source"),
     )
