@@ -823,6 +823,54 @@ describe("TerminalPaneHeader", () => {
       expect(screen.queryByLabelText("Custom command")).toBeNull();
     });
 
+    it("hides undetected profiles behind a Not-detected expander that still launches", async () => {
+      agentProfilesMock.mockResolvedValue([
+        { id: "opencode", displayName: "OpenCode", command: "opencode", promptDelivery: "arg", available: true },
+        { id: "grok", displayName: "Grok CLI", command: "grok", promptDelivery: "arg", available: false },
+      ]);
+      const launchSpy = vi
+        .spyOn(useTerminalStore.getState(), "splitPaneWithCommand")
+        .mockResolvedValue(undefined);
+      render(<TerminalPaneHeader id="s1" path={[0]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal"));
+
+      expect(await screen.findByText("OpenCode")).toBeTruthy();
+      expect(screen.queryByText("Grok CLI")).toBeNull();
+      expect(screen.getByText("Not detected (1)")).toBeTruthy();
+
+      fireEvent.click(screen.getByText("Not detected (1)"));
+      expect(screen.getByText("Grok CLI")).toBeTruthy();
+      expect(screen.getByText("not installed")).toBeTruthy();
+
+      fireEvent.click(screen.getByText("Grok CLI"));
+      expect(launchSpy).toHaveBeenCalledWith("h", [0], "grok", "Grok CLI");
+    });
+
+    it("treats profiles without availability info as detected (stale daemon fail-open)", async () => {
+      agentProfilesMock.mockResolvedValue([
+        { id: "codex", displayName: "Codex", promptDelivery: "arg" },
+      ]);
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal"));
+
+      expect(await screen.findByText("Codex")).toBeTruthy();
+      expect(screen.queryByText(/Not detected/)).toBeNull();
+    });
+
+    it("omits the expander when every profile is detected", async () => {
+      agentProfilesMock.mockResolvedValue([
+        { id: "opencode", displayName: "OpenCode", command: "opencode", promptDelivery: "arg", available: true },
+      ]);
+      render(<TerminalPaneHeader id="s1" path={[]} />);
+
+      fireEvent.click(screen.getByTitle("New Terminal"));
+
+      expect(await screen.findByText("OpenCode")).toBeTruthy();
+      expect(screen.queryByText(/Not detected/)).toBeNull();
+    });
+
     it("choosing New branch… from More menu opens the worktree create modal without splitting", async () => {
       useTerminalStore.setState({
         sessions: {

@@ -3,10 +3,10 @@
 //! Data ported from Orca's tui-agent-config.ts / tui-agent-startup.ts;
 //! agent ids follow oppa's own resume/hook conventions where they overlap.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PromptDelivery {
     Arg,

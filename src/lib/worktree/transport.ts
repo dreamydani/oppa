@@ -66,6 +66,9 @@ export interface AgentProfile {
   // Launch binary (differs from id only for cursor → cursor-agent).
   // Optional: old daemons predate the field, callers fall back to id.
   command?: string;
+  // PATH-resolved at serve time. Absent on old daemons: callers fail open
+  // (treat as detected) so the menu never blanks against a stale daemon.
+  available?: boolean;
   promptDelivery: PromptDelivery;
 }
 

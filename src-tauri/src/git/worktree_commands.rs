@@ -4,7 +4,7 @@ use crate::git::worktrees::WorktreeListEntry;
 use crate::pty::daemon_client::WorktreeAgentHandoff;
 use crate::pty::ipc_protocol::{FleetSlot, FleetSlotResult, WorktreePsEntry};
 use crate::pty::manager::PtyManager;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 // Worktree/repo commands: thin forwarders so the daemon stays the single owner
@@ -52,13 +52,20 @@ pub fn worktree_list(manager: State<'_, PtyManager>) -> Result<Vec<WorktreeListE
 }
 
 /// Minimal agent descriptor for the GUI picker; launch details stay daemon-side.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProfileDto {
     pub id: String,
     pub display_name: String,
+    // Deserialize-only compat: production payloads always carry these;
+    // legacy shapes omit them and degrade gracefully.
+    #[serde(default)]
     pub command: String,
     pub prompt_delivery: PromptDelivery,
+    // PATH resolution at serve time; the GUI hides unavailable entries behind
+    // a "Not detected" expander instead of pretending every CLI exists.
+    #[serde(default)]
+    pub available: bool,
 }
 
 fn agent_profiles_impl() -> Vec<AgentProfileDto> {
@@ -69,6 +76,7 @@ fn agent_profiles_impl() -> Vec<AgentProfileDto> {
             display_name: p.display_name.to_string(),
             command: p.command.to_string(),
             prompt_delivery: p.prompt_delivery,
+            available: crate::agents::catalog::resolve_command(p.command).is_some(),
         })
         .collect()
 }
@@ -201,6 +209,17 @@ mod tests {
         assert!(json.contains("\"displayName\":\"Claude Code\""));
         assert!(json.contains("\"command\":\"claude\""));
         assert!(json.contains("\"command\":\"cursor-agent\""));
+        // Availability rides the same payload: the pseudo `generic` command
+        // exists on no machine, so it pins the false case portably.
+        assert!(json.contains("\"available\":"));
+        let generic = dtos.iter().find(|d| d.id == "generic").expect("generic profile");
+        assert!(!generic.available);
+
+        // Pre-availability daemons omit the field; the GUI fail-opens on
+        // absent, so legacy payloads must still parse (default false).
+        let legacy = r#"[{"id":"claude","displayName":"Claude Code","promptDelivery":"arg"}]"#;
+        let parsed: Vec<AgentProfileDto> = serde_json::from_str(legacy).expect("legacy profiles");
+        assert!(!parsed[0].available);
         assert!(json.contains("\"promptDelivery\":\"arg\""));
         assert!(json.contains("\"promptDelivery\":\"stdin\""));
         assert!(!json.contains("display_name"), "must not leak snake_case");

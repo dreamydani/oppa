@@ -125,8 +125,15 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const [isDraggingLocal, setIsDraggingLocal] = useState(false);
   // New-terminal plus menu (plain splits + agent catalog + custom cmd).
   const [isPlusOpen, setIsPlusOpen] = useState(false);
+  const [isMissingOpen, setIsMissingOpen] = useState(false);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [customCommand, setCustomCommand] = useState("");
+
+  // Detected CLIs list directly; undetected ones hide behind the expander.
+  // `available === undefined` (stale daemon) fail-opens into the main list
+  // so the menu never blanks against an old backend.
+  const visibleProfiles = profiles.filter((p) => p.id !== "generic" && p.available !== false);
+  const missingProfiles = profiles.filter((p) => p.id !== "generic" && p.available === false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -330,6 +337,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   useEffect(() => {
     if (!isPlusOpen) return;
     let cancelled = false;
+    setIsMissingOpen(false);
     void agentProfiles()
       .then((list) => {
         if (!cancelled) setProfiles(list);
@@ -561,10 +569,8 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             >
               Split Down
             </button>
-            <div className="terminal-pane-header-menu-separator" role="separator" />
-            {profiles
-              .filter((p) => p.id !== "generic")
-              .map((p) => (
+              <div className="terminal-pane-header-menu-separator" role="separator" />
+              {visibleProfiles.map((p) => (
                 <button
                   key={p.id}
                   type="button"
@@ -579,7 +585,38 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
                   </span>
                 </button>
               ))}
-            <div className="terminal-pane-header-menu-separator" role="separator" />
+              {missingProfiles.length > 0 && (
+                <>
+                  <div className="terminal-pane-header-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    className="terminal-pane-header-menu-item"
+                    aria-expanded={isMissingOpen}
+                    onClick={() => setIsMissingOpen((prev) => !prev)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="terminal-pane-header-menu-label">
+                      Not detected ({missingProfiles.length})
+                    </span>
+                    <ChevronDown size={10} strokeWidth={2.4} />
+                  </button>
+                  {isMissingOpen &&
+                    missingProfiles.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        role="menuitem"
+                        className="terminal-pane-header-menu-item terminal-pane-header-menu-item--missing"
+                        onClick={() => launchAgent(p)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="terminal-pane-header-menu-label">{p.displayName}</span>
+                        <span className="terminal-pane-header-menu-subtext">not installed</span>
+                      </button>
+                    ))}
+                </>
+              )}
+              <div className="terminal-pane-header-menu-separator" role="separator" />
             <input
               aria-label="Custom command"
               className="terminal-pane-header-custom-input"

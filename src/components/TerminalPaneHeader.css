@@ -183,6 +183,16 @@
   background-color: var(--tint-active);
 }
 
+/* Undetected CLI rows stay launchable (daemon PATH can disagree with the
+   shell), but read as unavailable until hovered. */
+.terminal-pane-header-menu-item--missing {
+  color: var(--text-muted);
+}
+
+.terminal-pane-header-menu-item--missing:hover {
+  color: var(--text-primary);
+}
+
 /* Plus popover: right-anchored to the button cluster at the pane's right
    edge so it always opens inside the pane (a left-anchored menu here
    rendered half-clipped by the leaf's overflow:hidden). Width is capped to
