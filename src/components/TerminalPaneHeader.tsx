@@ -134,7 +134,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const switcherBtnRef = useRef<HTMLButtonElement>(null);
   const switcherPanelRef = useRef<HTMLDivElement>(null);
   const plusPanelRef = useRef<HTMLDivElement>(null);
-  const plusCaretRef = useRef<HTMLButtonElement>(null);
+  const plusBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -308,8 +308,8 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       if (
         plusPanelRef.current &&
         !plusPanelRef.current.contains(target) &&
-        plusCaretRef.current &&
-        !plusCaretRef.current.contains(target)
+        plusBtnRef.current &&
+        !plusBtnRef.current.contains(target)
       ) {
         setIsPlusOpen(false);
       }
@@ -452,125 +452,6 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       />
 
       <div className="terminal-pane-header-right">
-        <span className="terminal-pane-header-plus-group">
-          <button
-            className="terminal-pane-header-btn"
-            title="New Terminal"
-            aria-label="New Terminal"
-            onClick={() => void splitPane("h", path)}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <IconPlus />
-          </button>
-          <button
-            ref={plusCaretRef}
-            type="button"
-            className="terminal-pane-header-btn terminal-pane-header-split-caret"
-            title="New Terminal Options"
-            aria-label="New Terminal Options"
-            aria-expanded={isPlusOpen}
-            aria-haspopup="menu"
-            onClick={() => {
-              setIsMenuOpen(false);
-              setIsPlusOpen((prev) => !prev);
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <ChevronDown size={9} strokeWidth={2.6} />
-          </button>
-          {isPlusOpen && (
-            <div
-              ref={plusPanelRef}
-              className="terminal-pane-header-menu terminal-pane-header-plus-popover"
-              role="menu"
-              data-motion="menu"
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="terminal-pane-header-menu-item"
-                onClick={() => {
-                  setIsPlusOpen(false);
-                  void splitPane("h", path);
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                Split Right
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="terminal-pane-header-menu-item"
-                onClick={() => {
-                  setIsPlusOpen(false);
-                  void splitPane("v", path);
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                Split Down
-              </button>
-              <div className="terminal-pane-header-menu-separator" role="separator" />
-              {profiles
-                .filter((p) => p.id !== "generic")
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="menuitem"
-                    className="terminal-pane-header-menu-item"
-                    onClick={() => launchAgent(p)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    <span className="terminal-pane-header-menu-label">{p.displayName}</span>
-                    <span className="terminal-pane-header-menu-subtext">
-                      {p.command ?? p.id}
-                    </span>
-                  </button>
-                ))}
-              <div className="terminal-pane-header-menu-separator" role="separator" />
-              <input
-                aria-label="Custom command"
-                className="terminal-pane-header-custom-input"
-                placeholder="Custom command…"
-                value={customCommand}
-                onChange={(e) => setCustomCommand(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    runCustomCommand();
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    setIsPlusOpen(false);
-                  }
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          )}
-        </span>
-
-        <button
-          className={`terminal-pane-header-btn${isMaximized ? " active" : ""}`}
-          title={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
-          aria-label={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
-          onClick={() => toggleMaximizePane(id)}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
-
-        <button
-          className="terminal-pane-header-btn close-btn"
-          title="Close Pane"
-          aria-label="Close Pane"
-          onClick={() => void closePane(path)}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <IconClose />
-        </button>
-
         <button
           ref={moreBtnRef}
           className={`terminal-pane-header-btn ${isMenuOpen ? "active" : ""}`}
@@ -631,6 +512,114 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             </button>
           </div>
         )}
+
+        <button
+          ref={plusBtnRef}
+          type="button"
+          className={`terminal-pane-header-btn${isPlusOpen ? " active" : ""}`}
+          title="New Terminal"
+          aria-label="New Terminal"
+          aria-expanded={isPlusOpen}
+          aria-haspopup="menu"
+          onClick={() => {
+            setIsMenuOpen(false);
+            setIsPlusOpen((prev) => !prev);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <IconPlus />
+        </button>
+        {isPlusOpen && (
+          <div
+            ref={plusPanelRef}
+            className="terminal-pane-header-menu terminal-pane-header-plus-popover"
+            role="menu"
+            data-motion="menu"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="terminal-pane-header-menu-item"
+              onClick={() => {
+                setIsPlusOpen(false);
+                void splitPane("h", path);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              Split Right
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="terminal-pane-header-menu-item"
+              onClick={() => {
+                setIsPlusOpen(false);
+                void splitPane("v", path);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              Split Down
+            </button>
+            <div className="terminal-pane-header-menu-separator" role="separator" />
+            {profiles
+              .filter((p) => p.id !== "generic")
+              .map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="menuitem"
+                  className="terminal-pane-header-menu-item"
+                  onClick={() => launchAgent(p)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <span className="terminal-pane-header-menu-label">{p.displayName}</span>
+                  <span className="terminal-pane-header-menu-subtext">
+                    {p.command ?? p.id}
+                  </span>
+                </button>
+              ))}
+            <div className="terminal-pane-header-menu-separator" role="separator" />
+            <input
+              aria-label="Custom command"
+              className="terminal-pane-header-custom-input"
+              placeholder="Custom command…"
+              value={customCommand}
+              onChange={(e) => setCustomCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runCustomCommand();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setIsPlusOpen(false);
+                }
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
+        <button
+          className={`terminal-pane-header-btn${isMaximized ? " active" : ""}`}
+          title={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
+          aria-label={isMaximized ? "Restore Grid" : "Solo / Maximize Pane"}
+          onClick={() => toggleMaximizePane(id)}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+
+        <button
+          className="terminal-pane-header-btn close-btn"
+          title="Close Pane"
+          aria-label="Close Pane"
+          onClick={() => void closePane(path)}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <IconClose />
+        </button>
       </div>
 
       {isSwitcherOpen && (

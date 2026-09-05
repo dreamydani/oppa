@@ -510,6 +510,9 @@
   /* Isolate each pane's layout/paint so animated resizes (drawer slide,
      divider drag) never cascade reflow into the xterm DOM subtree. */
   contain: layout paint style;
+  /* Query container for cqi units: header dropdowns cap their width to the
+     pane (94cqi) so menus never render half-clipped in narrow panes. */
+  container-type: inline-size;
   /* Reveal-side durations: a restored sibling fades/scales back in here;
      the hide side lives on .pane-hidden (destination-state rule wins). */
   transition: border-color var(--dur-micro) var(--ease-out),

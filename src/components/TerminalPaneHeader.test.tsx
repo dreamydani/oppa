@@ -103,14 +103,28 @@ describe("TerminalPaneHeader", () => {
 
     expect(screen.getByText("Terminal 1")).toBeTruthy();
     expect(screen.getByTitle("New Terminal")).toBeTruthy();
-    expect(screen.getByTitle("New Terminal Options")).toBeTruthy();
     expect(screen.getByTitle("More Options")).toBeTruthy();
     expect(screen.getByTitle("Solo / Maximize Pane")).toBeTruthy();
     expect(screen.getByTitle("Close Pane")).toBeTruthy();
-    // Removed in the simplify pass: dedicated split + browser buttons.
+    // Removed in the simplify pass: dedicated split + browser buttons and
+    // the plus caret (the + button itself opens the menu).
     expect(screen.queryByTitle("Split Right")).toBeNull();
     expect(screen.queryByTitle("Split Down")).toBeNull();
     expect(screen.queryByTitle("Open in Browser")).toBeNull();
+    expect(screen.queryByTitle("New Terminal Options")).toBeNull();
+  });
+
+  it("orders header buttons overflow, new terminal, maximize, close from the left", () => {
+    const { container } = render(<TerminalPaneHeader id="s1" path={[]} />);
+    const titles = Array.from(
+      container.querySelectorAll(".terminal-pane-header-right .terminal-pane-header-btn"),
+    ).map((b) => b.getAttribute("title"));
+    expect(titles).toEqual([
+      "More Options",
+      "New Terminal",
+      "Solo / Maximize Pane",
+      "Close Pane",
+    ]);
   });
 
   it("renders branch badge when session is bound to a worktree", () => {
@@ -265,18 +279,20 @@ describe("TerminalPaneHeader", () => {
     expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
   });
 
-  it("splits pane right when New Terminal is clicked", async () => {
+  it("toggles the plus menu when New Terminal is clicked without splitting", async () => {
     render(<TerminalPaneHeader id="s1" path={[]} />);
 
-    fireEvent.click(screen.getByTitle("New Terminal"));
+    expect(screen.queryByText("Split Right")).toBeNull();
 
-    await vi.waitFor(() => {
-      const layout = useTerminalStore.getState().layout;
-      expect(layout.type).toBe("split");
-      if (layout.type === "split") {
-        expect(layout.dir).toBe("h");
-      }
-    });
+    fireEvent.click(screen.getByTitle("New Terminal"));
+    expect(screen.getByText("Split Right")).toBeTruthy();
+    expect(screen.getByText("Split Down")).toBeTruthy();
+    // No instant split: the pane count is unchanged until a menu row is picked.
+    expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "s1" });
+
+    fireEvent.click(screen.getByTitle("New Terminal"));
+    expect(screen.queryByText("Split Right")).toBeNull();
+    expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "s1" });
   });
 
   it("closes pane when Close button is clicked", async () => {
@@ -719,17 +735,17 @@ describe("TerminalPaneHeader", () => {
       expect(resolveRepoForCwd(undefined, repos)).toBeNull();
     });
 
-    it("opens the plus menu from the caret while the main button stays instant", async () => {
+    it("opens the plus menu from the button and splits from its rows", async () => {
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
       expect(screen.queryByText("Split Down")).toBeNull();
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
       expect(screen.getByText("Split Right")).toBeTruthy();
       expect(screen.getByText("Split Down")).toBeTruthy();
 
-      // Main button still executes its split immediately (no popover needed).
-      fireEvent.click(screen.getByTitle("New Terminal"));
+      // Plain split rows execute their split immediately.
+      fireEvent.click(screen.getByText("Split Right"));
       await vi.waitFor(() => {
         expect(useTerminalStore.getState().layout.type).toBe("split");
       });
@@ -741,7 +757,7 @@ describe("TerminalPaneHeader", () => {
         .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[0]} />);
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
       fireEvent.click(screen.getByText("Split Down"));
 
       expect(splitSpy).toHaveBeenCalledTimes(1);
@@ -760,7 +776,7 @@ describe("TerminalPaneHeader", () => {
         .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[0]} />);
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
 
       expect(await screen.findByText("OpenCode")).toBeTruthy();
       expect(screen.getByText("cursor-agent")).toBeTruthy();
@@ -781,7 +797,7 @@ describe("TerminalPaneHeader", () => {
         .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
 
       expect(await screen.findByText("Codex")).toBeTruthy();
       fireEvent.click(screen.getByText("Codex"));
@@ -796,7 +812,7 @@ describe("TerminalPaneHeader", () => {
         .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
 
       const input = await screen.findByLabelText("Custom command");
       fireEvent.change(input, { target: { value: "btop" } });
@@ -870,7 +886,7 @@ describe("TerminalPaneHeader", () => {
         .mockResolvedValue(undefined);
       render(<TerminalPaneHeader id="s1" path={[]} />);
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
       expect(screen.getByText("Split Right")).toBeTruthy();
 
       fireEvent.keyDown(document, { key: "Escape" });
@@ -888,7 +904,7 @@ describe("TerminalPaneHeader", () => {
         </div>,
       );
 
-      fireEvent.click(screen.getByTitle("New Terminal Options"));
+      fireEvent.click(screen.getByTitle("New Terminal"));
       expect(screen.getByText("Split Right")).toBeTruthy();
 
       fireEvent.mouseDown(screen.getByTestId("outside"));

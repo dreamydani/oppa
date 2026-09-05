@@ -150,7 +150,7 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
-  /* Unfolds downward from the kebab that opened it (see motion.css
+  /* Unfolds downward from the button that opened it (see motion.css
      [data-motion="menu"]); a centre-origin scale reads as materialising from
      no particular place. */
   transform-origin: top right;
@@ -183,36 +183,18 @@
   background-color: var(--tint-active);
 }
 
-/* Split chooser: icon + caret combo per direction; popover reuses menu styles */
-.terminal-pane-header-split-group {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.terminal-pane-header-split-caret {
-  width: 13px;
-  margin-left: -5px;
-  padding: 0;
-}
-
-.terminal-pane-header-split-popover {
-  min-width: 150px;
-}
-
-/* New-terminal plus group: same icon + caret combo pattern as the old
-   split groups; the caret class is shared so hover/active stay identical. */
-.terminal-pane-header-plus-group {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
+/* Plus popover: right-anchored to the button cluster at the pane's right
+   edge so it always opens inside the pane (a left-anchored menu here
+   rendered half-clipped by the leaf's overflow:hidden). Width is capped to
+   the pane itself via cqi (.pane-leaf is a query container), so even a
+   tiny dragged pane shows a whole menu, never half of one. */
 .terminal-pane-header-plus-popover {
-  left: 0;
-  right: auto;
-  transform-origin: top left;
+  right: 0;
+  left: auto;
+  transform-origin: top right;
   min-width: 200px;
+  max-width: 260px;
+  max-width: min(260px, 94cqi);
 }
 
 .terminal-pane-header-menu-separator {
