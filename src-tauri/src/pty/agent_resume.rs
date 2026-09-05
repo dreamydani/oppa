@@ -48,7 +48,7 @@ fn normalize_program_token(token: &str) -> String {
 }
 
 /// Claude Code slug: cwd with every non-alphanumeric replaced by '-' (case preserved).
-/// Verified against a real ~/.claude/projects: "C:\\Users\\danial" -> "C--Users-danial".
+/// Verified against a real ~/.claude/projects: "C:\\Users\\oppa-user" -> "C--Users-oppa-user".
 fn claude_cwd_slug(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
@@ -460,8 +460,8 @@ mod tests {
     #[test]
     fn claude_slug_matches_real_projects_layout() {
         assert_eq!(
-            claude_cwd_slug(r"C:\Users\danial"),
-            "C--Users-danial"
+            claude_cwd_slug(r"C:\Users\oppa-user"),
+            "C--Users-oppa-user"
         );
         assert_eq!(
             claude_cwd_slug(r"C:\01-DeveloperSpace"),
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn capture_finds_newest_claude_transcript_in_temp_home() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let projects = tmp.path().join(".claude").join("projects").join("C--Users-danial");
+        let projects = tmp.path().join(".claude").join("projects").join("C--Users-oppa-user");
         fs::create_dir_all(&projects).expect("mkdir");
         fs::write(projects.join("stale.jsonl"), b"a").expect("write");
         std::thread::sleep(Duration::from_millis(30));
@@ -480,7 +480,7 @@ mod tests {
 
         let claude_profile =
             find_profile("claude --continue").expect("profile");
-        let captured = capture_for_profile(claude_profile, tmp.path(), r"C:\Users\danial")
+        let captured = capture_for_profile(claude_profile, tmp.path(), r"C:\Users\oppa-user")
             .expect("captured");
         assert_eq!(
             captured,
@@ -564,7 +564,7 @@ mod tests {
             r#"{
   "C:\\01_DeveloperSpace": "a974f46f-8746-4c0c-8cad-550506546873",
   "C:\\oppa\\oppa": "c9187a6c-3496-4542-a719-1b456cd50eb5",
-  "C:\\Users\\danial": "31e5a925-6ade-4e11-9499-ef59b9f57770"
+  "C:\\Users\\oppa-user": "31e5a925-6ade-4e11-9499-ef59b9f57770"
 }"#,
         )
         .expect("write cache");

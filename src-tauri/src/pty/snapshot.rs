@@ -455,7 +455,7 @@ mod tests {
                 agent: "claude".to_string(),
                 id: "abc123".to_string(),
                 transcript_path: Some(
-                    "C:\\Users\\danial\\.claude\\projects\\x\\abc123.jsonl".to_string(),
+                    "C:\\Users\\oppa-user\\.claude\\projects\\x\\abc123.jsonl".to_string(),
                 ),
             }),
             worktree_id: Some("repo::C:/ws/feat-a".to_string()),
@@ -475,7 +475,7 @@ mod tests {
                 agent: "claude".to_string(),
                 id: "abc123".to_string(),
                 transcript_path: Some(
-                    "C:\\Users\\danial\\.claude\\projects\\x\\abc123.jsonl".to_string()
+                    "C:\\Users\\oppa-user\\.claude\\projects\\x\\abc123.jsonl".to_string()
                 ),
             })
         );

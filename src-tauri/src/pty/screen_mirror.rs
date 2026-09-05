@@ -124,9 +124,9 @@ mod tests {
     #[test]
     fn test_screen_mirror_snapshot_omits_trailing_blank_lines() {
         let mut mirror = ScreenMirror::new(80, 24, 1000);
-        mirror.process(b"PS C:\\Users\\danial>\x1b[?25h");
+        mirror.process(b"PS C:\\Users\\oppa-user>\x1b[?25h");
         let snapshot = mirror.get_formatted_snapshot();
-        assert!(snapshot.contains("PS C:\\Users\\danial>"));
+        assert!(snapshot.contains("PS C:\\Users\\oppa-user>"));
         assert!(!snapshot.contains("\r\n"));
     }
 

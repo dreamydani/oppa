@@ -480,8 +480,8 @@ mod tests {
     #[test]
     fn validated_branch_name_with_clean_prefix() {
         assert_eq!(
-            compute_validated_branch_name("feature-x", Some("danial")).unwrap(),
-            "danial/feature-x"
+            compute_validated_branch_name("feature-x", Some("oppa-user")).unwrap(),
+            "oppa-user/feature-x"
         );
     }
 
