@@ -283,18 +283,23 @@ export function classifyUpdateError(
 // downloading itself cannot kill sessions, and the user chose to update).
 // `onBeforeInstall` flushes layout + scrollbacks (Orca-style restore) before
 // the plugin replaces files; flush failures never block the install.
+// `force` is the single-shot explicit-confirm bypass (Update anyway): the user
+// saw the busy warning and accepted the restart, so the probe must not
+// re-block — without it the confirm loops back onto the same warning forever.
 export async function installNativeUpdateAndRelaunch(
   onProgress: NativeProgressCallback = () => {},
-  options: { onBeforeInstall?: () => Promise<unknown> } = {},
+  options: { onBeforeInstall?: () => Promise<unknown>; force?: boolean } = {},
 ): Promise<NativeInstallOutcome> {
-  // probeUpgradeSafety swallows invoke rejections but not a malformed
-  // resolved payload — a throwing probe must degrade to unknown, never reject.
-  const probe = await probeUpgradeSafety().catch(() => ({
-    status: "unknown" as const,
-    sessionCount: 0,
-  }));
-  if (probe.status === "busy") {
-    return { proceeded: false, reason: "busy", sessionCount: probe.sessionCount };
+  if (!options.force) {
+    // probeUpgradeSafety swallows invoke rejections but not a malformed
+    // resolved payload — a throwing probe must degrade to unknown, never reject.
+    const probe = await probeUpgradeSafety().catch(() => ({
+      status: "unknown" as const,
+      sessionCount: 0,
+    }));
+    if (probe.status === "busy") {
+      return { proceeded: false, reason: "busy", sessionCount: probe.sessionCount };
+    }
   }
   const pending = pendingNativeUpdate;
   if (!pending) {

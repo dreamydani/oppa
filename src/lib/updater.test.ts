@@ -535,6 +535,39 @@ describe("updater seam", () => {
       expect(outcome).toEqual({ proceeded: true });
       expect(update.install).toHaveBeenCalledTimes(1);
     });
+
+    it("forced install skips the busy probe and proceeds (explicit confirm)", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(BUSY);
+      relaunchMock.mockResolvedValue(undefined);
+      const outcome = await installNativeUpdateAndRelaunch(() => {}, { force: true });
+      expect(outcome).toEqual({ proceeded: true });
+      // The probe never ran: no can_upgrade_daemon round trip.
+      expect(
+        invokeMock.mock.calls.filter((c) => c[0] === "can_upgrade_daemon").length,
+      ).toBe(0);
+      expect(update.download).toHaveBeenCalledTimes(1);
+      expect(update.install).toHaveBeenCalledTimes(1);
+      expect(relaunchMock).toHaveBeenCalled();
+    });
+
+    it("forced install still runs the pre-install flush", async () => {
+      const update = await establishPending();
+      invokeMock.mockResolvedValue(BUSY);
+      relaunchMock.mockResolvedValue(undefined);
+      const order: string[] = [];
+      update.install = vi.fn().mockImplementation(() => {
+        order.push("install");
+        return Promise.resolve();
+      });
+      const onBeforeInstall = vi.fn().mockImplementation(() => {
+        order.push("flush");
+        return Promise.resolve();
+      });
+      const outcome = await installNativeUpdateAndRelaunch(() => {}, { force: true, onBeforeInstall });
+      expect(outcome).toEqual({ proceeded: true });
+      expect(order).toEqual(["flush", "install"]);
+    });
   });
 
   describe("channel version gate + error taxonomy", () => {

@@ -657,7 +657,7 @@ describe("UpdateBanner", () => {
       releaseUrl: "https://github.com/dreamydani/oppa/releases/tag/v0.3.0",
     });
     expect(await screen.findByText(/Oppa v0\.3\.0 is ready/)).toBeInTheDocument();
-    expect(screen.getByText(/Sessions restore after restart/)).toBeInTheDocument();
+    expect(screen.getByText(/won't be interrupted during the update/)).toBeInTheDocument();
     expect(screen.getByText(/Fixes terminals/)).toBeInTheDocument();
     expect(screen.getByText(/Release notes/)).toBeInTheDocument();
     expect(screen.getByTestId("update-banner")).toHaveAttribute("aria-label", "Update available");
@@ -705,5 +705,64 @@ describe("UpdateBanner", () => {
       { onBeforeInstall?: () => Promise<unknown> }?,
     ];
     expect(typeof options?.onBeforeInstall).toBe("function");
+  });
+
+  it("Update anyway confirms once: forces install, never re-loops the warning", async () => {
+    installNativeUpdateAndRelaunchMock
+      .mockResolvedValueOnce({ proceeded: false, reason: "busy", sessionCount: 6 })
+      .mockResolvedValue({ proceeded: true });
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    await screen.findByRole("button", { name: "Restart now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+    expect(await screen.findByText(/6 sessions are still running/)).toBeInTheDocument();
+    expect(screen.getByText(/restore after the restart/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Update anyway" }));
+    await waitFor(() =>
+      expect(installNativeUpdateAndRelaunchMock).toHaveBeenCalledTimes(2),
+    );
+    // The confirm bypasses the probe: no second busy warning, no loop.
+    const [, options] = installNativeUpdateAndRelaunchMock.mock.calls[1] as unknown as [
+      unknown,
+      { force?: boolean }?,
+    ];
+    expect(options?.force).toBe(true);
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("install-error retry inside a confirmed cycle keeps the confirmation", async () => {
+    installNativeUpdateAndRelaunchMock
+      .mockResolvedValueOnce({ proceeded: false, reason: "busy", sessionCount: 1 })
+      .mockResolvedValueOnce({ proceeded: false, reason: "error", error: "install failed" })
+      .mockResolvedValue({ proceeded: true });
+    render(<UpdateBanner />);
+    await act(async () => {});
+    announceNative();
+    await screen.findByRole("button", { name: "Download now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    await screen.findByRole("button", { name: "Restart now" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Update anyway" }));
+    expect(await screen.findByText(/install failed/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(installNativeUpdateAndRelaunchMock).toHaveBeenCalledTimes(3),
+    );
+    const [, options] = installNativeUpdateAndRelaunchMock.mock.calls[2] as unknown as [
+      unknown,
+      { force?: boolean }?,
+    ];
+    expect(options?.force).toBe(true);
   });
 });
