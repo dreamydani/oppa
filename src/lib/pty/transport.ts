@@ -61,6 +61,8 @@ export interface PtySpawnResult {
   working?: boolean;
   // Hydrates the last hook-classified rich status on warm/cold reattach
   agent_status?: AgentStatusEntry | null;
+  // Birth name seeded at spawn so panes never show raw s- ids
+  title?: string | null;
 }
 
 // Type alias (not interface) so it satisfies InvokeArgs' index signature.
@@ -80,6 +82,9 @@ export type PtySpawnOptions = {
 export interface SessionTitleChangedPayload {
   id: string;
   title: string;
+  // Manual renames pin, auto titles don't. Absent (pre-field backends, which
+  // only emitted manual renames) means pinned.
+  pinned?: boolean;
 }
 
 export interface SessionFocusRequestedPayload {
@@ -115,6 +120,14 @@ export function ptyResize(id: string, cols: number, rows: number): Promise<void>
 
 export function ptyKill(id: string): Promise<void> {
   return invoke("pty_kill", { id });
+}
+
+export function ptySetTitle(id: string, title: string): Promise<void> {
+  return invoke("pty_set_title", { id, title });
+}
+
+export function ptyResetTitle(id: string): Promise<void> {
+  return invoke("pty_reset_title", { id });
 }
 
 export function ptyAck(id: string, bytes: number): Promise<void> {

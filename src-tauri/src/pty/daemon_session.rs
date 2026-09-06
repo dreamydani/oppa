@@ -5,11 +5,11 @@ use crate::pty::pause_gate::PauseGate;
 use crate::pty::snapshot::AgentSessionRef;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
+use crate::pty::title_watcher;
 use crate::pty::working_state_watcher;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::io::Write;use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -54,6 +54,14 @@ pub struct DaemonSession {
     pub worktree_id: Option<String>,
     // Tab-title sync: set via SetSessionTitle, mirrored into checkpoints
     pub title: Mutex<Option<String>>,
+    // Birth name for idle panes + revert target after foreground work ends
+    pub idle_title: Mutex<String>,
+    // Manual renames pin the title: auto paths must never overwrite them
+    pub title_pinned: Mutex<bool>,
+    // One-shot session topic consumed by the first substantive agent prompt
+    pub topic_set: Mutex<bool>,
+    // Server-installed global fan-out for auto titles (reader/hook threads)
+    pub global_tx: Mutex<Option<tokio::sync::broadcast::Sender<DaemonEvent>>>,
     env_bindings: Vec<(String, String)>,
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
@@ -244,6 +252,10 @@ impl DaemonSession {
                 .find(|(k, _)| k == "OPPA_WORKTREE_ID")
                 .map(|(_, v)| v.clone()),
             title: Mutex::new(None),
+            idle_title: Mutex::new(String::new()),
+            title_pinned: Mutex::new(false),
+            topic_set: Mutex::new(false),
+            global_tx: Mutex::new(None),
             env_bindings: applied_bindings,
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
@@ -329,6 +341,7 @@ impl DaemonSession {
         let initial_command_reader = initial_command.clone();
         let writer_inject = Arc::clone(&writer);
         let written_inject = Arc::clone(&initial_command_written);
+        let session_title = Arc::clone(&session);
         std::thread::spawn(move || {
             let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
@@ -384,6 +397,10 @@ impl DaemonSession {
                                 }
                                 OscEvent::CommandStart(cmdline) => {
                                     // Empty cmdline means the hook couldn't capture it — unknown, not empty
+                                    if !cmdline.is_empty() {
+                                        // Known agent CLIs retitle the pane (OpenCode…); ignored otherwise
+                                        session_title.try_agent_title(&cmdline);
+                                    }
                                     *foreground.lock() =
                                         if cmdline.is_empty() { None } else { Some(cmdline) };
                                     // New foreground work invalidates the previous agent session
@@ -467,7 +484,9 @@ impl DaemonSession {
         }
 
         // Working/idle dots: edge-triggered SessionWorking events for subscribers
-        working_state_watcher::spawn(session);
+        working_state_watcher::spawn(Arc::clone(&session));
+        // Generic foreground commands retitle the pane while stable; idle reverts
+        title_watcher::spawn(session);
     }
 
     /// Write input bytes to the PTY's input stream.
@@ -661,6 +680,100 @@ impl DaemonSession {
 
     pub fn set_title(&self, title: String) {
         *self.title.lock() = Some(title);
+    }
+
+    // Birth-name seed: title + idle word together so fresh panes never show s- ids.
+    pub fn seed_birth_title(&self, title: String) {
+        *self.idle_title.lock() = title.clone();
+        *self.title.lock() = Some(title);
+    }
+
+    pub fn idle_title(&self) -> String {
+        self.idle_title.lock().clone()
+    }
+
+    pub fn pin_title(&self) {
+        *self.title_pinned.lock() = true;
+    }
+
+    pub fn set_idle_title(&self, title: String) {
+        *self.idle_title.lock() = title;
+    }
+
+    pub fn mark_topic_set(&self) {
+        *self.topic_set.lock() = true;
+    }
+
+    // Pins and one-shot topics both freeze auto titles.
+    pub(crate) fn auto_title_locked(&self) -> bool {
+        *self.title_pinned.lock() || *self.topic_set.lock()
+    }
+
+    // Back to the birth name once foreground work ends; skipped when the
+    // idle word was never seeded (pre-seed sessions, bare test spawns).
+    pub(crate) fn revert_to_idle_title(&self) -> bool {
+        let idle = self.idle_title();
+        if idle.is_empty() {
+            return false;
+        }
+        self.announce_title(idle)
+    }
+
+    pub fn set_global_sender(&self, tx: tokio::sync::broadcast::Sender<DaemonEvent>) {
+        *self.global_tx.lock() = Some(tx);
+    }
+
+    // Store + fan out an auto title; no-op when pinned, unchanged, or blank.
+    pub(crate) fn announce_title(&self, title: String) -> bool {
+        if *self.title_pinned.lock() || title.is_empty() {
+            return false;
+        }
+        if self.title.lock().as_deref() == Some(title.as_str()) {
+            return false;
+        }
+        *self.title.lock() = Some(title.clone());
+        if let Some(tx) = self.global_tx.lock().as_ref() {
+            let _ = tx.send(DaemonEvent::TitleChanged {
+                session_id: self.id.clone(),
+                title,
+                // Announcer paths are auto titles only; manual renames pin via SetSessionTitle.
+                pinned: false,
+            });
+        }
+        true
+    }
+
+    // Agent CLIs resolve to their display name (opencode → OpenCode);
+    // ordinary commands are the generic-title slice's job, not this one.
+    pub fn try_agent_title(&self, cmdline: &str) -> bool {
+        if *self.title_pinned.lock() || *self.topic_set.lock() {
+            return false;
+        }
+        let Some(display) = crate::pty::agent_resume::display_name_for_command(cmdline) else {
+            return false;
+        };
+        let title = crate::pty::ipc_protocol::sanitize_session_title(display);
+        self.announce_title(title)
+    }
+
+    // First substantive hook prompt becomes the session topic, once only.
+    // Junk prompts return false without consuming the one shot.
+    pub fn try_topic_title(&self, prompt: &str) -> bool {
+        if *self.title_pinned.lock() || *self.topic_set.lock() {
+            return false;
+        }
+        let Some(topic) = crate::pty::friendly_name::topic_title_from_prompt(prompt) else {
+            return false;
+        };
+        let title = crate::pty::ipc_protocol::sanitize_session_title(&topic);
+        if title.is_empty() {
+            return false;
+        }
+        if self.announce_title(title) {
+            *self.topic_set.lock() = true;
+            return true;
+        }
+        false
     }
 
     /// Command currently running in the foreground, per OSC 133 C/D markers.
@@ -1315,6 +1428,68 @@ mod tests {
             Some("release pane"),
             "checkpoint must carry the session title for warm/cold restore"
         );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_agent_command_marker_retitles_and_pin_blocks() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "auto-title-1".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn auto-title session");
+        session.seed_birth_title("fox".into());
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
+        session.set_global_sender(tx);
+
+        // Agent command marker → display name broadcast.
+        session
+            .write(b"printf '\\033]133;C;opencode --prompt hi\\007'\n")
+            .expect("write C marker");
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("title event deadline")
+            .expect("broadcast live");
+        match event {
+            DaemonEvent::TitleChanged {
+                session_id,
+                title,
+                pinned,
+            } => {
+                assert_eq!(session_id, "auto-title-1");
+                assert_eq!(title, "OpenCode");
+                assert!(!pinned, "agent auto titles never pin");
+            }
+            other => panic!("expected TitleChanged, got {other:?}"),
+        }
+
+        // Short-lived ordinary commands never retitle.
+        session
+            .write(b"printf '\\033]133;C;git status\\007'\n")
+            .expect("write plain marker");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        session
+            .write(b"printf '\\033]133;D\\007'\n")
+            .expect("write D marker");
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "plain foreground commands must not emit titles"
+        );
+
+        // Manual pin freezes the title against later agent commands.
+        session.set_title("Build Output".into());
+        session.pin_title();
+        assert!(!session.try_agent_title("claude --resume x"));
+        assert!(!session.try_topic_title("a later substantive prompt here"));
+        assert_eq!(session.title().as_deref(), Some("Build Output"));
         let _ = session.kill();
     }
 

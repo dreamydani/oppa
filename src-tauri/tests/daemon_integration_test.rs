@@ -2018,6 +2018,9 @@ fn test_update_restart_checkpoint_disk_roundtrip_preserves_restore_state() {
         }),
         worktree_id: Some("repo::C:/ws/feat-a".into()),
         agent_status: Some(restart_seed_status()),
+        title_pinned: true,
+        topic_set: false,
+        idle_title: Some("fox".into()),
     };
     storage.save_snapshot(&seeded).expect("seed checkpoint");
     let loaded = storage
@@ -2055,6 +2058,9 @@ fn test_e2e_update_restart_cold_boot_restores_checkpoint_state() {
             agent_session: None,
             worktree_id: None,
             agent_status: Some(seeded_status.clone()),
+            title_pinned: true,
+            topic_set: false,
+            idle_title: Some("fox".into()),
         })
         .expect("seed checkpoint");
 

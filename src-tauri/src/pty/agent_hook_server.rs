@@ -234,6 +234,14 @@ fn apply_hook_payload(
                 });
             }
         }
+        // First substantive user prompt becomes the pane's one-shot topic.
+        if boundary_event(family_of(agent), &event_name) {
+            if let Some(prompt) =
+                crate::agents::status::first_string(&payload, &["prompt", "user_prompt"])
+            {
+                session.try_topic_title(&prompt);
+            }
+        }
     }
 
     // Field names differ per agent: Claude writes snake_case `session_id`,
@@ -762,6 +770,87 @@ mod tests {
                 }
             }
         }
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_user_prompt_submit_sets_one_shot_topic_title() {
+        let sh = test_shell_for_hook();
+        let sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let session = DaemonSession::spawn_with_args(
+            "hook-topic-1".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn session for topic test");
+        session.seed_birth_title("fox".into());
+        sessions
+            .lock()
+            .insert("hook-topic-1".into(), Arc::clone(&session));
+
+        let server = AgentHookServer::start(Arc::clone(&sessions))
+            .await
+            .expect("server started");
+        let submit = |prompt: &str| {
+            serde_json::json!({
+                "pane_key": "hook-topic-1",
+                "token": server.token,
+                "payload": {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": prompt,
+                    "session_id": "conv-topic-1",
+                }
+            })
+            .to_string()
+        };
+
+        // Junk prompts never consume the one shot.
+        post("/hook/opencode", &submit("hi"), server.port)
+            .await
+            .expect("post");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(session.title().as_deref(), Some("fox"));
+
+        // First substantive prompt becomes the topic.
+        post(
+            "/hook/opencode",
+            &submit("build the export flow please"),
+            server.port,
+        )
+        .await
+        .expect("post");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if session.title().as_deref() == Some("build the export flow please") {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "expected topic title within deadline, got {:?}",
+                session.title()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        // Later prompts never overwrite it.
+        post(
+            "/hook/opencode",
+            &submit("now refactor everything else here"),
+            server.port,
+        )
+        .await
+        .expect("post");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            session.title().as_deref(),
+            Some("build the export flow please")
+        );
         let _ = session.kill();
     }
 }

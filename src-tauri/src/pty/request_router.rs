@@ -21,6 +21,7 @@ use crate::git::worktrees::{
     worktree_set, worktree_show, WorktreeCreateRequest,
 };
 use crate::pty::daemon_session::DaemonSession;
+use crate::pty::friendly_name::{is_synthetic_title, pick_friendly_name};
 use crate::pty::ipc_protocol::{
     sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
     FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
@@ -90,6 +91,7 @@ impl DaemonServer {
                     // Only the ack counter resets (and the gate opens): queued
                     // batcher bytes are preserved for the new client.
                     let _ = session.reset_pending();
+                    session.set_global_sender(self.global_events.clone());
                     let snapshot = session.get_snapshot();
                     DaemonResponse::SessionAttached(CreateOrAttachResult {
                         is_new: false,
@@ -103,6 +105,7 @@ impl DaemonServer {
                         worktree_id: session.worktree_id().map(str::to_string),
                         working: session.working_state(),
                         agent_status: session.agent_status(),
+                        title: session.title(),
                     })
                 } else {
                     // Cold restore: consult the disk checkpoint for agent resume state
@@ -156,6 +159,40 @@ impl DaemonServer {
                             let session_cwd = session.cwd();
                             let worktree_id = session.worktree_id().map(str::to_string);
                             let working = session.working_state();
+                            // Birth name: pinned and topic titles survive a cold boot
+                            // with their flags; transient auto titles drop in
+                            // favor of a fresh friendly word.
+                            let reusable = checkpoint.as_ref().filter(|snap| {
+                                (snap.title_pinned || snap.topic_set)
+                                    && snap
+                                        .title
+                                        .as_deref()
+                                        .is_some_and(|t| !is_synthetic_title(t, &session_id))
+                            });
+                            let birth = reusable
+                                .and_then(|snap| snap.title.clone())
+                                .unwrap_or_else(|| {
+                                    pick_friendly_name(&session_id, &|cand| {
+                                        sessions.values().any(|s| {
+                                            s.title().as_deref() == Some(cand)
+                                        })
+                                    })
+                                });
+                            session.seed_birth_title(birth.clone());
+                            if let Some(snap) = reusable {
+                                if snap.title_pinned {
+                                    session.pin_title();
+                                }
+                                if snap.topic_set {
+                                    session.mark_topic_set();
+                                }
+                                if let Some(idle) = snap.idle_title.as_deref() {
+                                    if !idle.is_empty() {
+                                        session.set_idle_title(idle.to_string());
+                                    }
+                                }
+                            }
+                            session.set_global_sender(self.global_events.clone());
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
                             }
@@ -175,6 +212,7 @@ impl DaemonServer {
                                 agent_status: checkpoint
                                     .as_ref()
                                     .and_then(|snap| snap.agent_status.clone()),
+                                title: Some(birth),
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),
@@ -277,9 +315,39 @@ impl DaemonServer {
                 match session {
                     Some(session) => {
                         session.set_title(sanitized.clone());
+                        // WHY pin: manual renames freeze the title; auto paths must never overwrite them.
+                        session.pin_title();
                         self.publish_global(DaemonEvent::TitleChanged {
                             session_id,
                             title: sanitized,
+                            pinned: true,
+                        });
+                        DaemonResponse::Ok
+                    }
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
+            DaemonRequest::ResetSessionTitle { session_id } => {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => {
+                        *session.title_pinned.lock() = false;
+                        *session.topic_set.lock() = false;
+                        // Revert to the birth name when seeded; otherwise keep
+                        // the live title (pre-seed sessions only).
+                        let title = {
+                            let idle = session.idle_title();
+                            if idle.is_empty() {
+                                session.title().unwrap_or_else(|| session_id.clone())
+                            } else {
+                                session.seed_birth_title(idle.clone());
+                                idle
+                            }
+                        };
+                        self.publish_global(DaemonEvent::TitleChanged {
+                            session_id,
+                            title,
+                            pinned: false,
                         });
                         DaemonResponse::Ok
                     }
@@ -949,6 +1017,48 @@ mod tests {
         );
         assert_eq!(
             server.handle_request(DaemonRequest::UpgradeIfIdle),
+            DaemonResponse::Ok
+        );
+    }
+
+    #[test]
+    fn create_or_attach_seeds_friendly_birth_title() {
+        let server = DaemonServer::new();
+        let spawn = |session_id: &str| {
+            server.handle_request(DaemonRequest::CreateOrAttach {
+                session_id: session_id.into(),
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                shell: None,
+                resume_agents: false,
+                worktree_id: None,
+                extra_env: Vec::new(),
+                initial_command: None,
+            })
+        };
+        let title_of = |resp: DaemonResponse| match resp {
+            DaemonResponse::SessionAttached(res) => res.title,
+            other => panic!("expected SessionAttached, got {other:?}"),
+        };
+        // Fresh s- ids get a human birth name, never the raw id.
+        let first = title_of(spawn("s-1786150000000-11")).expect("birth title");
+        assert!(!crate::pty::friendly_name::is_synthetic_title(&first, "s-1786150000000-11"));
+        // Reattach returns the same title back.
+        assert_eq!(title_of(spawn("s-1786150000000-11")), Some(first.clone()));
+        // A second pane gets its own word.
+        let second = title_of(spawn("s-1786150000000-12")).expect("second birth title");
+        assert_ne!(first, second);
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "s-1786150000000-11".into()
+            }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "s-1786150000000-12".into()
+            }),
             DaemonResponse::Ok
         );
     }

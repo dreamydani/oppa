@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ChevronDown, X, GitBranch, Maximize2, Minimize2 } from "lucide-react";
 import { useTerminalStore } from "../store/terminalStore";
+import { ptySetTitle } from "../lib/pty/transport";
 import type { SessionInfo } from "../store/terminalStore";
 import type { Path } from "../lib/pane-manager/layout";
 import type { DropZone } from "../lib/pane-manager/layout";
@@ -97,6 +98,8 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   const session = useTerminalStore((s) => s.sessions[id]);
   const worktrees = useTerminalStore((s) => s.worktrees);
   const renameSession = useTerminalStore((s) => s.renameSession);
+  const setTitlePinned = useTerminalStore((s) => s.setTitlePinned);
+  const resetSessionTitle = useTerminalStore((s) => s.resetSessionTitle);
   const dismissSessionRestoredBanner = useTerminalStore((s) => s.dismissSessionRestoredBanner);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
   const toggleMaximizePane = useTerminalStore((s) => s.toggleMaximizePane);
@@ -151,17 +154,21 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   }, [isEditing]);
 
   const startRename = useCallback(() => {
-    setEditTitle(session?.title || "oppa");
+    // WHY displayTitle: the stored title may be the raw s- id; never leak it into the input.
+    setEditTitle(displayTitle);
     setIsEditing(true);
-  }, [session?.title]);
+  }, [displayTitle]);
 
   const handleSave = useCallback(() => {
     const next = editTitle.trim();
     if (next && next !== session?.title) {
       renameSession(id, next);
+      setTitlePinned(id, true);
+      // WHY daemon push: the daemon owns auto titles; without the pin it would overwrite this rename.
+      void ptySetTitle(id, next).catch(() => {});
     }
     setIsEditing(false);
-  }, [editTitle, id, renameSession, session?.title]);
+  }, [editTitle, id, renameSession, session?.title, setTitlePinned]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -170,11 +177,11 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         handleSave();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        setEditTitle(session?.title || "oppa");
+        setEditTitle(displayTitle);
         setIsEditing(false);
       }
     },
-    [handleSave, session?.title]
+    [handleSave, displayTitle]
   );
 
   const handleOpenInBrowser = useCallback(() => {
@@ -390,7 +397,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         ) : (
           <span
             className="terminal-pane-header-title terminal-pane-title"
-            title="Click to rename pane"
+            title={session?.cwd ? `Click to rename pane · ${session.cwd}` : "Click to rename pane"}
             onClick={startRename}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -501,6 +508,18 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
             >
               Rename Pane
             </button>
+            {session?.titlePinned && (
+              <button
+                className="terminal-pane-header-menu-item"
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  void resetSessionTitle(id);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                Reset to automatic
+              </button>
+            )}
             <button
               className="terminal-pane-header-menu-item"
               onClick={splitNewBranch}
