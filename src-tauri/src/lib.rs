@@ -12,6 +12,7 @@ pub mod layout;
 pub mod pty;
 pub mod settings;
 pub mod updater;
+pub mod voice;
 mod workspace_presets;
 
 use pty::manager::PtyManager;
@@ -107,7 +108,8 @@ pub fn run() {
         // Process plugin (relaunch after install) is channel-independent.
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
-        .manage(browser::manager::BrowserManager::new());
+        .manage(browser::manager::BrowserManager::new())
+        .manage(voice::commands::VoiceState::new());
     // The updater is stable+rc-only: a dev build NEVER checks for updates,
     // so the plugin (which would add its own update-check commands) is not
     // registered on dev. `Channel::current()` is compile-time, so the
@@ -182,6 +184,17 @@ pub fn run() {
             layout::confirm_save_complete,
             settings::save_settings,
             settings::load_settings,
+            voice::commands::voice_get_catalog,
+            voice::commands::voice_get_model_states,
+            voice::commands::voice_download_model,
+            voice::commands::voice_cancel_download,
+            voice::commands::voice_delete_model,
+            voice::commands::voice_start_dictation,
+            voice::commands::voice_feed_audio,
+            voice::commands::voice_stop_dictation,
+            voice::commands::voice_get_key_status,
+            voice::commands::voice_save_key,
+            voice::commands::voice_clear_key,
             fs::fs_read_dir,
             fs::fs_read_file,
             fs::fs_write_file,

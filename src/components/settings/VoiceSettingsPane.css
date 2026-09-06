@@ -97,3 +97,25 @@
   color: var(--muted-foreground, #8e8e93);
   white-space: nowrap;
 }
+
+.voice-model-download {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent, #4f8cff);
+  background: transparent;
+  color: var(--accent, #4f8cff);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-model-download:hover:not(:disabled) {
+  background: var(--bg-selected, rgba(79, 140, 255, 0.12));
+}
+
+.voice-model-download:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

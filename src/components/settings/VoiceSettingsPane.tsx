@@ -1,151 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import type { DictationMode, SpeechModelManifest } from "../../lib/voice/voiceTypes";
+import { onVoiceDownloadProgress } from "../../lib/voice/transport";
+import type {
+  DictationMode,
+  SpeechModelManifest,
+  SpeechModelState,
+} from "../../lib/voice/voiceTypes";
 import "./GeneralSettingsPane.css";
 import "./VoiceSettingsPane.css";
-
-// Slice 1 stub: static catalog mirroring Orca's model-catalog entries
-// (ids, labels, descriptions, sizes). Replaced by the live backend catalog
-// in Slice 2/4; download/delete actions stay disabled until then.
-export const STUB_VOICE_CATALOG: SpeechModelManifest[] = [
-  {
-    id: "parakeet-tdt-0.6b-v3-int8",
-    label: "Parakeet TDT v3",
-    description: "Highest accuracy for 25 European languages. Punctuation, capitalization, and word-level timestamps.",
-    type: "transducer",
-    provider: "local",
-    language: "multilingual",
-    sizeBytes: 670478772,
-    sampleRate: 16000,
-    streaming: false,
-    modelingUnit: "bpe",
-    recommended: true,
-  },
-  {
-    id: "parakeet-tdt-0.6b-v2-int8",
-    label: "Parakeet TDT v2",
-    description: "English only. Faster than v3 with similar accuracy. Punctuation and capitalization.",
-    type: "transducer",
-    provider: "local",
-    language: "en",
-    sizeBytes: 661190513,
-    sampleRate: 16000,
-    streaming: false,
-    modelingUnit: "bpe",
-  },
-  {
-    id: "zipformer-bilingual-zh-en",
-    label: "Zipformer Bilingual",
-    description: "Chinese + English with code-switching. Low-latency real-time streaming.",
-    type: "transducer",
-    provider: "local",
-    language: "zh-en",
-    sizeBytes: 356862456,
-    sampleRate: 16000,
-    streaming: true,
-    modelingUnit: "cjkchar+bpe",
-  },
-  {
-    id: "paraformer-bilingual-zh-en",
-    label: "Paraformer Bilingual",
-    description: "Chinese (Mandarin + dialects) + English. Strong on accented and regional Chinese.",
-    type: "paraformer",
-    provider: "local",
-    language: "zh-en",
-    sizeBytes: 237202501,
-    sampleRate: 16000,
-    streaming: true,
-  },
-  {
-    id: "zipformer-streaming-en-20m",
-    label: "Zipformer Streaming EN",
-    description: "English only. Lightweight 20M-param model, good balance of speed and size.",
-    type: "transducer",
-    provider: "local",
-    language: "en",
-    sizeBytes: 91928372,
-    sampleRate: 16000,
-    streaming: true,
-    modelingUnit: "bpe",
-  },
-  {
-    id: "zipformer-streaming-zh-14m",
-    label: "Zipformer Streaming ZH",
-    description: "Chinese only. Ultra-lightweight 14M-param model, ideal for low-resource devices.",
-    type: "transducer",
-    provider: "local",
-    language: "zh",
-    sizeBytes: 55716588,
-    sampleRate: 16000,
-    streaming: true,
-    modelingUnit: "cjkchar",
-  },
-  {
-    id: "zipformer-streaming-korean",
-    label: "Zipformer Streaming KO",
-    description: "Korean only. Low-latency real-time streaming.",
-    type: "transducer",
-    provider: "local",
-    language: "ko",
-    sizeBytes: 132455201,
-    sampleRate: 16000,
-    streaming: true,
-    modelingUnit: "bpe",
-  },
-  {
-    id: "parakeet-tdt-ctc-0.6b-ja-int8",
-    label: "Parakeet TDT-CTC JA",
-    description: "Japanese only. Trained on 35k+ hours of natural speech. Punctuation included.",
-    type: "nemo-ctc",
-    provider: "local",
-    language: "ja",
-    sizeBytes: 655571161,
-    sampleRate: 16000,
-    streaming: false,
-  },
-  {
-    id: "whisper-tiny",
-    label: "Whisper Tiny",
-    description: "90+ languages. Lower accuracy than Parakeet but broadest language coverage.",
-    type: "whisper",
-    provider: "local",
-    language: "multilingual",
-    sizeBytes: 152969611,
-    sampleRate: 16000,
-    streaming: false,
-  },
-  {
-    id: "sense-voice-zh-en-ja-ko-yue",
-    label: "SenseVoice",
-    description: "Chinese, English, Japanese, Korean, and Cantonese with automatic language detection.",
-    type: "senseVoice",
-    provider: "local",
-    language: "multilingual",
-    sizeBytes: 239549735,
-    sampleRate: 16000,
-    streaming: false,
-  },
-  {
-    id: "openai-gpt-4o-mini-transcribe",
-    label: "GPT-4o mini Transcribe",
-    description: "Cloud transcription with strong accuracy and low cost. Requires an OpenAI API key.",
-    type: "openai",
-    provider: "openai",
-    language: "multilingual",
-    sampleRate: 16000,
-    streaming: false,
-  },
-  {
-    id: "openai-gpt-4o-transcribe",
-    label: "GPT-4o Transcribe",
-    description: "Cloud transcription with higher accuracy. Requires an OpenAI API key.",
-    type: "openai",
-    provider: "openai",
-    language: "multilingual",
-    sampleRate: 16000,
-    streaming: false,
-  },
-];
 
 function formatModelSize(sizeBytes?: number): string {
   if (sizeBytes === undefined) return "";
@@ -153,15 +15,120 @@ function formatModelSize(sizeBytes?: number): string {
   return mb >= 100 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
 }
 
+function statusLabel(state: SpeechModelState | undefined, progress?: number): string {
+  if (!state || state.status === "not-downloaded") return "Not downloaded";
+  if (state.status === "downloading") {
+    const pct = Math.round(((progress ?? state.progress) ?? 0) * 100);
+    return `${pct}%`;
+  }
+  if (state.status === "extracting") return "Extracting...";
+  if (state.status === "ready") return "Ready";
+  return state.error ? `Error: ${state.error}` : "Error";
+}
+
 interface MicDevice {
   deviceId: string;
   label: string;
 }
 
+function ModelRow({
+  model,
+  state,
+  selected,
+  downloading,
+  onSelect,
+  onDownload,
+}: {
+  model: SpeechModelManifest;
+  state: SpeechModelState | undefined;
+  selected: boolean;
+  downloading: boolean;
+  onSelect: () => void;
+  onDownload: () => void;
+}): React.ReactElement {
+  const showDownload =
+    model.provider === "local" &&
+    (!state || state.status === "not-downloaded" || state.status === "error");
+  return (
+    <div
+      role="radio"
+      tabIndex={0}
+      aria-checked={selected}
+      aria-label={`${model.label}${model.recommended ? ", recommended" : ""}`}
+      className={`voice-model-row ${selected ? "selected" : ""}`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+    >
+      <span className="voice-model-main">
+        <span className="voice-model-label">
+          {model.provider === "openai" && (
+            <span className="voice-model-cloud" aria-hidden="true">☁</span>
+          )}
+          {model.label}
+          {model.recommended && <span className="voice-model-badge recommended">Recommended</span>}
+        </span>
+        <span className="voice-model-desc">{model.description}</span>
+      </span>
+      <span className="voice-model-meta">
+        <span className="voice-model-badge">{model.streaming ? "Streaming" : "Offline"}</span>
+        <span className="voice-model-badge">{model.language}</span>
+        {model.sizeBytes !== undefined && (
+          <span className="voice-model-size">{formatModelSize(model.sizeBytes)}</span>
+        )}
+        {showDownload ? (
+          <button
+            type="button"
+            aria-label={`Download ${model.label}`}
+            className="voice-model-download"
+            disabled={downloading}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload();
+            }}
+          >
+            Download
+          </button>
+        ) : (
+          <span className="voice-model-status">
+            {downloading ? statusLabel(state, state?.progress) : statusLabel(state)}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 export function VoiceSettingsPane(): React.ReactElement {
   const voice = useTerminalStore((s) => s.settings.voice);
   const updateSettings = useTerminalStore((s) => s.updateSettings);
+  const catalog = useTerminalStore((s) => s.catalog);
+  const modelStates = useTerminalStore((s) => s.modelStates);
+  const refreshCatalog = useTerminalStore((s) => s.refreshCatalog);
+  const refreshModelStates = useTerminalStore((s) => s.refreshModelStates);
+  const downloadModel = useTerminalStore((s) => s.downloadModel);
+  const applyModelProgress = useTerminalStore((s) => s.applyModelProgress);
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
+
+  // Catalog + states come from the backend; progress events patch the store
+  // directly so a download storm never triggers a re-fetch loop.
+  useEffect(() => {
+    void refreshCatalog();
+    void refreshModelStates();
+    let unlisten: (() => void) | null = null;
+    void onVoiceDownloadProgress(({ modelId, progress }) => {
+      applyModelProgress(modelId, progress);
+    }).then((fn) => {
+      unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      unlisten?.();
+    };
+  }, [refreshCatalog, refreshModelStates, applyModelProgress]);
 
   // List already-permitted devices for the picker; no new permission prompt
   // in this slice (live capture + permission flow arrive in Slice 3).
@@ -223,6 +190,14 @@ export function VoiceSettingsPane(): React.ReactElement {
   const setModel = (modelId: string) => {
     updateSettings({ voice: { sttModel: modelId } });
   };
+
+  const handleDownload = (modelId: string) => {
+    // Backend owns the terminal state; failures surface as the row's error
+    // status via refresh (no toast infra in settings).
+    void downloadModel(modelId).catch(() => {});
+  };
+
+  const stateById = new Map(modelStates.map((s) => [s.id, s]));
 
   // Preferred device currently unplugged — keep its cached label visible.
   const preferredMissing =
@@ -338,45 +313,25 @@ export function VoiceSettingsPane(): React.ReactElement {
               Speech Model
             </h3>
 
-            <p className="voice-stub-note" role="note">
-              Model downloads arrive in the next slice — selecting a model below saves your choice but does not download anything yet.
-            </p>
-
-            <div className="voice-model-list" role="radiogroup" aria-label="Speech model">
-              {STUB_VOICE_CATALOG.map((model) => {
-                const selected = voice.sttModel === model.id;
-                return (
-                  <button
+            {catalog.length === 0 ? (
+              <p className="voice-stub-note" role="note">
+                Loading speech models from the backend…
+              </p>
+            ) : (
+              <div className="voice-model-list" role="radiogroup" aria-label="Speech model">
+                {catalog.map((model) => (
+                  <ModelRow
                     key={model.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-label={`${model.label}${model.recommended ? ", recommended" : ""}`}
-                    className={`voice-model-row ${selected ? "selected" : ""}`}
-                    onClick={() => setModel(model.id)}
-                  >
-                    <span className="voice-model-main">
-                      <span className="voice-model-label">
-                        {model.provider === "openai" && (
-                          <span className="voice-model-cloud" aria-hidden="true">☁</span>
-                        )}
-                        {model.label}
-                        {model.recommended && <span className="voice-model-badge recommended">Recommended</span>}
-                      </span>
-                      <span className="voice-model-desc">{model.description}</span>
-                    </span>
-                    <span className="voice-model-meta">
-                      <span className="voice-model-badge">{model.streaming ? "Streaming" : "Offline"}</span>
-                      <span className="voice-model-badge">{model.language}</span>
-                      {model.sizeBytes !== undefined && (
-                        <span className="voice-model-size">{formatModelSize(model.sizeBytes)}</span>
-                      )}
-                      <span className="voice-model-status">Not downloaded</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                    model={model}
+                    state={stateById.get(model.id)}
+                    selected={voice.sttModel === model.id}
+                    downloading={stateById.get(model.id)?.status === "downloading"}
+                    onSelect={() => setModel(model.id)}
+                    onDownload={() => handleDownload(model.id)}
+                  />
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="settings-card" aria-labelledby="heading-voice-openai">
