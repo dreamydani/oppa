@@ -263,6 +263,30 @@ describe("TerminalPaneHeader", () => {
     expect(screen.getByText("Terminal 1")).toBeTruthy();
   });
 
+  it("rename input shows the display title, never the raw s- session id", () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-1786150000000-1": {
+          id: "s-1786150000000-1",
+          title: "s-1786150000000-1",
+          status: "running",
+          cols: 80,
+          rows: 24,
+          cwd: "C:/repos/oppa",
+        },
+      },
+    });
+
+    render(<TerminalPaneHeader id="s-1786150000000-1" path={[]} />);
+
+    // Header hides the synthetic id and shows the cwd basename.
+    fireEvent.click(screen.getByText("oppa"));
+
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    expect(input.value).toBe("oppa");
+    expect(input.value).not.toContain("s-1786150000000-1");
+  });
+
   it("toggles maximize and restore pane state", () => {
     const { rerender } = render(<TerminalPaneHeader id="s1" path={[]} />);
 

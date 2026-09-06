@@ -151,9 +151,10 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   }, [isEditing]);
 
   const startRename = useCallback(() => {
-    setEditTitle(session?.title || "oppa");
+    // WHY displayTitle: the stored title may be the raw s- id; never leak it into the input.
+    setEditTitle(displayTitle);
     setIsEditing(true);
-  }, [session?.title]);
+  }, [displayTitle]);
 
   const handleSave = useCallback(() => {
     const next = editTitle.trim();
@@ -170,11 +171,11 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
         handleSave();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        setEditTitle(session?.title || "oppa");
+        setEditTitle(displayTitle);
         setIsEditing(false);
       }
     },
-    [handleSave, session?.title]
+    [handleSave, displayTitle]
   );
 
   const handleOpenInBrowser = useCallback(() => {

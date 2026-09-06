@@ -21,6 +21,7 @@ use crate::git::worktrees::{
     worktree_set, worktree_show, WorktreeCreateRequest,
 };
 use crate::pty::daemon_session::DaemonSession;
+use crate::pty::friendly_name::{is_synthetic_title, pick_friendly_name};
 use crate::pty::ipc_protocol::{
     sanitize_session_title, CreateOrAttachResult, DaemonEvent, DaemonRequest, DaemonResponse,
     FleetSlot, FleetSlotResult, WorktreePsEntry, DAEMON_PROTOCOL_VERSION,
@@ -103,6 +104,7 @@ impl DaemonServer {
                         worktree_id: session.worktree_id().map(str::to_string),
                         working: session.working_state(),
                         agent_status: session.agent_status(),
+                        title: session.title(),
                     })
                 } else {
                     // Cold restore: consult the disk checkpoint for agent resume state
@@ -156,6 +158,20 @@ impl DaemonServer {
                             let session_cwd = session.cwd();
                             let worktree_id = session.worktree_id().map(str::to_string);
                             let working = session.working_state();
+                            // Birth name: restored user titles survive, synthetic
+                            // s- ids drop in favor of a fresh friendly word.
+                            let birth = checkpoint
+                                .as_ref()
+                                .and_then(|snap| snap.title.clone())
+                                .filter(|t| !is_synthetic_title(t, &session_id))
+                                .unwrap_or_else(|| {
+                                    pick_friendly_name(&session_id, &|cand| {
+                                        sessions.values().any(|s| {
+                                            s.title().as_deref() == Some(cand)
+                                        })
+                                    })
+                                });
+                            session.seed_birth_title(birth.clone());
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
                             }
@@ -175,6 +191,7 @@ impl DaemonServer {
                                 agent_status: checkpoint
                                     .as_ref()
                                     .and_then(|snap| snap.agent_status.clone()),
+                                title: Some(birth),
                             })
                         }
                         Err(e) => DaemonResponse::Error(e),
@@ -949,6 +966,48 @@ mod tests {
         );
         assert_eq!(
             server.handle_request(DaemonRequest::UpgradeIfIdle),
+            DaemonResponse::Ok
+        );
+    }
+
+    #[test]
+    fn create_or_attach_seeds_friendly_birth_title() {
+        let server = DaemonServer::new();
+        let spawn = |session_id: &str| {
+            server.handle_request(DaemonRequest::CreateOrAttach {
+                session_id: session_id.into(),
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                shell: None,
+                resume_agents: false,
+                worktree_id: None,
+                extra_env: Vec::new(),
+                initial_command: None,
+            })
+        };
+        let title_of = |resp: DaemonResponse| match resp {
+            DaemonResponse::SessionAttached(res) => res.title,
+            other => panic!("expected SessionAttached, got {other:?}"),
+        };
+        // Fresh s- ids get a human birth name, never the raw id.
+        let first = title_of(spawn("s-1786150000000-11")).expect("birth title");
+        assert!(!crate::pty::friendly_name::is_synthetic_title(&first, "s-1786150000000-11"));
+        // Reattach returns the same title back.
+        assert_eq!(title_of(spawn("s-1786150000000-11")), Some(first.clone()));
+        // A second pane gets its own word.
+        let second = title_of(spawn("s-1786150000000-12")).expect("second birth title");
+        assert_ne!(first, second);
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "s-1786150000000-11".into()
+            }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "s-1786150000000-12".into()
+            }),
             DaemonResponse::Ok
         );
     }

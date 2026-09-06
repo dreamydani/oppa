@@ -155,6 +155,8 @@ pub struct PtySpawnResultPayload {
     pub resume_declined_reason: Option<String>,
     // Mirrors CreateOrAttachResult.working so warm reattach hydrates dots
     pub working: bool,
+    // Birth name seeded at spawn so panes never show raw s- ids
+    pub title: Option<String>,
 }
 
 /// Spawn or reattach to a PTY session running in the background daemon.
@@ -265,6 +267,7 @@ pub fn pty_spawn(
         }),
         resume_declined_reason: attach_res.resume_declined_reason,
         working: attach_res.working,
+        title: attach_res.title,
     })
 }
 
@@ -498,6 +501,7 @@ mod tests {
             resume: None,
             resume_declined_reason: None,
             working: true,
+            title: Some("fox".into()),
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"id\":\"s1\""));

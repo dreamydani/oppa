@@ -242,6 +242,54 @@ describe("terminalStore", () => {
     expect(session.isRestored).toBeUndefined();
   });
 
+  it("spawnSession uses the daemon birth title when provided", async () => {
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-1-1"), title: "fox" });
+    const id = await useTerminalStore.getState().spawnSession();
+    expect(useTerminalStore.getState().sessions[id].title).toBe("fox");
+  });
+
+  it("spawnSession falls back to a friendly name when the daemon omits the title", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s-1786150000000-9"));
+    const id = await useTerminalStore.getState().spawnSession();
+    const title = useTerminalStore.getState().sessions[id].title;
+    expect(title).not.toBe(id);
+    expect(title.startsWith("s-")).toBe(false);
+  });
+
+  it("spawnSession replaces a synthetic existing title on reattach", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-keep": {
+          id: "s-keep",
+          title: "s-keep",
+          status: "sleeping",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-keep"), is_new: false, title: "heron" });
+    const id = await useTerminalStore.getState().spawnSession(undefined, undefined, "s-keep");
+    expect(useTerminalStore.getState().sessions[id].title).toBe("heron");
+  });
+
+  it("spawnSession keeps a user title across reattach", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-mine": {
+          id: "s-mine",
+          title: "Build Output",
+          status: "sleeping",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-mine"), is_new: false, title: "fox" });
+    const id = await useTerminalStore.getState().spawnSession(undefined, undefined, "s-mine");
+    expect(useTerminalStore.getState().sessions[id].title).toBe("Build Output");
+  });
+
   it("spawnSession sends resumeAgents:false when auto-resume setting is disabled", async () => {
     useTerminalStore.setState({
       settings: {

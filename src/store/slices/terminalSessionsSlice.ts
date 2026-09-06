@@ -10,6 +10,7 @@ import {
 } from "../../lib/pty/transport";
 import type { PtySpawnOptions } from "../../lib/pty/transport";
 import { substituteLeafId } from "../../lib/pane-manager/layout";
+import { isSyntheticTitle, pickFriendlyName } from "../../lib/terminal/friendlyNames";
 import { applyCachedScrollbackBudget } from "../../lib/terminal/scrollbackBudget";
 import type { TerminalState } from "../terminalStore";
 import { getSyncedTabs } from "./layoutQueries";
@@ -200,12 +201,25 @@ export function createSessionsSlice(
 
         set((state) => {
           const existingSession = state.sessions[id];
+          const daemonTitle = typeof res !== "string" ? (res.title ?? null) : null;
+          const usable = (t: string | null | undefined): t is string =>
+            !!t && !isSyntheticTitle(t, id);
+          // WHY birth chain: kept user titles win, daemon seeds cover live
+          // sessions, local picks cover old daemons and web-dev spawns.
+          const title = usable(existingSession?.title)
+            ? existingSession.title
+            : usable(daemonTitle)
+              ? daemonTitle
+              : pickFriendlyName(
+                  id,
+                  new Set(Object.values(state.sessions).map((s) => s.title)),
+                );
           return {
             sessions: {
               ...state.sessions,
               [id]: {
                 id,
-                title: existingSession?.title || id,
+                title,
                 status: "running",
                 cwd: resolvedCwd || existingSession?.cwd,
                 cols,

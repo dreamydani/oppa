@@ -61,6 +61,8 @@ export interface PtySpawnResult {
   working?: boolean;
   // Hydrates the last hook-classified rich status on warm/cold reattach
   agent_status?: AgentStatusEntry | null;
+  // Birth name seeded at spawn so panes never show raw s- ids
+  title?: string | null;
 }
 
 // Type alias (not interface) so it satisfies InvokeArgs' index signature.

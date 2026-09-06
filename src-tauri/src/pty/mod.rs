@@ -9,6 +9,7 @@ pub mod daemon_client;
 pub mod daemon_server;
 pub mod daemon_session;
 pub mod daemon_spawner;
+pub mod friendly_name;
 pub mod ipc_protocol;
 pub mod manager;
 pub mod osc_scanner;

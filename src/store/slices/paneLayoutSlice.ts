@@ -23,6 +23,7 @@ import {
 } from "../../lib/layout/transport";
 import { getSavedWindowState, applyWindowState } from "../../lib/window/transport";
 import type { WindowState } from "../../lib/window/transport";
+import { isSyntheticTitle } from "../../lib/terminal/friendlyNames";
 import type { EditorTab, EditorViewMode } from "./codeEditorSlice";
 import type { AppMode, DevicePreset } from "./browserPaneSlice";
 import type { TerminalState } from "../terminalStore";
@@ -1187,7 +1188,11 @@ export function createPaneLayoutSlice(
               }
 
               if (savedSession?.title && savedSession.title !== newId) {
-                get().renameSession(newId, savedSession.title);
+                // WHY migration: synthetic s- titles drop so the fresh birth
+                // name survives; kept user titles re-apply as before.
+                if (!isSyntheticTitle(savedSession.title, oldId)) {
+                  get().renameSession(newId, savedSession.title);
+                }
               }
 
               const prev = await loadScrollback(oldId);
@@ -1319,7 +1324,10 @@ export function createPaneLayoutSlice(
               }
 
               if (savedSession?.title && savedSession.title !== newId) {
-                get().renameSession(newId, savedSession.title);
+                // WHY migration: synthetic s- titles drop so the fresh birth name survives.
+                if (!isSyntheticTitle(savedSession.title, oldId)) {
+                  get().renameSession(newId, savedSession.title);
+                }
               }
 
               const prev = await loadScrollback(oldId);

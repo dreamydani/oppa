@@ -769,6 +769,7 @@ fn sample_attached() -> CreateOrAttachResult {
         worktree_id: Some("repo::C:/ws/feat-a".into()),
         working: true,
         agent_status: None,
+        title: None,
     }
 }
 

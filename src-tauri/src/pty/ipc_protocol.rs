@@ -61,6 +61,10 @@ pub struct CreateOrAttachResult {
     // Additive MVP-status field: last hook-classified truth for instant pills
     #[serde(default)]
     pub agent_status: Option<crate::agents::status::AgentStatusEntry>,
+    // Birth name seeded at spawn so panes never show raw s- ids; defaulted so
+    // old daemons/clients keep interoperating
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 // Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
@@ -624,6 +628,7 @@ mod tests {
             worktree_id: None,
             working: false,
             agent_status: None,
+            title: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -662,6 +667,7 @@ mod tests {
                 worktree_id: None,
                 working: true,
                 agent_status: None,
+                title: None,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -1142,6 +1148,7 @@ mod tests {
             worktree_id: None,
             working: false,
             agent_status: None,
+            title: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");

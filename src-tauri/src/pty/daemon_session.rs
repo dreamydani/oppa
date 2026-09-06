@@ -54,6 +54,8 @@ pub struct DaemonSession {
     pub worktree_id: Option<String>,
     // Tab-title sync: set via SetSessionTitle, mirrored into checkpoints
     pub title: Mutex<Option<String>>,
+    // Birth name for idle panes + revert target after foreground work ends
+    pub idle_title: Mutex<String>,
     env_bindings: Vec<(String, String)>,
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
@@ -244,6 +246,7 @@ impl DaemonSession {
                 .find(|(k, _)| k == "OPPA_WORKTREE_ID")
                 .map(|(_, v)| v.clone()),
             title: Mutex::new(None),
+            idle_title: Mutex::new(String::new()),
             env_bindings: applied_bindings,
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
@@ -661,6 +664,16 @@ impl DaemonSession {
 
     pub fn set_title(&self, title: String) {
         *self.title.lock() = Some(title);
+    }
+
+    // Birth-name seed: title + idle word together so fresh panes never show s- ids.
+    pub fn seed_birth_title(&self, title: String) {
+        *self.idle_title.lock() = title.clone();
+        *self.title.lock() = Some(title);
+    }
+
+    pub fn idle_title(&self) -> String {
+        self.idle_title.lock().clone()
     }
 
     /// Command currently running in the foreground, per OSC 133 C/D markers.
