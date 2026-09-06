@@ -65,30 +65,25 @@ describe("zoom transport", () => {
     await expect(applyUiZoom(1.0)).resolves.not.toThrow();
   });
 
-  it("scales #root with compensated size when WebView API is unavailable (browser dev)", async () => {
+  it("zooms the root element when WebView API is unavailable (browser dev)", async () => {
     vi.mocked(getCurrentWebview).mockImplementationOnce(() => {
       throw new Error("Tauri API not available");
     });
 
     await applyUiZoom(0.8);
 
-    // transform scale + inverse layout size keeps the app filling the window.
-    expect(rootEl.style.transform).toBe("scale(0.8)");
-    expect(rootEl.style.width).toBe("125%");
-    expect(rootEl.style.height).toBe("125%");
+    // Real browsers treat root zoom like page zoom: viewport-unit layouts
+    // (100vw/100vh) still fill the window, so no gutters at 80%.
+    expect(document.documentElement.style.zoom).toBe("0.8");
   });
 
-  it("clears the browser fallback when WebView zoom succeeds", async () => {
-    rootEl.style.transform = "scale(0.8)";
-    rootEl.style.width = "125%";
-    rootEl.style.height = "125%";
+  it("clears root zoom when WebView zoom succeeds (native zoom owns it)", async () => {
+    document.documentElement.style.zoom = "0.8";
     mockSetZoom.mockResolvedValueOnce(undefined);
 
     await applyUiZoom(1.0);
 
     expect(mockSetZoom).toHaveBeenCalledWith(1.0);
-    expect(rootEl.style.transform).toBe("");
-    expect(rootEl.style.width).toBe("");
-    expect(rootEl.style.height).toBe("");
+    expect(document.documentElement.style.zoom).toBe("");
   });
 });

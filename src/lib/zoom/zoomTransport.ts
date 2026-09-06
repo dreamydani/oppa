@@ -1,31 +1,7 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
-// Browser-dev fallback (no Tauri webview under `pnpm dev`): transform-scale
-// #root with inverse layout compensation so the app still fills the window
-// instead of leaving gutters (80%) or clipping (110%+).
-function applyBrowserFallback(factor: number): void {
-  if (typeof document === "undefined") return;
-  const root = document.getElementById("root");
-  if (!root) return;
-  if (factor === 1) {
-    root.style.transform = "";
-    root.style.transformOrigin = "";
-    root.style.width = "";
-    root.style.height = "";
-    return;
-  }
-  const percent = 100 / factor;
-  root.style.transform = `scale(${factor})`;
-  root.style.transformOrigin = "top left";
-  root.style.width = `${percent}%`;
-  root.style.height = `${percent}%`;
-  // Nudge observers (xterm fit) that don't track CSS transforms.
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("resize"));
-  }
-}
-
-function clearBrowserFallback(): void {
+// Clear stale #root scale leftovers from the short-lived transform fallback.
+function clearRootScaleFallback(): void {
   if (typeof document === "undefined") return;
   const root = document.getElementById("root");
   if (!root) return;
@@ -46,8 +22,21 @@ export async function applyUiZoom(factor: number): Promise<void> {
   }
   try {
     await getCurrentWebview().setZoom(factor);
-    clearBrowserFallback();
+    // Native zoom owns scaling: root CSS zoom must stay off or they stack.
+    if (typeof document !== "undefined") {
+      document.documentElement.style.zoom = "";
+    }
+    clearRootScaleFallback();
   } catch {
-    applyBrowserFallback(factor);
+    // No Tauri webview under `pnpm dev`: real browsers treat root zoom like
+    // page zoom, so viewport-unit layouts keep filling the window. (A scaled
+    // inner element would gutter because 100vw/100vh ignore its transform.)
+    if (typeof document !== "undefined") {
+      document.documentElement.style.zoom = String(factor);
+    }
+    clearRootScaleFallback();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("resize"));
+    }
   }
 }

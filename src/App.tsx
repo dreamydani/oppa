@@ -105,11 +105,8 @@ function App() {
     if (appearance.appFontFamily) {
       document.documentElement.style.setProperty("--font-sans", appearance.appFontFamily);
     }
-    // WebView-level zoom (Orca parity): scales the viewport so 100vw layouts
-    // still fill the window. Never zoom <html> itself (gutters/clipping).
-    if (document.documentElement.style.zoom) {
-      document.documentElement.style.zoom = "";
-    }
+    // WebView-level zoom (Orca parity) via zoomTransport, which owns root
+    // zoom state: native WebView zoom under Tauri, root CSS zoom in browser.
     if (appearance.uiZoom) {
       void applyUiZoom(appearance.uiZoom);
     }

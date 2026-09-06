@@ -962,7 +962,7 @@ describe("App", () => {
     });
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    // WebView-level zoom (Orca parity): never zoom the root element itself.
+    // Zoom ownership lives in zoomTransport (mocked here): App never touches it.
     expect(document.documentElement.style.zoom).toBe("");
     expect(applyUiZoom).toHaveBeenCalledWith(1.1);
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("Inter, sans-serif");
@@ -983,10 +983,11 @@ describe("App", () => {
 
   it("flushes pending settings on app:before-close before confirming save", async () => {
     const { listen } = await import("@tauri-apps/api/event");
-    const handlers = new Map<string, () => Promise<void>>();
-    vi.mocked(listen).mockImplementation(async (event: string, cb: () => Promise<void>) => {
-      handlers.set(event, cb);
-      return vi.fn();
+    const handlers = new Map<string, (e?: unknown) => unknown>();
+    vi.mocked(listen).mockImplementation(async (event, cb) => {
+      handlers.set(event as string, cb as (e?: unknown) => unknown);
+      const unlisten = () => {};
+      return unlisten;
     });
     const flushSpy = vi.spyOn(useTerminalStore.getState(), "flushSettings").mockResolvedValue(undefined);
 
