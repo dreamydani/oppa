@@ -5,6 +5,7 @@ import { leafIds } from "../../store/slices/layoutQueries";
 import { findLeafPath, focus } from "../../lib/pane-manager/layout";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
+import { AgentWorkingDots } from "./AgentWorkingDots";
 import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
 import { ChevronDown, Folder, Pin, Sparkles } from "lucide-react";
 import "./workspace-list.css";
@@ -73,7 +74,6 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
     : data.tab.title || "Workspace";
   const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
-  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
   const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
 
   // Pinned sessions float to the top of their folder; the rest keep order.
@@ -180,20 +180,17 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
           )}
           {sortedRows.map((row, rowIndex) => {
             const agentEntry = statusBySessionId[row.sessionId];
-            const unread = unreadBySessionId[row.sessionId] ?? false;
             const isWorking = workingBySessionId[row.sessionId] ?? false;
             const isFocusedLeaf = data.isActive && row.sessionId === activeSessionId;
             const age = relativeAge(agentEntry?.state_started_at_ms);
             const isPinned = pinnedSessionIds.has(row.sessionId);
-            // State mapping: focused=blue, working=pulsing indigo, done=green,
-            // blocked=red, waiting=amber, idle=indigo, exited(stopped)=grey.
-            const state = agentEntry
-              ? agentEntry.state
-              : row.exited
-                ? "exited"
-                : isWorking
-                  ? "working"
-                  : "idle";
+            // Sidebar shows exactly two states: working (animated dot-grid
+            // loader) and done (green dot). Idle, exited, blocked, and waiting
+            // render no indicator so quiet rows stay visually silent.
+            const isWorkingState =
+              agentEntry?.state === "working" ||
+              (!agentEntry && !row.exited && isWorking);
+            const isDoneState = agentEntry?.state === "done";
 
             return (
               <div
@@ -209,11 +206,12 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 }}
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
-                {!isPinned && (
+                {!isPinned && isWorkingState && <AgentWorkingDots />}
+                {!isPinned && isDoneState && (
                   <span
-                    className={`ws-status-circle ${state}${isFocusedLeaf ? " focused" : ""}${unread ? " unread" : ""}`}
-                    title={`Status: ${state}`}
-                    aria-label={`Status: ${state}`}
+                    className="ws-status-circle done"
+                    title="Status: done"
+                    aria-label="Status: done"
                   />
                 )}
                 <button

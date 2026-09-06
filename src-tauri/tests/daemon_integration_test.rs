@@ -1628,7 +1628,87 @@ fn test_e2e_daemon_agent_status_hook_lifecycle_over_http() {
     let _ = session.kill();
 }
 
-// ---------- Task 8: session-safe restart verification (update-restart shape) ----------
+// Latency guard: a hook POST must land on the session event stream — the same
+// stream the GUI client subscribes to on attach — fast enough that sidebar
+// indicators feel instant. Guards against regressions that reclassify status
+// on a timer instead of edge-triggered hook delivery.
+#[test]
+fn test_agent_status_event_delivery_is_instant_not_polled() {
+    let sessions: Arc<
+        parking_lot::Mutex<HashMap<String, Arc<oppa_lib::pty::daemon_session::DaemonSession>>>,
+    > = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+    let sh = sh_path_for_working_test();
+    let session = oppa_lib::pty::daemon_session::DaemonSession::spawn_with_args(
+        "agent-status-latency-session".into(),
+        &sh,
+        &[],
+        None,
+        80,
+        24,
+        None,
+        &[],
+    )
+    .expect("spawn session for latency guard");
+    sessions
+        .lock()
+        .insert("agent-status-latency-session".into(), Arc::clone(&session));
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let server = rt
+        .block_on(oppa_lib::pty::agent_hook_server::AgentHookServer::start(
+            Arc::clone(&sessions),
+        ))
+        .expect("agent hook server started");
+
+    // Subscribe before the POST, mirroring the GUI wiring: the client is
+    // subscribed via session.subscribe() the moment a pane attaches.
+    let mut rx = session.subscribe();
+
+    let started = std::time::Instant::now();
+    post_hook(
+        "/hook/claude",
+        &serde_json::json!({
+            "pane_key": "agent-status-latency-session",
+            "token": server.token,
+            "payload": { "hook_event_name": "UserPromptSubmit", "prompt": "ship it" },
+        })
+        .to_string(),
+        server.port,
+    );
+
+    let deadline = started + Duration::from_secs(5);
+    let mut delivered = None;
+    while std::time::Instant::now() < deadline {
+        match rx.try_recv() {
+            Ok(event) => {
+                if let oppa_lib::pty::ipc_protocol::DaemonEvent::AgentStatusChanged {
+                    pane_key,
+                    entry,
+                } = event.as_ref()
+                {
+                    assert_eq!(pane_key, "agent-status-latency-session");
+                    assert_eq!(
+                        entry.state,
+                        oppa_lib::agents::status::AgentStatusState::Working
+                    );
+                    delivered = Some(started.elapsed());
+                    break;
+                }
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+        }
+    }
+    let elapsed = delivered.expect("AgentStatusChanged must arrive on the session stream");
+    assert!(
+        elapsed < Duration::from_millis(1000),
+        "hook status must reach the event stream instantly, took {elapsed:?}"
+    );
+
+    let _ = session.kill();
+}
 
 // Update restarts drop every GUI client while the daemon lives on. These
 // tests prove sessions survive that shape. They extend (not duplicate)

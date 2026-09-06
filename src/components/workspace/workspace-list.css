@@ -189,7 +189,8 @@
   user-select: none;
 }
 
-/* Status dot lives in the left gutter so titles align across rows. */
+/* Status dot lives in the left gutter so titles align across rows. Only the
+   done state keeps a dot: idle/exited/blocked/waiting render no indicator. */
 .ws-row .ws-status-circle {
   position: absolute;
   left: 8px;
@@ -253,44 +254,10 @@
   display: inline-block;
 }
 
-.ws-status-circle.focused {
-  background: var(--accent-blue, #58a6ff);
-  box-shadow: 0 0 5px rgba(88, 166, 255, 0.5);
-}
-
-.ws-status-circle.idle {
-  background: #6366f1;
-  box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
-}
-
-.ws-status-circle.working {
-  background: #818cf8;
-  box-shadow: 0 0 6px rgba(129, 140, 248, 0.6);
-  animation: wsCirclePulse 1.4s var(--ease-in-out) infinite;
-}
-
 .ws-status-circle.done {
-  background: #3fb950;
-  box-shadow: 0 0 4px rgba(63, 185, 80, 0.4);
-}
-
-.ws-status-circle.waiting {
-  background: #d29922;
-  box-shadow: 0 0 4px rgba(210, 153, 34, 0.4);
-}
-
-.ws-status-circle.blocked {
-  background: #f85149;
-  box-shadow: 0 0 4px rgba(248, 81, 73, 0.4);
-}
-
-.ws-status-circle.exited {
-  background: #4b5563;
-}
-
-@keyframes wsCirclePulse {
-  0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
-  50% { opacity: 0.4; transform: translateY(-50%) scale(0.85); }
+  background: var(--status-running, #3fb950);
+  box-shadow: 0 0 4px
+    color-mix(in srgb, var(--status-running, #3fb950) 40%, transparent);
 }
 
 .ws-row-actions {

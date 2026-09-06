@@ -284,6 +284,19 @@ const PROFILES: &[AgentProfile] = &[
         prompt_argv_separator: None,
         trust_preapproval_args: NO_ARGS,
     },
+    // Cline CLI takes a positional first prompt; no hooks surface yet, so its
+    // sidebar status rides the quiet-watcher fallback (working/idle only).
+    AgentProfile {
+        id: "cline",
+        display_name: "Cline",
+        command: "cline",
+        default_args: NO_ARGS,
+        env: NO_ENV,
+        prompt_delivery: PromptDelivery::Arg,
+        prompt_arg: None,
+        prompt_argv_separator: None,
+        trust_preapproval_args: NO_ARGS,
+    },
     // Placeholder for user-typed raw commands; never spawned via lookup.
     AgentProfile {
         id: "generic",
@@ -303,7 +316,8 @@ mod tests {
     use super::*;
 
     const M1_IDS: &[&str] = &[
-        "claude", "codex", "gemini", "qwen", "opencode", "grok", "cursor", "aider", "amp", "droid",
+        "claude", "codex", "gemini", "qwen", "opencode", "grok", "cursor", "cline",
+        "aider", "amp", "droid",
         "copilot", "goose", "kimi", "agy", "generic",
     ];
 
