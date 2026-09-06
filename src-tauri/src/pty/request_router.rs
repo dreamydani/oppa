@@ -91,6 +91,7 @@ impl DaemonServer {
                     // Only the ack counter resets (and the gate opens): queued
                     // batcher bytes are preserved for the new client.
                     let _ = session.reset_pending();
+                    session.set_global_sender(self.global_events.clone());
                     let snapshot = session.get_snapshot();
                     DaemonResponse::SessionAttached(CreateOrAttachResult {
                         is_new: false,
@@ -172,6 +173,7 @@ impl DaemonServer {
                                     })
                                 });
                             session.seed_birth_title(birth.clone());
+                            session.set_global_sender(self.global_events.clone());
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
                             }
@@ -294,6 +296,8 @@ impl DaemonServer {
                 match session {
                     Some(session) => {
                         session.set_title(sanitized.clone());
+                        // WHY pin: manual renames freeze the title; auto paths must never overwrite them.
+                        session.pin_title();
                         self.publish_global(DaemonEvent::TitleChanged {
                             session_id,
                             title: sanitized,

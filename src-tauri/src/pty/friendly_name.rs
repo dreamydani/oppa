@@ -27,6 +27,19 @@ fn hash_str(s: &str) -> u64 {
     hash
 }
 
+// One-shot session topic from the first substantive user prompt: single line,
+// whitespace-collapsed, capped at 40 chars. Junk (too short) never consumes
+// the one shot — the caller only marks it used on Some.
+pub fn topic_title_from_prompt(prompt: &str) -> Option<String> {
+    let line = prompt.lines().next().unwrap_or("").trim();
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() < 8 {
+        return None;
+    }
+    let truncated: String = collapsed.chars().take(40).collect();
+    Some(truncated)
+}
+
 // Deterministic per session id (same id re-picks the same word, good for
 // restore remaps); first untaken word wins, numeric suffix only when the pool
 // is exhausted.
@@ -101,5 +114,28 @@ mod tests {
             assert!(!w.contains('-') && !w.contains(' '), "{w}");
             assert!(seen.insert(*w), "duplicate {w}");
         }
+    }
+
+    #[test]
+    fn topic_keeps_first_line_collapsed_and_capped() {
+        assert_eq!(
+            topic_title_from_prompt("fix the login redirect flow"),
+            Some("fix the login redirect flow".into())
+        );
+        assert_eq!(
+            topic_title_from_prompt("  spaced   out   prompt here  \nsecond line ignored"),
+            Some("spaced out prompt here".into())
+        );
+        let long = "a".repeat(100);
+        assert_eq!(topic_title_from_prompt(&long).map(|t| t.len()), Some(40));
+    }
+
+    #[test]
+    fn topic_rejects_junk_so_later_prompts_still_win() {
+        assert_eq!(topic_title_from_prompt("hi"), None);
+        assert_eq!(topic_title_from_prompt(""), None);
+        assert_eq!(topic_title_from_prompt("   \n  "), None);
+        assert_eq!(topic_title_from_prompt("1234567"), None);
+        assert!(topic_title_from_prompt("12345678").is_some());
     }
 }
