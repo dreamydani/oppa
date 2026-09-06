@@ -227,7 +227,7 @@ describe("WorkspaceList", () => {
     expect(screen.queryByText("web runtime render")).not.toBeInTheDocument();
   });
 
-  it("shows a gutter status dot on rows whose session has an agent status", () => {
+  it("renders the working loader on rows whose session is working", () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -251,11 +251,67 @@ describe("WorkspaceList", () => {
       },
     });
 
-    render(<WorkspaceList />);
-    expect(screen.getByLabelText("Status: working")).toBeInTheDocument();
+    const { container } = render(<WorkspaceList />);
+    const loader = screen.getByRole("status", { name: /working/i });
+    expect(loader).toBeInTheDocument();
+    // Cline-style dot grid: exactly 8 dots chase in sequence.
+    expect(loader.querySelectorAll(".agent-working-dot")).toHaveLength(8);
+    // The loader replaces the status circle entirely — no duplicate dot.
+    expect(container.querySelector(".ws-status-circle")).toBeNull();
   });
 
-  it("shows a status dot on idle rows too", () => {
+  it("renders the working loader from the quiet-watcher fallback too", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "a" }),
+      },
+      workingBySessionId: { "s-1": true },
+    });
+
+    render(<WorkspaceList />);
+    expect(screen.getByRole("status", { name: /working/i })).toBeInTheDocument();
+  });
+
+  it("renders a green done dot for hook-classified done state", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "a" }),
+      },
+      statusBySessionId: {
+        "s-1": {
+          state: "done",
+          state_started_at_ms: 0,
+          updated_at_ms: 0,
+          origin: "hook",
+        },
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const dot = container.querySelector(".ws-status-circle.done");
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("aria-label")).toBe("Status: done");
+  });
+
+  it("renders no status indicator on idle rows", () => {
     useTerminalStore.setState({
       tabs: [
         {
@@ -269,8 +325,72 @@ describe("WorkspaceList", () => {
       sessions: { "s-1": session({ id: "s-1", title: "quiet pane" }) },
     });
 
-    render(<WorkspaceList />);
-    expect(screen.getByLabelText("Status: idle")).toBeInTheDocument();
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-status-circle")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("renders no status indicator on exited rows", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "dead pane", status: "exited" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-status-circle")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("renders no status indicator for blocked or waiting states (done/working only)", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "blocked pane" }),
+        "s-2": session({ id: "s-2", title: "waiting pane" }),
+      },
+      statusBySessionId: {
+        "s-1": {
+          state: "blocked",
+          state_started_at_ms: 0,
+          updated_at_ms: 0,
+          origin: "hook",
+        },
+        "s-2": {
+          state: "waiting",
+          state_started_at_ms: 0,
+          updated_at_ms: 0,
+          origin: "hook",
+        },
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-status-circle")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows the collapse chevron on folder headers only when there are multiple sessions", () => {

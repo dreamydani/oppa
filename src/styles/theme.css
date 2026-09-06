@@ -113,6 +113,8 @@
   /* Status Colors */
   --status-running: #22c55e;
   --status-warning: #eab308;
+  /* Agent working state (sidebar dot-grid loader, distinct from done green). */
+  --status-working: #818cf8;
 
   /* Overlay Surfaces (floating bars/modals over terminal content) */
   --bg-overlay: #2c2c2c;

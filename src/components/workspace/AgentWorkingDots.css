@@ -1,0 +1,59 @@
+/* ==========================================================================
+   Agent Working Dots — Cline-style 4x2 dot-grid loader for sidebar rows.
+   The highlight chases in serpentine order (down one column, back up the
+   other) so it reads as a continuous spin. Pure CSS; respects reduced motion.
+   ========================================================================== */
+
+.agent-working-dots {
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  grid-template-columns: repeat(2, 3px);
+  grid-template-rows: repeat(4, 3px);
+  gap: 1.5px;
+  flex-shrink: 0;
+  transition: opacity var(--dur-micro) var(--ease-out);
+}
+
+/* Hover swaps the loader for the pin button — same contract as the status dot. */
+.ws-row:hover .agent-working-dots {
+  opacity: 0;
+}
+
+.agent-working-dot {
+  grid-row: var(--dot-row);
+  grid-column: var(--dot-col);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--status-working, #818cf8);
+  box-shadow: 0 0 3px
+    color-mix(in srgb, var(--status-working, #818cf8) 45%, transparent);
+  /* Negative delays stagger each dot's peak and start mid-cycle, so the very
+     first paint is already alive instead of visibly "winding up". */
+  animation: agentWorkingChase 1.6s linear infinite;
+  animation-delay: calc(var(--dot-index) * -0.2s);
+}
+
+@keyframes agentWorkingChase {
+  0%,
+  25%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  12.5% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-working-dot {
+    animation: none;
+    opacity: 0.7;
+    transform: none;
+  }
+}
