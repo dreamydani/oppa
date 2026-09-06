@@ -1,0 +1,99 @@
+/* Voice settings pane — layout primitives come from GeneralSettingsPane.css;
+   only voice-specific bits live here. */
+
+.voice-stub-note {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #8e8e93);
+  background: var(--bg-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.voice-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-model-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.voice-model-row:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.2));
+}
+
+.voice-model-row.selected {
+  border-color: var(--accent, #4f8cff);
+  background: var(--bg-selected, rgba(79, 140, 255, 0.08));
+}
+
+.voice-model-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.voice-model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.voice-model-cloud {
+  font-size: 12px;
+}
+
+.voice-model-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-foreground, #8e8e93);
+}
+
+.voice-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.voice-model-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  color: var(--muted-foreground, #8e8e93);
+  white-space: nowrap;
+}
+
+.voice-model-badge.recommended {
+  color: var(--accent, #4f8cff);
+  border-color: var(--accent, #4f8cff);
+}
+
+.voice-model-size,
+.voice-model-status {
+  font-size: 11px;
+  color: var(--muted-foreground, #8e8e93);
+  white-space: nowrap;
+}

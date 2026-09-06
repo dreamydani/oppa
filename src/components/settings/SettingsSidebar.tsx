@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowLeft, Settings, Palette, Terminal, Keyboard } from "lucide-react";
+import { ArrowLeft, Settings, Palette, Terminal, Keyboard, Mic } from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { SettingsTabId } from "../../lib/settings/types";
 import "./SettingsSidebar.css";
@@ -22,6 +22,11 @@ const CATEGORIES: SettingsCategory[] = [
     id: "appearance",
     label: "Appearance",
     icon: Palette,
+  },
+  {
+    id: "voice",
+    label: "Voice",
+    icon: Mic,
   },
   {
     id: "terminal",

@@ -87,6 +87,69 @@ impl Default for AppearanceSettings {
 pub struct AppSettings {
     pub general: GeneralSettings,
     pub appearance: AppearanceSettings,
+    pub voice: VoiceSettings,
+}
+
+/// One user-supplied (non-catalog) speech model directory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UserModelConfig {
+    pub id: String,
+    pub model_type: String,
+    pub dir: String,
+    /// Sample rate in Hz; `None` means the engine default (16000).
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
+}
+
+impl Default for UserModelConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            model_type: String::new(),
+            dir: String::new(),
+            sample_rate: None,
+        }
+    }
+}
+
+/// Voice dictation settings. Field-for-field port of Orca's `VoiceSettings`
+/// (speech-types.ts); serde names stay snake_case and the frontend normalizes
+/// them to camelCase on load (see `src/lib/settings/transport.ts`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceSettings {
+    pub enabled: bool,
+    pub stt_model: String,
+    pub models_dir: String,
+    pub language: String,
+    pub dictation_mode: String,
+    pub terminal_confirm_before_insert: bool,
+    pub user_models: Vec<UserModelConfig>,
+    pub open_ai_api_key_configured: bool,
+    /// `None` = system default input device.
+    #[serde(default)]
+    pub microphone_device_id: Option<String>,
+    /// Cached label shown when the preferred device is unplugged.
+    #[serde(default)]
+    pub microphone_device_label: Option<String>,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stt_model: String::new(),
+            models_dir: String::new(),
+            language: "en".into(),
+            dictation_mode: "toggle".into(),
+            terminal_confirm_before_insert: false,
+            user_models: Vec::new(),
+            open_ai_api_key_configured: false,
+            microphone_device_id: None,
+            microphone_device_label: None,
+        }
+    }
 }
 
 /// Persist settings.json to `path`, creating parent directories as needed.
@@ -226,5 +289,45 @@ mod tests {
         assert_eq!(deserialized.appearance.sidebar_on_launch, "remember_last");
         assert!(deserialized.appearance.show_status_bar);
         assert!(deserialized.appearance.show_titlebar_logo);
+    }
+
+    #[test]
+    fn voice_settings_default_and_backward_compatibility() {
+        let settings = AppSettings::default();
+        assert!(!settings.voice.enabled);
+        assert_eq!(settings.voice.stt_model, "");
+        assert_eq!(settings.voice.language, "en");
+        assert_eq!(settings.voice.dictation_mode, "toggle");
+        assert!(!settings.voice.terminal_confirm_before_insert);
+        assert!(settings.voice.user_models.is_empty());
+        assert!(!settings.voice.open_ai_api_key_configured);
+        assert_eq!(settings.voice.microphone_device_id, None);
+        assert_eq!(settings.voice.microphone_device_label, None);
+
+        // Legacy save without the voice key deserializes to defaults.
+        let legacy_json = r#"{"general":{"default_cwd_mode":"home"}}"#;
+        let deserialized: AppSettings = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(deserialized.voice, VoiceSettings::default());
+
+        // Partial voice object fills the rest with defaults.
+        let partial_json = r#"{"voice":{"enabled":true,"stt_model":"whisper-tiny"}}"#;
+        let deserialized: AppSettings = serde_json::from_str(partial_json).unwrap();
+        assert!(deserialized.voice.enabled);
+        assert_eq!(deserialized.voice.stt_model, "whisper-tiny");
+        assert_eq!(deserialized.voice.dictation_mode, "toggle");
+        assert_eq!(deserialized.voice.microphone_device_id, None);
+
+        // Full round-trip incl. mic selection and user models.
+        let json = r#"{"voice":{"enabled":true,"stt_model":"parakeet-tdt-0.6b-v3-int8","models_dir":"/m","language":"en","dictation_mode":"hold","terminal_confirm_before_insert":true,"user_models":[{"id":"custom","model_type":"whisper","dir":"/m/custom"}],"open_ai_api_key_configured":true,"microphone_device_id":"mic-1","microphone_device_label":"USB Mic"}}"#;
+        let deserialized: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(deserialized.voice.dictation_mode, "hold");
+        assert_eq!(
+            deserialized.voice.microphone_device_id.as_deref(),
+            Some("mic-1")
+        );
+        assert_eq!(deserialized.voice.user_models.len(), 1);
+        let serialized = serde_json::to_string(&deserialized).unwrap();
+        let round_tripped: AppSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(round_tripped, deserialized);
     }
 }

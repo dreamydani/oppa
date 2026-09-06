@@ -25,6 +25,11 @@ describe("SettingsView", () => {
     rerender(<SettingsView />);
     expect(screen.getByRole("region", { name: /keyboard shortcuts/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/search shortcuts/i)).toBeInTheDocument();
+
+    useTerminalStore.setState({ activeSettingsTab: "voice" });
+    rerender(<SettingsView />);
+    expect(screen.getByRole("region", { name: /voice settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /voice dictation/i })).toBeInTheDocument();
   });
 
   it("navigates between categories using sidebar buttons", () => {
@@ -40,6 +45,11 @@ describe("SettingsView", () => {
     fireEvent.click(shortcutsTab);
     expect(useTerminalStore.getState().activeSettingsTab).toBe("shortcuts");
     expect(screen.getByRole("region", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+
+    const voiceTab = screen.getByRole("button", { name: /^voice$/i });
+    fireEvent.click(voiceTab);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("voice");
+    expect(screen.getByRole("region", { name: /voice settings/i })).toBeInTheDocument();
 
     const generalTab = screen.getByRole("button", { name: /general/i });
     fireEvent.click(generalTab);

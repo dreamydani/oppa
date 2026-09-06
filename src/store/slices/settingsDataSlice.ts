@@ -23,7 +23,11 @@ export interface SettingsDataSlice {
   updateSettings: (
     partial:
       | Partial<AppSettings>
-      | { general?: Partial<AppSettings["general"]>; appearance?: Partial<AppSettings["appearance"]> },
+      | {
+          general?: Partial<AppSettings["general"]>;
+          appearance?: Partial<AppSettings["appearance"]>;
+          voice?: Partial<AppSettings["voice"]>;
+        },
   ) => void;
   updateAppearanceSettings: (partial: Partial<AppSettings["appearance"]>) => void;
   resolveDefaultCwd: () => string | undefined;
@@ -59,6 +63,10 @@ export function createSettingsDataSlice(
         appearance: {
           ...current.appearance,
           ...(partial.appearance || {}),
+        },
+        voice: {
+          ...current.voice,
+          ...(partial.voice || {}),
         },
       };
       set({ settings: updated });
