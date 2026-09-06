@@ -309,6 +309,14 @@ pub fn is_known_agent_program(command_line: &str) -> bool {
     find_profile(command_line).is_some()
 }
 
+// Human display name for a command line when it launches a known agent
+// (opencode → OpenCode); None for ordinary commands. Chains the resume
+// registry's program match to the launch catalog's display names.
+pub fn display_name_for_command(command_line: &str) -> Option<&'static str> {
+    let profile = find_profile(command_line)?;
+    crate::agents::catalog::lookup(&profile.name).map(|p| p.display_name)
+}
+
 /// Newest-mtime *.jsonl-style transcript under dir (recursive).
 /// id = file stem minus Codex's "rollout-" prefix (no other agent uses it).
 pub fn find_newest_transcript(dir: &Path, extension: &str) -> Option<(String, PathBuf)> {
@@ -420,6 +428,17 @@ mod tests {
         assert!(find_profile("").is_none());
         assert!(!is_known_agent_program("npm install"));
         assert!(is_known_agent_program("claude.exe"));
+    }
+
+    #[test]
+    fn display_name_resolves_agents_and_rejects_plain_commands() {
+        assert_eq!(display_name_for_command("opencode"), Some("OpenCode"));
+        assert_eq!(display_name_for_command("opencode --prompt hi"), Some("OpenCode"));
+        assert_eq!(display_name_for_command("CLAUDE.EXE --resume x"), Some("Claude Code"));
+        assert_eq!(display_name_for_command("codex resume abc"), Some("Codex"));
+        assert_eq!(display_name_for_command("npm run dev"), None);
+        assert_eq!(display_name_for_command("git status"), None);
+        assert_eq!(display_name_for_command(""), None);
     }
 
     #[test]

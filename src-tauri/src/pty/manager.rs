@@ -240,6 +240,18 @@ impl PtyManager {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 
+    /// Rename a session's title (pins it against auto titles).
+    pub fn set_title(&self, id: &str, title: &str) -> Result<(), String> {
+        let client = self.get_client()?;
+        client.set_title(id, title)
+    }
+
+    /// Clear a session's pin and one-shot topic, reverting to automatic titles.
+    pub fn reset_title(&self, id: &str) -> Result<(), String> {
+        let client = self.get_client()?;
+        client.reset_title(id)
+    }
+
     /// Kill the session child process.
     pub fn kill(&self, id: &str) -> std::io::Result<()> {
         let client = self

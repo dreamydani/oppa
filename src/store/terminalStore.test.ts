@@ -17,6 +17,8 @@ vi.mock("../lib/pty/transport", () => ({
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
   ptyList: vi.fn().mockResolvedValue([]),
+  ptySetTitle: vi.fn().mockResolvedValue(undefined),
+  ptyResetTitle: vi.fn().mockResolvedValue(undefined),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
   onSessionWorking: vi.fn().mockResolvedValue(() => {}),
@@ -240,6 +242,54 @@ describe("terminalStore", () => {
     const session = useTerminalStore.getState().sessions["agent-1"];
     expect(session.resumeKind).toBe("agent-resume");
     expect(session.isRestored).toBeUndefined();
+  });
+
+  it("spawnSession uses the daemon birth title when provided", async () => {
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-1-1"), title: "fox" });
+    const id = await useTerminalStore.getState().spawnSession();
+    expect(useTerminalStore.getState().sessions[id].title).toBe("fox");
+  });
+
+  it("spawnSession falls back to a friendly name when the daemon omits the title", async () => {
+    ptySpawnMock.mockResolvedValue(spawnRes("s-1786150000000-9"));
+    const id = await useTerminalStore.getState().spawnSession();
+    const title = useTerminalStore.getState().sessions[id].title;
+    expect(title).not.toBe(id);
+    expect(title.startsWith("s-")).toBe(false);
+  });
+
+  it("spawnSession replaces a synthetic existing title on reattach", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-keep": {
+          id: "s-keep",
+          title: "s-keep",
+          status: "sleeping",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-keep"), is_new: false, title: "heron" });
+    const id = await useTerminalStore.getState().spawnSession(undefined, undefined, "s-keep");
+    expect(useTerminalStore.getState().sessions[id].title).toBe("heron");
+  });
+
+  it("spawnSession keeps a user title across reattach", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        "s-mine": {
+          id: "s-mine",
+          title: "Build Output",
+          status: "sleeping",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    ptySpawnMock.mockResolvedValue({ ...spawnRes("s-mine"), is_new: false, title: "fox" });
+    const id = await useTerminalStore.getState().spawnSession(undefined, undefined, "s-mine");
+    expect(useTerminalStore.getState().sessions[id].title).toBe("Build Output");
   });
 
   it("spawnSession sends resumeAgents:false when auto-resume setting is disabled", async () => {
@@ -1184,8 +1234,8 @@ describe("terminalStore", () => {
           ],
           activeTabId: "tab-1",
           sessions: [
-            { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40 },
-            { id: "b", title: "b", status: "exited", cols: 80, rows: 24 },
+            { id: "a", title: "a", status: "running", cwd: "C:\\work", cols: 120, rows: 40, titlePinned: false },
+            { id: "b", title: "b", status: "exited", cols: 80, rows: 24, titlePinned: false },
           ],
         }),
       );
@@ -4372,6 +4422,99 @@ describe("terminalStore", () => {
     it("title change for an unknown session is ignored silently", () => {
       expect(() => titleChangedHandler?.({ id: "ghost", title: "x" })).not.toThrow();
       expect(Object.keys(useTerminalStore.getState().sessions)).not.toContain("ghost");
+    });
+
+    it("auto title events never overwrite a locally pinned rename", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "Build Output", titlePinned: true, status: "running", cols: 80, rows: 24 },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+
+      titleChangedHandler?.({ id: "s1", title: "npm run dev", pinned: false });
+
+      expect(useTerminalStore.getState().sessions["s1"].title).toBe("Build Output");
+    });
+
+    it("manual title events apply and pin the session", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "fox", status: "running", cols: 80, rows: 24 },
+        },
+        tabs: [
+          { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        ],
+        activeTabId: "tab-1",
+        layout: { type: "leaf", id: "s1" },
+        focusedPath: [],
+      });
+
+      titleChangedHandler?.({ id: "s1", title: "Release", pinned: true });
+
+      const session = useTerminalStore.getState().sessions["s1"];
+      expect(session.title).toBe("Release");
+      expect(session.titlePinned).toBe(true);
+    });
+
+    it("auto titles follow only the focused pane's tab title", () => {
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "fox", status: "running", cols: 80, rows: 24 },
+          s2: { id: "s2", title: "heron", status: "running", cols: 80, rows: 24 },
+        },
+        tabs: [
+          {
+            id: "tab-1",
+            title: "fox",
+            layout: {
+              type: "split",
+              dir: "h",
+              ratio: 0.5,
+              a: { type: "leaf", id: "s1" },
+              b: { type: "leaf", id: "s2" },
+            },
+            focusedPath: [0],
+          },
+        ],
+        activeTabId: "tab-1",
+        layout: {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "s1" },
+          b: { type: "leaf", id: "s2" },
+        },
+        focusedPath: [0],
+      });
+
+      // Background pane auto title updates its session but not the shared tab.
+      titleChangedHandler?.({ id: "s2", title: "npm run dev", pinned: false });
+      expect(useTerminalStore.getState().sessions["s2"].title).toBe("npm run dev");
+      expect(useTerminalStore.getState().tabs[0].title).toBe("fox");
+
+      // Focused pane auto title follows.
+      titleChangedHandler?.({ id: "s1", title: "opencode", pinned: false });
+      expect(useTerminalStore.getState().tabs[0].title).toBe("opencode");
+    });
+
+    it("resetSessionTitle unpins locally and asks the daemon to revert", async () => {
+      const resetMock = vi.mocked(ptyTransport.ptyResetTitle);
+      useTerminalStore.setState({
+        sessions: {
+          s1: { id: "s1", title: "Build Output", titlePinned: true, status: "running", cols: 80, rows: 24 },
+        },
+      });
+
+      await useTerminalStore.getState().resetSessionTitle("s1");
+
+      expect(useTerminalStore.getState().sessions["s1"].titlePinned).toBe(false);
+      expect(resetMock).toHaveBeenCalledWith("s1");
     });
 
     it("focus request selects the owning tab and focuses that pane", () => {

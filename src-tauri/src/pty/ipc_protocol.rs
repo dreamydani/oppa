@@ -61,6 +61,10 @@ pub struct CreateOrAttachResult {
     // Additive MVP-status field: last hook-classified truth for instant pills
     #[serde(default)]
     pub agent_status: Option<crate::agents::status::AgentStatusEntry>,
+    // Birth name seeded at spawn so panes never show raw s- ids; defaulted so
+    // old daemons/clients keep interoperating
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 // Wire values are kebab-case ("tui-idle"), matching the CLI --for argument verbatim.
@@ -159,10 +163,15 @@ pub enum DaemonRequest {
         cond: WaitCondition,
         timeout_ms: u64,
     },
-    // Tab-title sync: daemon sanitizes, stores, and broadcasts TitleChanged
+    // Tab-title sync: daemon sanitizes, stores, pins, and broadcasts TitleChanged
     SetSessionTitle {
         session_id: String,
         title: String,
+    },
+    // Back to automatic: clears the pin and one-shot topic, reverts to the
+    // idle birth name, and broadcasts TitleChanged with pinned=false
+    ResetSessionTitle {
+        session_id: String,
     },
     // CLI-driven focus switch; the GUI decides what "focus" means
     RequestSessionFocus {
@@ -368,6 +377,10 @@ pub enum DaemonEvent {
     TitleChanged {
         session_id: String,
         title: String,
+        // Manual renames pin, auto titles don't. Defaults true so pre-field
+        // daemons (manual-only emitters) keep their pin semantics.
+        #[serde(default = "default_title_pinned")]
+        pinned: bool,
     },
     SessionFocusRequested {
         session_id: String,
@@ -390,6 +403,10 @@ pub enum DaemonEvent {
 
 // Tab bars render titles verbatim: control bytes and runaway length never belong there.
 pub const MAX_SESSION_TITLE_CHARS: usize = 80;
+
+fn default_title_pinned() -> bool {
+    true
+}
 
 /// Strip control chars (<0x20, 0x7F-0x9F), trim, then cap at 80 chars on a char boundary.
 pub fn sanitize_session_title(raw: &str) -> String {
@@ -624,6 +641,7 @@ mod tests {
             worktree_id: None,
             working: false,
             agent_status: None,
+            title: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         assert!(encoded.contains("\"is_new\":false"));
@@ -662,6 +680,7 @@ mod tests {
                 worktree_id: None,
                 working: true,
                 agent_status: None,
+                title: None,
             }),
             DaemonResponse::SessionList(vec!["s1".into(), "s2".into()]),
             DaemonResponse::Ok,
@@ -714,6 +733,7 @@ mod tests {
             DaemonEvent::TitleChanged {
                 session_id: "s1".into(),
                 title: "build".into(),
+                pinned: true,
             },
             DaemonEvent::SessionFocusRequested {
                 session_id: "s1".into(),
@@ -733,6 +753,23 @@ mod tests {
             let decoded: DaemonEvent = serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(event, decoded);
         }
+    }
+
+    #[test]
+    fn test_title_changed_missing_pinned_defaults_true_for_old_daemons() {
+        // Pre-field daemons only emitted manual renames, which pin.
+        let decoded: DaemonEvent = serde_json::from_str(
+            r#"{"event":"TitleChanged","payload":{"session_id":"s1","title":"build"}}"#,
+        )
+        .expect("legacy title event");
+        assert_eq!(
+            decoded,
+            DaemonEvent::TitleChanged {
+                session_id: "s1".into(),
+                title: "build".into(),
+                pinned: true,
+            }
+        );
     }
 
     #[test]
@@ -1142,6 +1179,7 @@ mod tests {
             worktree_id: None,
             working: false,
             agent_status: None,
+            title: None,
         });
         let encoded = serde_json::to_string(&res).expect("serialize");
         let decoded: DaemonResponse = serde_json::from_str(&encoded).expect("deserialize");

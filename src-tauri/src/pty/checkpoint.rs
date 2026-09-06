@@ -178,6 +178,9 @@ impl DaemonServer {
             agent_session,
             worktree_id: session.worktree_id.clone(),
             agent_status: session.agent_status(),
+            title_pinned: *session.title_pinned.lock(),
+            topic_set: *session.topic_set.lock(),
+            idle_title: Some(session.idle_title()),
         }
     }
 
@@ -187,6 +190,11 @@ impl DaemonServer {
         snapshot.scrollback.hash(&mut hasher);
         snapshot.cwd.hash(&mut hasher);
         snapshot.foreground_command.hash(&mut hasher);
+        // Title state flips are content changes too, or a fresh pin would
+        // wait for the next scrollback change before reaching disk.
+        snapshot.title.hash(&mut hasher);
+        snapshot.title_pinned.hash(&mut hasher);
+        snapshot.topic_set.hash(&mut hasher);
         // State flips are content changes even when scrollback stands still,
         // or a finished pill would stay stale until the next text output.
         snapshot.agent_status.hash(&mut hasher);
