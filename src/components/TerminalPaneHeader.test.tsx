@@ -12,6 +12,8 @@ vi.mock("../lib/pty/transport", () => ({
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn(),
+  ptySetTitle: vi.fn().mockResolvedValue(undefined),
+  ptyResetTitle: vi.fn().mockResolvedValue(undefined),
   onPtyCwd: vi.fn(),
   onTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onFocusRequested: vi.fn().mockResolvedValue(() => {}),
@@ -285,6 +287,48 @@ describe("TerminalPaneHeader", () => {
     const input = screen.getByRole("textbox") as HTMLInputElement;
     expect(input.value).toBe("oppa");
     expect(input.value).not.toContain("s-1786150000000-1");
+  });
+
+  it("saving a rename pins the title and pushes it to the daemon", () => {
+    render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    fireEvent.click(screen.getByText("Terminal 1"));
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "Build Output" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const state = useTerminalStore.getState();
+    expect(state.sessions["s1"].title).toBe("Build Output");
+    expect(state.sessions["s1"].titlePinned).toBe(true);
+    expect(vi.mocked(transport.ptySetTitle)).toHaveBeenCalledWith("s1", "Build Output");
+  });
+
+  it("Reset to automatic shows only for pinned panes and unpins via the daemon", () => {
+    const { rerender } = render(<TerminalPaneHeader id="s1" path={[]} />);
+
+    fireEvent.click(screen.getByTitle("More Options"));
+    expect(screen.queryByText("Reset to automatic")).toBeNull();
+    fireEvent.click(screen.getByTitle("More Options"));
+
+    useTerminalStore.setState({
+      sessions: {
+        s1: {
+          id: "s1",
+          title: "Build Output",
+          titlePinned: true,
+          status: "running",
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+    rerender(<TerminalPaneHeader id="s1" path={[]} />);
+
+    fireEvent.click(screen.getByTitle("More Options"));
+    fireEvent.click(screen.getByText("Reset to automatic"));
+
+    expect(useTerminalStore.getState().sessions["s1"].titlePinned).toBe(false);
+    expect(vi.mocked(transport.ptyResetTitle)).toHaveBeenCalledWith("s1");
   });
 
   it("toggles maximize and restore pane state", () => {

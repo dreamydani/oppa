@@ -65,6 +65,13 @@ export interface TabState {
 // One in-flight wake per tab so rapid re-selection cannot double-spawn.
 const pendingWakeTabs = new Map<string, Promise<void>>();
 
+// Restore pin state: explicit flags win; pre-pin layouts migrate
+// non-synthetic titles (user-chosen) to pinned, synthetic ones stay auto.
+function restoredTitlePinned(saved: { id: string; title?: string; titlePinned?: boolean }): boolean {
+  if (saved.titlePinned !== undefined) return saved.titlePinned;
+  return !!saved.title && !isSyntheticTitle(saved.title, saved.id);
+}
+
 export interface PaneLayoutSlice {
   tabs: TabState[];
   activeTabId: string;
@@ -960,6 +967,9 @@ export function createPaneLayoutSlice(
           cols: s.cols,
           rows: s.rows,
           ...(s.worktreeId ? { worktreeId: s.worktreeId } : {}),
+          // WHY explicit bool: absent must mean legacy (migrate by synthetic
+          // check), never confuse a transient auto title with a rename.
+          titlePinned: s.titlePinned ?? false,
         })),
       };
       await transportSaveLayout(JSON.stringify(snapshot));
@@ -1120,6 +1130,7 @@ export function createPaneLayoutSlice(
                   updatedSessions[s.id] = {
                     id: s.id,
                     title: s.title || s.id,
+                    ...(restoredTitlePinned(s) ? { titlePinned: true } : {}),
                     status: isRestoring ? "restoring" : "sleeping",
                     cwd: s.cwd,
                     cols: s.cols || DEFAULT_COLS,
@@ -1136,6 +1147,13 @@ export function createPaneLayoutSlice(
                 updatedSessions[oldId] = {
                   id: oldId,
                   title: saved?.title || oldId,
+                  ...(restoredTitlePinned({
+                    id: oldId,
+                    title: saved?.title,
+                    titlePinned: saved?.titlePinned,
+                  })
+                    ? { titlePinned: true }
+                    : {}),
                   status: "sleeping",
                   cwd: saved?.cwd,
                   cols: saved?.cols || DEFAULT_COLS,
@@ -1151,6 +1169,13 @@ export function createPaneLayoutSlice(
                 updatedSessions[oldId] = {
                   id: oldId,
                   title: saved?.title || oldId,
+                  ...(restoredTitlePinned({
+                    id: oldId,
+                    title: saved?.title,
+                    titlePinned: saved?.titlePinned,
+                  })
+                    ? { titlePinned: true }
+                    : {}),
                   status: "restoring",
                   cwd: saved?.cwd,
                   cols: saved?.cols || DEFAULT_COLS,
@@ -1192,6 +1217,11 @@ export function createPaneLayoutSlice(
                 // name survives; kept user titles re-apply as before.
                 if (!isSyntheticTitle(savedSession.title, oldId)) {
                   get().renameSession(newId, savedSession.title);
+                  // WHY explicit-false check: absent means legacy (pin the
+                  // migrated rename); transient auto titles save false.
+                  if (savedSession.titlePinned !== false) {
+                    get().setTitlePinned(newId, true);
+                  }
                 }
               }
 
@@ -1272,6 +1302,7 @@ export function createPaneLayoutSlice(
                   updatedSessions[s.id] = {
                     id: s.id,
                     title: s.title || s.id,
+                    ...(restoredTitlePinned(s) ? { titlePinned: true } : {}),
                     status: "restoring",
                     cwd: s.cwd,
                     cols: s.cols || DEFAULT_COLS,
@@ -1288,6 +1319,13 @@ export function createPaneLayoutSlice(
                 updatedSessions[oldId] = {
                   id: oldId,
                   title: saved?.title || oldId,
+                  ...(restoredTitlePinned({
+                    id: oldId,
+                    title: saved?.title,
+                    titlePinned: saved?.titlePinned,
+                  })
+                    ? { titlePinned: true }
+                    : {}),
                   status: "restoring",
                   cwd: saved?.cwd,
                   cols: saved?.cols || DEFAULT_COLS,
@@ -1327,6 +1365,11 @@ export function createPaneLayoutSlice(
                 // WHY migration: synthetic s- titles drop so the fresh birth name survives.
                 if (!isSyntheticTitle(savedSession.title, oldId)) {
                   get().renameSession(newId, savedSession.title);
+                  // WHY explicit-false check: absent means legacy (pin the
+                  // migrated rename); transient auto titles save false.
+                  if (savedSession.titlePinned !== false) {
+                    get().setTitlePinned(newId, true);
+                  }
                 }
               }
 

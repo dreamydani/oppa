@@ -28,7 +28,7 @@ pub type OnExit = Box<dyn Fn(&str, Option<i32>) + Send + Sync + 'static>;
 pub type OnCwd = Box<dyn Fn(&str, &str) + Send + Sync + 'static>;
 // Arc-shared so one forwarder can be installed on every reconnecting client.
 pub type OnWorktreeChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
-pub type OnTitleChanged = Arc<dyn Fn(&str, &str) + Send + Sync>;
+pub type OnTitleChanged = Arc<dyn Fn(&str, &str, bool) + Send + Sync>;
 pub type OnFocusRequested = Arc<dyn Fn(&str) + Send + Sync>;
 pub type OnGitChanged = Arc<dyn Fn() + Send + Sync>;
 pub type OnPrChanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
@@ -231,9 +231,13 @@ impl DaemonClient {
                                         cb(id.as_deref());
                                     }
                                 }
-                                DaemonEvent::TitleChanged { session_id, title } => {
+                                DaemonEvent::TitleChanged {
+                                    session_id,
+                                    title,
+                                    pinned,
+                                } => {
                                     if let Some(cb) = title_changed_cb_clone.lock().as_ref() {
-                                        cb(&session_id, &title);
+                                        cb(&session_id, &title, pinned);
                                     }
                                 }
                                 DaemonEvent::SessionFocusRequested { session_id } => {
@@ -556,6 +560,31 @@ impl DaemonClient {
             },
             "ack",
         )
+    }
+
+    /// Rename a session's title (pins it against auto titles).
+    pub fn set_title(&self, session_id: &str, title: &str) -> Result<(), String> {
+        let req = DaemonRequest::SetSessionTitle {
+            session_id: session_id.to_string(),
+            title: title.to_string(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for SetSessionTitle: {other:?}")),
+        }
+    }
+
+    /// Clear a session's pin and one-shot topic, reverting to automatic titles.
+    pub fn reset_title(&self, session_id: &str) -> Result<(), String> {
+        let req = DaemonRequest::ResetSessionTitle {
+            session_id: session_id.to_string(),
+        };
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for ResetSessionTitle: {other:?}")),
+        }
     }
 
     /// Kill the session child process.

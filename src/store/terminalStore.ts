@@ -180,12 +180,22 @@ void onWorktreeChanged(() => {
   }, 300);
 });
 
-void onTitleChanged(({ id, title }) => {
+void onTitleChanged(({ id, title, pinned }) => {
   const state = useTerminalStore.getState();
   if (!state.sessions[id]) return;
+  // Pre-field backends only emitted manual renames, which pin.
+  const isPinned = pinned ?? true;
+  // A local manual pin wins over daemon auto titles (e.g. renamed here while
+  // the daemon hasn't learned it yet); manual events always apply.
+  if (!isPinned && state.sessions[id].titlePinned) return;
   state.renameSession(id, title);
+  state.setTitlePinned(id, isPinned);
   const tab = state.tabs.find((t) => leafIds(t.layout).includes(id));
-  if (tab) state.renameTab(tab.id, title);
+  // WHY tab guard: two auto-updating panes must not thrash one shared tab
+  // title; manual renames always follow, auto only the focused pane.
+  if (tab && (isPinned || focusLeaf(tab.layout, tab.focusedPath) === id)) {
+    state.renameTab(tab.id, title);
+  }
 });
 
 void onFocusRequested(({ id }) => {

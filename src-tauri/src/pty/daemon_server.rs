@@ -1067,6 +1067,9 @@ mod tests {
                 agent_session: None,
                 worktree_id: None,
                 agent_status: None,
+                title_pinned: false,
+                topic_set: false,
+                idle_title: None,
             })
             .expect("seed checkpoint");
 
@@ -1155,6 +1158,9 @@ mod tests {
                 agent_session: None,
                 worktree_id: None,
                 agent_status: None,
+                title_pinned: false,
+                topic_set: false,
+                idle_title: None,
             })
             .expect("seed checkpoint");
 
@@ -1209,6 +1215,9 @@ mod tests {
                     }),
                     worktree_id: None,
                     agent_status: None,
+                    title_pinned: false,
+                    topic_set: false,
+                    idle_title: None,
                 })
                 .expect("seed checkpoint");
         }
@@ -1897,10 +1906,19 @@ mod tests {
             Some("My Tab"),
             "sanitized title must be stored on the session"
         );
+        assert!(
+            *session.title_pinned.lock(),
+            "manual renames must pin against auto titles"
+        );
         match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
-            Ok(Ok(DaemonEvent::TitleChanged { session_id, title })) => {
+            Ok(Ok(DaemonEvent::TitleChanged {
+                session_id,
+                title,
+                pinned,
+            })) => {
                 assert_eq!(session_id, "titled");
                 assert_eq!(title, "My Tab");
+                assert!(pinned, "manual renames pin the title");
             }
             other => panic!("expected TitleChanged broadcast, got {other:?}"),
         }
@@ -1919,6 +1937,68 @@ mod tests {
         }
         let _ = server.handle_request(DaemonRequest::Kill {
             session_id: "titled".into(),
+        });
+    }
+
+    #[tokio::test]
+    async fn reset_session_title_clears_pin_and_reverts_to_birth() {
+        let server = DaemonServer::new();
+        let spawn = |session_id: &str| {
+            server.handle_request(DaemonRequest::CreateOrAttach {
+                session_id: session_id.into(),
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                shell: None,
+                resume_agents: false,
+                worktree_id: None,
+                extra_env: Vec::new(),
+                initial_command: None,
+            })
+        };
+        let birth = match spawn("s-reset-1") {
+            DaemonResponse::SessionAttached(res) => res.title.expect("birth title"),
+            other => panic!("spawn failed: {other:?}"),
+        };
+        assert_eq!(
+            server.handle_request(DaemonRequest::SetSessionTitle {
+                session_id: "s-reset-1".into(),
+                title: "Manual".into(),
+            }),
+            DaemonResponse::Ok
+        );
+        let mut rx = server.subscribe_global_events();
+        assert_eq!(
+            server.handle_request(DaemonRequest::ResetSessionTitle {
+                session_id: "s-reset-1".into(),
+            }),
+            DaemonResponse::Ok
+        );
+        let session = server.sessions.lock().get("s-reset-1").cloned().expect("live");
+        assert_eq!(session.title().as_deref(), Some(birth.as_str()));
+        assert!(!*session.title_pinned.lock());
+        assert!(!*session.topic_set.lock());
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(DaemonEvent::TitleChanged {
+                session_id,
+                title,
+                pinned,
+            })) => {
+                assert_eq!(session_id, "s-reset-1");
+                assert_eq!(title, birth);
+                assert!(!pinned);
+            }
+            other => panic!("expected TitleChanged broadcast, got {other:?}"),
+        }
+        // Unknown sessions reject instead of broadcasting.
+        assert!(matches!(
+            server.handle_request(DaemonRequest::ResetSessionTitle {
+                session_id: "missing".into(),
+            }),
+            DaemonResponse::Error(_)
+        ));
+        let _ = server.handle_request(DaemonRequest::Kill {
+            session_id: "s-reset-1".into(),
         });
     }
 
@@ -2299,9 +2379,12 @@ mod tests {
                 timestamp: 1,
                 foreground_command: None,
                 agent_session: None,
-                worktree_id: Some(created.id.clone()),
-                agent_status: None,
-            })
+                    worktree_id: Some(created.id.clone()),
+                    agent_status: None,
+                    title_pinned: false,
+                    topic_set: false,
+                    idle_title: None,
+                })
             .expect("seed checkpoint");
 
         // No request.worktree_id: the checkpoint restores the binding

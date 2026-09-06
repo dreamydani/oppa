@@ -28,6 +28,14 @@ pub struct SessionSnapshot {
     // Last hook-classified agent state; lets a rebooted machine show truthful pills instantly
     #[serde(default)]
     pub agent_status: Option<crate::agents::status::AgentStatusEntry>,
+    // Manual renames pin the title; the one-shot topic survives with its flag.
+    // Transient auto titles (unpinned, no topic) are dropped on restore.
+    #[serde(default)]
+    pub title_pinned: bool,
+    #[serde(default)]
+    pub topic_set: bool,
+    #[serde(default)]
+    pub idle_title: Option<String>,
 }
 
 /// Identity of an agent CLI session (e.g. Claude Code transcript id) captured
@@ -195,6 +203,9 @@ impl SnapshotStorage {
                 agent_session: None,
                 worktree_id: None,
                 agent_status: None,
+                title_pinned: false,
+                topic_set: false,
+                idle_title: None,
             }));
         }
 
@@ -416,6 +427,9 @@ mod tests {
             agent_session: None,
             worktree_id: None,
             agent_status: None,
+            title_pinned: false,
+            topic_set: false,
+            idle_title: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -460,6 +474,9 @@ mod tests {
             }),
             worktree_id: Some("repo::C:/ws/feat-a".to_string()),
             agent_status: None,
+            title_pinned: true,
+            topic_set: false,
+            idle_title: Some("fox".into()),
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");
@@ -506,6 +523,9 @@ mod tests {
         assert_eq!(loaded.foreground_command, None);
         assert_eq!(loaded.agent_session, None);
         assert_eq!(loaded.worktree_id, None);
+        assert!(!loaded.title_pinned);
+        assert!(!loaded.topic_set);
+        assert_eq!(loaded.idle_title, None);
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -548,6 +568,9 @@ mod tests {
             agent_session: None,
             worktree_id: None,
             agent_status: None,
+            title_pinned: false,
+            topic_set: false,
+            idle_title: None,
         };
 
         storage.save_snapshot(&snapshot).expect("save succeeds");

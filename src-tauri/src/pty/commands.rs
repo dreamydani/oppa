@@ -40,6 +40,7 @@ pub struct WorktreeChangedPayload {
 pub struct SessionTitleChangedPayload {
     pub id: String,
     pub title: String,
+    pub pinned: bool,
 }
 
 /// Payload emitted on `session-focus-requested` (CLI-driven tab switch).
@@ -62,14 +63,17 @@ pub fn worktree_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(Option<&str>) +
     })
 }
 
-pub fn session_title_changed_forwarder(app: &AppHandle) -> Arc<dyn Fn(&str, &str) + Send + Sync> {
+pub fn session_title_changed_forwarder(
+    app: &AppHandle,
+) -> Arc<dyn Fn(&str, &str, bool) + Send + Sync> {
     let emitter = app.clone();
-    Arc::new(move |id, title| {
+    Arc::new(move |id, title, pinned| {
         let _ = emitter.emit(
             "session-title-changed",
             SessionTitleChangedPayload {
                 id: id.to_string(),
                 title: title.to_string(),
+                pinned,
             },
         );
     })
@@ -291,6 +295,16 @@ pub fn pty_resize(
 #[tauri::command(async)]
 pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     manager.kill(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn pty_set_title(manager: State<'_, PtyManager>, id: String, title: String) -> Result<(), String> {
+    manager.set_title(&id, &title)
+}
+
+#[tauri::command(async)]
+pub fn pty_reset_title(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+    manager.reset_title(&id)
 }
 
 #[tauri::command(async)]
@@ -543,10 +557,12 @@ mod tests {
         let json = serde_json::to_string(&SessionTitleChangedPayload {
             id: "s1".into(),
             title: "build".into(),
+            pinned: true,
         })
         .unwrap();
         assert!(json.contains("\"id\":\"s1\""));
         assert!(json.contains("\"title\":\"build\""));
+        assert!(json.contains("\"pinned\":true"));
     }
 
     #[test]

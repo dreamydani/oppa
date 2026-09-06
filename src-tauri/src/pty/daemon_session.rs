@@ -696,6 +696,14 @@ impl DaemonSession {
         *self.title_pinned.lock() = true;
     }
 
+    pub fn set_idle_title(&self, title: String) {
+        *self.idle_title.lock() = title;
+    }
+
+    pub fn mark_topic_set(&self) {
+        *self.topic_set.lock() = true;
+    }
+
     // Pins and one-shot topics both freeze auto titles.
     pub(crate) fn auto_title_locked(&self) -> bool {
         *self.title_pinned.lock() || *self.topic_set.lock()
@@ -728,6 +736,8 @@ impl DaemonSession {
             let _ = tx.send(DaemonEvent::TitleChanged {
                 session_id: self.id.clone(),
                 title,
+                // Announcer paths are auto titles only; manual renames pin via SetSessionTitle.
+                pinned: false,
             });
         }
         true
@@ -1448,17 +1458,26 @@ mod tests {
             .expect("title event deadline")
             .expect("broadcast live");
         match event {
-            DaemonEvent::TitleChanged { session_id, title } => {
+            DaemonEvent::TitleChanged {
+                session_id,
+                title,
+                pinned,
+            } => {
                 assert_eq!(session_id, "auto-title-1");
                 assert_eq!(title, "OpenCode");
+                assert!(!pinned, "agent auto titles never pin");
             }
             other => panic!("expected TitleChanged, got {other:?}"),
         }
 
-        // Ordinary commands never retitle.
+        // Short-lived ordinary commands never retitle.
         session
             .write(b"printf '\\033]133;C;git status\\007'\n")
             .expect("write plain marker");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        session
+            .write(b"printf '\\033]133;D\\007'\n")
+            .expect("write D marker");
         tokio::time::sleep(Duration::from_millis(800)).await;
         assert!(
             rx.try_recv().is_err(),

@@ -7,6 +7,7 @@ import {
   ptyResize,
   ptyAck,
   ptyWrite,
+  ptyResetTitle,
 } from "../../lib/pty/transport";
 import type { PtySpawnOptions } from "../../lib/pty/transport";
 import { substituteLeafId } from "../../lib/pane-manager/layout";
@@ -59,6 +60,9 @@ export type SessionStatus =
 export interface SessionInfo {
   id: string;
   title: string;
+  // Manual renames pin the title: daemon auto titles must not overwrite it.
+  // Absent on pre-pin layouts; loadLayout migrates non-synthetic titles to pinned.
+  titlePinned?: boolean;
   status: SessionStatus;
   cwd?: string;
   // Worktree the session was spawned for, when created through a worktree tab.
@@ -100,6 +104,8 @@ export interface SessionSlice {
   dismissSessionRestoredBanner: (sessionId: string) => void;
   updateSessionCwd: (id: string, cwd: string) => void;
   renameSession: (id: string, title: string) => void;
+  setTitlePinned: (id: string, pinned: boolean) => void;
+  resetSessionTitle: (id: string) => Promise<void>;
   substituteSessionId: (from: string, to: string) => void;
   sendPromptToSession: (sessionId: string, prompt: string) => Promise<void>;
   interruptSession: (sessionId: string) => Promise<void>;
@@ -220,6 +226,7 @@ export function createSessionsSlice(
               [id]: {
                 id,
                 title,
+                ...(existingSession?.titlePinned ? { titlePinned: true } : {}),
                 status: "running",
                 cwd: resolvedCwd || existingSession?.cwd,
                 cols,
@@ -364,6 +371,35 @@ export function createSessionsSlice(
       });
       if (updated) {
         triggerDebouncedSaveLayout(get);
+      }
+    },
+
+    setTitlePinned: (id, pinned) => {
+      let updated = false;
+      set((state) => {
+        const session = state.sessions[id];
+        if (!session) return state;
+        if ((session.titlePinned ?? false) === pinned) return state;
+        updated = true;
+        return {
+          sessions: {
+            ...state.sessions,
+            [id]: pinned ? { ...session, titlePinned: true } : { ...session, titlePinned: false },
+          },
+        };
+      });
+      if (updated) {
+        triggerDebouncedSaveLayout(get);
+      }
+    },
+
+    // Back to automatic: unpin locally, the daemon reverts and broadcasts.
+    resetSessionTitle: async (id) => {
+      get().setTitlePinned(id, false);
+      try {
+        await ptyResetTitle(id);
+      } catch {
+        // Offline/web-dev: the local unpin stands and the next auto event heals the title.
       }
     },
 

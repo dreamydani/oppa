@@ -159,12 +159,18 @@ impl DaemonServer {
                             let session_cwd = session.cwd();
                             let worktree_id = session.worktree_id().map(str::to_string);
                             let working = session.working_state();
-                            // Birth name: restored user titles survive, synthetic
-                            // s- ids drop in favor of a fresh friendly word.
-                            let birth = checkpoint
-                                .as_ref()
+                            // Birth name: pinned and topic titles survive a cold boot
+                            // with their flags; transient auto titles drop in
+                            // favor of a fresh friendly word.
+                            let reusable = checkpoint.as_ref().filter(|snap| {
+                                (snap.title_pinned || snap.topic_set)
+                                    && snap
+                                        .title
+                                        .as_deref()
+                                        .is_some_and(|t| !is_synthetic_title(t, &session_id))
+                            });
+                            let birth = reusable
                                 .and_then(|snap| snap.title.clone())
-                                .filter(|t| !is_synthetic_title(t, &session_id))
                                 .unwrap_or_else(|| {
                                     pick_friendly_name(&session_id, &|cand| {
                                         sessions.values().any(|s| {
@@ -173,6 +179,19 @@ impl DaemonServer {
                                     })
                                 });
                             session.seed_birth_title(birth.clone());
+                            if let Some(snap) = reusable {
+                                if snap.title_pinned {
+                                    session.pin_title();
+                                }
+                                if snap.topic_set {
+                                    session.mark_topic_set();
+                                }
+                                if let Some(idle) = snap.idle_title.as_deref() {
+                                    if !idle.is_empty() {
+                                        session.set_idle_title(idle.to_string());
+                                    }
+                                }
+                            }
                             session.set_global_sender(self.global_events.clone());
                             if let Some(dir) = &self.snapshot_dir {
                                 Self::start_checkpoint_task(Arc::clone(&session), dir.clone());
@@ -301,6 +320,34 @@ impl DaemonServer {
                         self.publish_global(DaemonEvent::TitleChanged {
                             session_id,
                             title: sanitized,
+                            pinned: true,
+                        });
+                        DaemonResponse::Ok
+                    }
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
+            DaemonRequest::ResetSessionTitle { session_id } => {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => {
+                        *session.title_pinned.lock() = false;
+                        *session.topic_set.lock() = false;
+                        // Revert to the birth name when seeded; otherwise keep
+                        // the live title (pre-seed sessions only).
+                        let title = {
+                            let idle = session.idle_title();
+                            if idle.is_empty() {
+                                session.title().unwrap_or_else(|| session_id.clone())
+                            } else {
+                                session.seed_birth_title(idle.clone());
+                                idle
+                            }
+                        };
+                        self.publish_global(DaemonEvent::TitleChanged {
+                            session_id,
+                            title,
+                            pinned: false,
                         });
                         DaemonResponse::Ok
                     }
