@@ -40,6 +40,18 @@ pub fn topic_title_from_prompt(prompt: &str) -> Option<String> {
     Some(truncated)
 }
 
+// Generic foreground title: full command line, whitespace-collapsed, capped
+// at 50 chars (npm run dev → "npm run dev"). Empty lines yield None; agent
+// detection stays with the caller (agents get display names, not cmdlines).
+pub fn generic_title_from_command(cmdline: &str) -> Option<String> {
+    let line = cmdline.lines().next().unwrap_or("").trim();
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(collapsed.chars().take(50).collect())
+}
+
 // Deterministic per session id (same id re-picks the same word, good for
 // restore remaps); first untaken word wins, numeric suffix only when the pool
 // is exhausted.
@@ -137,5 +149,21 @@ mod tests {
         assert_eq!(topic_title_from_prompt("   \n  "), None);
         assert_eq!(topic_title_from_prompt("1234567"), None);
         assert!(topic_title_from_prompt("12345678").is_some());
+    }
+
+    #[test]
+    fn generic_title_keeps_full_command_capped_at_50() {
+        assert_eq!(
+            generic_title_from_command("npm run dev"),
+            Some("npm run dev".into())
+        );
+        assert_eq!(
+            generic_title_from_command("  git   log --oneline  "),
+            Some("git log --oneline".into())
+        );
+        let long = "x".repeat(100);
+        assert_eq!(generic_title_from_command(&long).map(|t| t.len()), Some(50));
+        assert_eq!(generic_title_from_command(""), None);
+        assert_eq!(generic_title_from_command("   "), None);
     }
 }

@@ -5,6 +5,7 @@ use crate::pty::pause_gate::PauseGate;
 use crate::pty::snapshot::AgentSessionRef;
 use crate::pty::screen_mirror::ScreenMirror;
 use crate::pty::shell_args::resolve_shell_launch_config;
+use crate::pty::title_watcher;
 use crate::pty::working_state_watcher;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -483,7 +484,9 @@ impl DaemonSession {
         }
 
         // Working/idle dots: edge-triggered SessionWorking events for subscribers
-        working_state_watcher::spawn(session);
+        working_state_watcher::spawn(Arc::clone(&session));
+        // Generic foreground commands retitle the pane while stable; idle reverts
+        title_watcher::spawn(session);
     }
 
     /// Write input bytes to the PTY's input stream.
@@ -693,12 +696,27 @@ impl DaemonSession {
         *self.title_pinned.lock() = true;
     }
 
+    // Pins and one-shot topics both freeze auto titles.
+    pub(crate) fn auto_title_locked(&self) -> bool {
+        *self.title_pinned.lock() || *self.topic_set.lock()
+    }
+
+    // Back to the birth name once foreground work ends; skipped when the
+    // idle word was never seeded (pre-seed sessions, bare test spawns).
+    pub(crate) fn revert_to_idle_title(&self) -> bool {
+        let idle = self.idle_title();
+        if idle.is_empty() {
+            return false;
+        }
+        self.announce_title(idle)
+    }
+
     pub fn set_global_sender(&self, tx: tokio::sync::broadcast::Sender<DaemonEvent>) {
         *self.global_tx.lock() = Some(tx);
     }
 
     // Store + fan out an auto title; no-op when pinned, unchanged, or blank.
-    fn announce_title(&self, title: String) -> bool {
+    pub(crate) fn announce_title(&self, title: String) -> bool {
         if *self.title_pinned.lock() || title.is_empty() {
             return false;
         }
