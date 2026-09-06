@@ -36,6 +36,7 @@ import {
 } from "./lib/extensions/extensionTransport";
 import { onPtyCwd } from "./lib/pty/transport";
 import { confirmSaveComplete } from "./lib/layout/transport";
+import { applyUiZoom } from "./lib/zoom/zoomTransport";
 import { detectGpuTier } from "./lib/terminal/gpuTier";
 import "./App.css";
 
@@ -73,6 +74,7 @@ function App() {
   const toggleLeftSidebar = useTerminalStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useTerminalStore((s) => s.toggleRightSidebar);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
+  const flushSettings = useTerminalStore((s) => s.flushSettings);
   const loadLayout = useTerminalStore((s) => s.loadLayout);
   const ready = useTerminalStore((s) => s.ready);
   const activeAppMode = useTerminalStore((s) => s.activeAppMode);
@@ -103,8 +105,10 @@ function App() {
     if (appearance.appFontFamily) {
       document.documentElement.style.setProperty("--font-sans", appearance.appFontFamily);
     }
+    // WebView-level zoom (Orca parity) via zoomTransport, which owns root
+    // zoom state: native WebView zoom under Tauri, root CSS zoom in browser.
     if (appearance.uiZoom) {
-      document.documentElement.style.zoom = String(appearance.uiZoom);
+      void applyUiZoom(appearance.uiZoom);
     }
 
     if (appearance.appTheme === "system") {
@@ -210,11 +214,14 @@ function App() {
   // save must not block the app from quitting.
   useEffect(() => {
     const onBeforeUnload = () => {
+      // Flush a pending debounced theme/zoom write too: the timer would die
+      // with the window and the restart would show stale appearance.
+      void flushSettings().catch(() => {});
       void saveLayout().catch(() => {});
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [saveLayout]);
+  }, [saveLayout, flushSettings]);
 
   // Close handshake: Rust intercepts the window close and emits
   // `app:before-close`; flush the save, signal completion, and let Rust exit.
@@ -225,6 +232,7 @@ function App() {
     let cancelled = false;
     void listen("app:before-close", async () => {
       try {
+        await flushSettings();
         await saveLayout();
         await confirmSaveComplete();
       } catch {
@@ -239,7 +247,7 @@ function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [saveLayout]);
+  }, [saveLayout, flushSettings]);
 
   useEffect(() => {
     const isMac =

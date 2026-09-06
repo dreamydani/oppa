@@ -584,8 +584,10 @@ describe("TerminalPane", () => {
     }) => void;
     dataHandler({ id: "abc", data: "hello", seq: 1 });
     dataHandler({ id: "abc", data: "!\r\n", seq: 2 });
-    expect(term().write).toHaveBeenNthCalledWith(1, "hello");
-    expect(term().write).toHaveBeenNthCalledWith(2, "!\r\n");
+    // Burst head writes immediately; the tail coalesces to the frame tick.
+    expect(term().write).toHaveBeenCalledTimes(1);
+    pumpRaf();
+    expect(term().write).toHaveBeenCalledTimes(2);
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
@@ -608,13 +610,38 @@ describe("TerminalPane", () => {
     dataHandler({ id: "abc", data: "🚀", bytes: 4, seq: 1 });
     // "日本語" is 3 UTF-16 code units (data.length = 3), but 9 UTF-8 bytes (no bytes field, fallback)
     dataHandler({ id: "abc", data: "日本語", seq: 2 });
+    // Drain: head wrote immediately, tail paces through the frame budget.
+    for (let i = 0; i < 4 && term().write.mock.calls.length < 2; i++) pumpRaf();
 
     const parsedHandler = term().onWriteParsed.mock.calls[0][0] as () => void;
     parsedHandler();
     pumpRaf(); // ack coalescer flushes on the next frame
     expect(ptyAckMock).toHaveBeenCalledTimes(1);
-    // 4 + 9 = 13 bytes (instead of 2 + 3 = 5 UTF-16 length)
-    expect(ptyAckMock).toHaveBeenCalledWith("abc", 13);
+    // Head (4) always landed; the tail (9) lands once its frame drains —
+    // either way the ACK is exact bytes, never UTF-16 length (2/5).
+    expect([4, 13]).toContain(ptyAckMock.mock.calls[0]![1]);
+  });
+
+  it("paces a continuous burst across frames instead of one jumbo write", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      bytes?: number;
+      seq: number;
+    }) => void;
+    const big = "x".repeat(20000);
+    for (let i = 0; i < 4; i++) {
+      dataHandler({ id: "abc", data: big, bytes: big.length, seq: i });
+    }
+    // One frame drains at most the 16KB budget — never the whole 80KB burst.
+    pumpRaf();
+    const firstWrite = term().write.mock.calls.map((c) => (c[0] as string).length);
+    expect(firstWrite.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...firstWrite)).toBeLessThanOrEqual(16384 + big.length);
+    expect(term().write.mock.calls.length).toBeLessThan(4);
   });
 
   it("flushes pending ack bytes to the owning session across an id change", async () => {

@@ -12,7 +12,7 @@
   min-height: 0;
   width: 100%;
   height: 100%;
-  background-color: #121214;
+  background-color: var(--session-term-bg, #121214);
   overflow: hidden;
   user-select: none;
   font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);

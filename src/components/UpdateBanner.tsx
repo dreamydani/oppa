@@ -54,16 +54,16 @@ type CardPhase =
 // appears after an explicit user action fails — checks stay fail-silent.
 //
 // Session-running warning: "Restart now" (native) and "Update now" (legacy)
-// surface "N sessions are still running. Updating will close them." with
-// Update anyway / Not now — the interruption is always the user's informed
-// choice. Unknown (can't verify — an old daemon, or a transport error) →
-// proceed to the download, which itself cannot kill sessions; we never claim
-// "safe" on unknown.
+// surface "N sessions are still running. They'll restore after the restart."
+// with Update anyway / Not now — the restart is always the user's informed
+// choice, and the confirmation bypasses the probe once (no re-loop).
+// Unknown (can't verify — an old daemon, or a transport error) → proceed to
+// the download, which itself cannot kill sessions; we never claim "safe" on
+// unknown.
 //
 // Orca-style restore: Restart flushes layout + scrollbacks first so the
-// relaunch cold-restores tabs/cwd/scrollback even though live shells end.
-// Copy says "Sessions restore after restart" (accurate, not "won't be
-// interrupted").
+// relaunch restores tabs/cwd/scrollback (warm reattach when the daemon lives,
+// cold replay when it doesn't). Copy matches Orca's reassurance.
 //
 // "Not now" hides the card and persists `general.dismissedUpdateVersion`
 // (debounced save via settingsDataSlice), so it never nags again for the same
@@ -116,6 +116,9 @@ export function UpdateBanner() {
   const notAvailableTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phaseRef = useRef<CardPhase | null>(null);
   phaseRef.current = phase;
+  // Set once the user confirms the busy warning: retries in the same offer
+  // cycle inherit the confirmation instead of re-hitting the busy wall.
+  const confirmedRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -183,6 +186,8 @@ export function UpdateBanner() {
     setErrorOrigin(null);
     setBusySessionCount(null);
     setProgress(null);
+    // A new offer starts a new consent cycle: a previous confirmation dies here.
+    confirmedRef.current = false;
     // Any state change resets collapse (Orca parity) and announces it.
     setCollapsed(false);
     announceCardCollapsed(false);
@@ -204,6 +209,7 @@ export function UpdateBanner() {
       setBusySessionCount(null);
       setError(null);
       setErrorOrigin(null);
+      confirmedRef.current = false;
       setProgress(null);
       setCollapsed(false);
       announceCardCollapsed(false);
@@ -313,12 +319,14 @@ export function UpdateBanner() {
     }
   };
 
-  const handleRestartNow = async () => {
+  const handleRestartNow = async (force = confirmedRef.current) => {
     // Flush layout + scrollbacks first (Orca-style restore), then install.
-    // The seam probes the daemon first and blocks on busy without touching
-    // the plugin; idle/unknown proceed to install + relaunch.
+    // Unforced, the seam probes the daemon first and blocks on busy without
+    // touching the plugin; forced (explicit confirm) skips the probe so the
+    // confirm can never loop back onto the same warning.
     const outcome = await installNativeUpdateAndRelaunch(() => {}, {
       onBeforeInstall: () => useTerminalStore.getState().saveLayout(),
+      force,
     });
     if (!mountedRef.current) return;
     if (outcome.proceeded) return;
@@ -334,13 +342,13 @@ export function UpdateBanner() {
   };
 
   const handleUpdateAnyway = async () => {
-    // The informed-choice path: the user saw the warning and accepted that
-    // updating will close their sessions.
+    // The informed-choice path: the user saw the warning and accepted the
+    // restart, so this single confirmation bypasses the busy probe (Orca:
+    // confirm means install). Sessions restore after the restart.
+    confirmedRef.current = true;
     setBusySessionCount(null);
     if (engine === "native") {
-      // No force flag on the seam by design — re-attempt re-probes and
-      // proceeds once sessions drain.
-      await handleRestartNow();
+      await handleRestartNow(true);
     } else {
       openDownload();
     }
@@ -349,6 +357,7 @@ export function UpdateBanner() {
   const handleRetry = async () => {
     setError(null);
     if (errorOrigin === "install") {
+      // A retry inside a confirmed cycle keeps the confirmation.
       await handleRestartNow();
     } else {
       await handleDownloadNow();
@@ -356,6 +365,7 @@ export function UpdateBanner() {
   };
 
   const dismissVersion = (version: string) => {
+    confirmedRef.current = false;
     updateSettings({ general: { dismissedUpdateVersion: version } });
     setPhase(null);
     setEngine(null);
@@ -417,7 +427,7 @@ export function UpdateBanner() {
         <div role="alert" className="update-card-column">
           <span className="update-card-sub">
             {busySessionCount} {busySessionCount === 1 ? "session is" : "sessions are"} still
-            running. Updating will close {busySessionCount === 1 ? "it" : "them"}.
+            running. They&apos;ll restore after the restart.
           </span>
           <div className="update-card-actions">
             <button
@@ -573,7 +583,9 @@ export function UpdateBanner() {
                   ? `Oppa v${version} is ready.`
                   : `A new version of OPPA is available (v${version}).`}
               </span>
-              <span className="update-card-sub">Sessions restore after restart.</span>
+              <span className="update-card-sub">
+                Your terminal sessions won&apos;t be interrupted during the update.
+              </span>
               {releaseBody ? (
                 <span className="update-card-notes">{releaseBody.slice(0, 220)}</span>
               ) : null}

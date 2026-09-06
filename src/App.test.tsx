@@ -89,6 +89,10 @@ vi.mock("./components/TerminalPane", () => ({
   ),
 }));
 
+vi.mock("./lib/zoom/zoomTransport", () => ({
+  applyUiZoom: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -945,7 +949,8 @@ describe("App", () => {
     });
   });
 
-  it("updates data-theme, uiZoom, and --font-sans on documentElement when appearance changes", () => {
+  it("updates data-theme, uiZoom, and --font-sans on documentElement when appearance changes", async () => {
+    const { applyUiZoom } = await import("./lib/zoom/zoomTransport");
     render(<App />);
 
     act(() => {
@@ -957,7 +962,9 @@ describe("App", () => {
     });
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(document.documentElement.style.zoom).toBe("1.1");
+    // Zoom ownership lives in zoomTransport (mocked here): App never touches it.
+    expect(document.documentElement.style.zoom).toBe("");
+    expect(applyUiZoom).toHaveBeenCalledWith(1.1);
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("Inter, sans-serif");
 
     act(() => {
@@ -969,8 +976,31 @@ describe("App", () => {
     });
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(document.documentElement.style.zoom).toBe("0.9");
+    expect(document.documentElement.style.zoom).toBe("");
+    expect(applyUiZoom).toHaveBeenCalledWith(0.9);
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe("Geist, sans-serif");
+  });
+
+  it("flushes pending settings on app:before-close before confirming save", async () => {
+    const { listen } = await import("@tauri-apps/api/event");
+    const handlers = new Map<string, (e?: unknown) => unknown>();
+    vi.mocked(listen).mockImplementation(async (event, cb) => {
+      handlers.set(event as string, cb as (e?: unknown) => unknown);
+      const unlisten = () => {};
+      return unlisten;
+    });
+    const flushSpy = vi.spyOn(useTerminalStore.getState(), "flushSettings").mockResolvedValue(undefined);
+
+    render(<App />);
+    await vi.waitFor(() => {
+      expect(handlers.has("app:before-close")).toBe(true);
+    });
+
+    await handlers.get("app:before-close")?.();
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+    expect(layoutTransport.saveLayout).toHaveBeenCalled();
+    expect(layoutTransport.confirmSaveComplete).toHaveBeenCalled();
+    flushSpy.mockRestore();
   });
 
   it("resolves and tracks system media query when appTheme is system", () => {

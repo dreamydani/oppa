@@ -4106,6 +4106,23 @@ describe("terminalStore", () => {
       }
     });
 
+    it("flushSettings immediately persists pending theme changes (close-path)", async () => {
+      useTerminalStore.getState().updateAppearanceSettings({
+        themeName: "dracula",
+      });
+      expect(saveSettingsMock).not.toHaveBeenCalled();
+
+      await useTerminalStore.getState().flushSettings();
+
+      expect(saveSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appearance: expect.objectContaining({
+            themeName: "dracula",
+          }),
+        }),
+      );
+    });
+
     it("updateSettings merges appearance slice and triggers debounced persistence", async () => {
       vi.useFakeTimers();
       try {

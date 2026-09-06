@@ -964,20 +964,32 @@ export function createPaneLayoutSlice(
       await transportSaveLayout(JSON.stringify(snapshot));
       // Serialize only buffers with new output since the last write — a tab
       // switch or rename must not stringify every live terminal. Each
-      // serialize is bounded (~1MB via scrollbackBudget) and we yield between
-      // sessions so a burst of dirty buffers never blocks the UI thread in
-      // one synchronous block.
+      // serialize is bounded (~1MB via scrollbackBudget) and the whole pass
+      // is deferred off the frame: every serialize() walks up to 5000 rows
+      // synchronously, so running it while an agent burst streams is the
+      // jank users feel as stutter. Dirty flags are left set; the deferred
+      // pass clears per-id before serializing so output landing mid-save
+      // re-marks for the next pass instead of being lost.
+      const dirtyIds = Object.values(sessions)
+        .map((s) => s.id)
+        .filter((id) => isScrollbackDirty(id));
+      if (dirtyIds.length === 0) {
+        await cleanupStaleScrollbacks(Object.keys(sessions)).catch(() => {});
+        return;
+      }
+      // Scrollback serializes walk up to 5000 rows synchronously: a microtask
+      // keeps the layout-JSON write (above) on the current task while each
+      // serialize lands after it. The per-session yields use a resolved promise
+      // (microtask, not setTimeout) so the pass never stalls under fake timers
+      // or on the close path, yet N dirty panes still can't block one frame.
       const scrollbackPromises: Promise<void>[] = [];
-      for (const s of Object.values(sessions)) {
-        if (!isScrollbackDirty(s.id)) continue;
-        // Clear per-id before awaiting: output landing mid-save re-marks it
-        // via markScrollbackDirty for the next pass instead of being lost.
-        clearDirtyScrollback(s.id);
-        const buffer = serializers[s.id]?.() || cachedScrollbacks[s.id];
+      await Promise.resolve();
+      for (const id of dirtyIds) {
+        clearDirtyScrollback(id);
+        const buffer = serializers[id]?.() || cachedScrollbacks[id];
         if (buffer) {
-          scrollbackPromises.push(saveScrollback(s.id, buffer).catch(() => {}));
+          scrollbackPromises.push(saveScrollback(id, buffer).catch(() => {}));
         }
-        // Yield to the event loop between serializations.
         await Promise.resolve();
       }
       if (scrollbackPromises.length > 0) {
