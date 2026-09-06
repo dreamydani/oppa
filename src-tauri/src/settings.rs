@@ -68,7 +68,7 @@ impl Default for AppearanceSettings {
             app_theme: "dark".into(),
             app_font_family: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif".into(),
             ui_zoom: 1.0,
-            sidebar_on_launch: "open".into(),
+            sidebar_on_launch: "remember_last".into(),
             show_status_bar: true,
             show_titlebar_logo: true,
             theme_name: "oppa_dark".into(),
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(settings.appearance.app_theme, "dark");
         assert_eq!(settings.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
         assert_eq!(settings.appearance.ui_zoom, 1.0);
-        assert_eq!(settings.appearance.sidebar_on_launch, "open");
+        assert_eq!(settings.appearance.sidebar_on_launch, "remember_last");
         assert!(settings.appearance.show_status_bar);
         assert!(settings.appearance.show_titlebar_logo);
         assert_eq!(settings.appearance.theme_name, "oppa_dark");
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(settings.appearance.app_theme, "dark");
         assert_eq!(settings.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
         assert_eq!(settings.appearance.ui_zoom, 1.0);
-        assert_eq!(settings.appearance.sidebar_on_launch, "open");
+        assert_eq!(settings.appearance.sidebar_on_launch, "remember_last");
         assert!(settings.appearance.show_status_bar);
         assert!(settings.appearance.show_titlebar_logo);
 
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(deserialized.appearance.app_theme, "dark");
         assert_eq!(deserialized.appearance.app_font_family, "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
         assert_eq!(deserialized.appearance.ui_zoom, 1.0);
-        assert_eq!(deserialized.appearance.sidebar_on_launch, "open");
+        assert_eq!(deserialized.appearance.sidebar_on_launch, "remember_last");
         assert!(deserialized.appearance.show_status_bar);
         assert!(deserialized.appearance.show_titlebar_logo);
     }

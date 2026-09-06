@@ -118,6 +118,34 @@ describe("settings transport", () => {
       expect(result?.appearance.themeName).toBe("solarized_dark");
     });
 
+    it("normalizes snake_case legacy appearance keys to camelCase", async () => {
+      const legacy = {
+        appearance: {
+          theme_name: "dracula",
+          font_size: 16,
+          app_theme: "light",
+          ui_zoom: 1.1,
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(legacy));
+      const result = await loadSettings();
+      expect(result?.appearance.themeName).toBe("dracula");
+      expect(result?.appearance.fontSize).toBe(16);
+      expect(result?.appearance.appTheme).toBe("light");
+      expect(result?.appearance.uiZoom).toBe(1.1);
+    });
+
+    it("falls back to default theme for unknown theme ids", async () => {
+      const bad = {
+        appearance: {
+          themeName: "not_a_real_theme_xyz",
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(bad));
+      const result = await loadSettings();
+      expect(result?.appearance.themeName).toBe("oppa_dark");
+    });
+
     it("returns null if load_settings returns null", async () => {
       invokeMock.mockResolvedValueOnce(null);
       const result = await loadSettings();

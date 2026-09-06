@@ -28,6 +28,7 @@ export interface SettingsDataSlice {
   updateAppearanceSettings: (partial: Partial<AppSettings["appearance"]>) => void;
   resolveDefaultCwd: () => string | undefined;
   loadSettingsData: () => Promise<void>;
+  flushSettings: () => Promise<void>;
 }
 
 function persistSettingsSoon(get: () => TerminalState) {
@@ -97,6 +98,20 @@ export function createSettingsDataSlice(
         }
       } catch {
         // Keep default settings on error
+      }
+    },
+
+    // Close-path flush: a pending debounced theme/zoom write must not die
+    // with the window (beforeunload cannot await the timer).
+    flushSettings: async () => {
+      if (settingsSaveTimer) {
+        clearTimeout(settingsSaveTimer);
+        settingsSaveTimer = null;
+      }
+      try {
+        await transportSaveSettings(get().settings);
+      } catch {
+        // Best-effort: a failed flush must not block quit.
       }
     },
   };

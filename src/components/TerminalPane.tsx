@@ -23,6 +23,7 @@ import {
   touchGlSlot,
 } from "../lib/terminal/webglRegistry";
 import { useTerminalStore, markScrollbackDirty } from "../store/terminalStore";
+import { useExtensionStore } from "../store/extensionStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
 import { planFullBleed } from "../lib/terminal/fullBleedFit";
@@ -82,6 +83,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const status = useTerminalStore((s) => s.sessions[id]?.status);
   const session = useTerminalStore((s) => s.sessions[id]);
   const appearance = useTerminalStore((s) => s.settings.appearance);
+  // Re-resolve the xterm theme when extension contributions land after boot:
+  // getTerminalTheme falls back to oppa_dark for unknown ids, and without
+  // this dep a pane mounted before the registry load would stay fallback.
+  const extensionThemeCount = useExtensionStore((s) => s.extensions.length);
   const appearanceRef = useRef(appearance);
   appearanceRef.current = appearance;
 
@@ -759,7 +764,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     term.options.cursorBlink = appearance.cursorBlink;
     paintSessionSurface(theme.background);
     commitFitRef.current?.();
-  }, [appearance, paintSessionSurface]);
+  }, [appearance, extensionThemeCount, paintSessionSurface]);
 
   if (!session) {
     return <div className="terminal-pane" />;
