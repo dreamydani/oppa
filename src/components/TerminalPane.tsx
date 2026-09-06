@@ -235,7 +235,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // Stretch-to-fill: nudge letterSpacing/lineHeight so cols*cellW and
     // rows*cellH consume the pane exactly — no right/bottom rounding gap.
     // Anchored to the CONFIGURED lineHeight so repeated plans never ratchet.
+    // Skipped while an output burst is in flight (tracked by the write path
+    // below): metric churn mid-burst re-measures every cell and reads as
+    // stutter; geometry commits still go through via fit.fit().
+    let outputBurstUntil = 0;
+    const noteOutputBurst = () => {
+      outputBurstUntil = Date.now() + 500;
+    };
+    const inOutputBurst = () => Date.now() < outputBurstUntil;
     const applyFullBleed = (): boolean => {
+      if (inOutputBurst()) return false;
       try {
         const dpr = window.devicePixelRatio || 1;
         const cssDims = (
@@ -515,10 +524,17 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
 
     // Routed through the shared multiplexer: one global listener dispatches
     // per session id (O(1)) instead of every pane filtering every event.
+    // ACKs are accounted when the queue actually hands bytes to xterm (render
+    // time), not at IPC receipt — otherwise the daemon's watermarks release
+    // while the renderer is still behind and bursts arrive as jumbo parses.
     const writeQueue = createThrottledWriteQueue(
       getPanePriority(id),
-      (data) => {
-        if (!disposed) term.write(data);
+      (data, bytes) => {
+        if (disposed) return;
+        // Render-time accounting: exact daemon bytes for this batch, drained
+        // into the ACK by onWriteParsed. Never counted at IPC receipt.
+        parsedRef.current += bytes;
+        term.write(data);
       },
       GpuTier[detectGpuTier()].backgroundFps,
     );
@@ -527,9 +543,11 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     unsubs.push(
       subscribePtyData(id, (p) => {
         if (disposed) return;
-        parsedRef.current +=
-          typeof p.bytes === "number" ? p.bytes : new TextEncoder().encode(p.data).length;
-        // Cheap Set.add: the next layout save re-serializes this buffer only.
+        // IPC receipt only marks persistence dirty (cheap Set.add). Byte
+        // accounting for backpressure happens in the queue's write callback.
+        // Large/fast chunks also arm the burst window that defers full-bleed
+        // metric churn until output goes quiet.
+        if (p.data.length > 1024) noteOutputBurst();
         markScrollbackDirty(id);
         // Once the buffer reaches the scrollback plateau (rows + cap), xterm
         // has started evicting the oldest lines — write a one-time marker so
@@ -544,7 +562,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
             truncationMarked,
           );
         }
-        writeQueue.push(p.data);
+        writeQueue.push(p.data, p.bytes);
       }),
     );
 
@@ -568,7 +586,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // Stable-fit guard (Orca pattern): Windows can report a one-column gutter
     // wobble between frames, so commit a fit only after the proposed grid
     // repeats on consecutive frames (or hits the frame cap) — otherwise
-    // split views vibrate with rapid SIGWINCH loops.
+    // split views vibrate with rapid SIGWINCH loops. The deadband extends the
+    // cap for sub-2-col/row flips: output-driven 1px wobble (scrollbar
+    // appear/disappear, DPR rounding) must never SIGWINCH a TUI into a full
+    // redraw — that feedback is the stutter under agent bursts.
     let stableRaf = 0;
     const proposeGrid = (): { cols: number; rows: number } | null => {
       try {
@@ -589,9 +610,23 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           return;
         }
         const matchesTerminal = term.cols === next.cols && term.rows === next.rows;
+        // Jitter = the PROPOSAL itself oscillates by 1 col/row between frames
+        // (scrollbar/DPR wobble). A stable proposal that differs from the
+        // terminal is a real resize and commits on repeat as before — only
+        // oscillating proposals get the extended cap so they have more time
+        // to settle back to matching (a harmless no-op) instead of forcing
+        // a SIGWINCH that makes TUIs fully redraw mid-burst.
+        const prev = previous;
+        const proposalChanged =
+          !!prev && (next.cols !== prev.cols || next.rows !== prev.rows);
+        const delta = proposalChanged && prev
+          ? Math.max(Math.abs(next.cols - prev.cols), Math.abs(next.rows - prev.rows))
+          : 0;
+        const jitter = proposalChanged && delta < 2 && !matchesTerminal;
+        const frameCap = jitter ? 16 : 8;
         const stable =
           matchesTerminal ||
-          ++frame >= 8 ||
+          ++frame >= frameCap ||
           (!!previous && next.cols === previous.cols && next.rows === previous.rows);
         if (!stable) {
           previous = next;
@@ -635,9 +670,29 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       pendingFitCancel = requestFit(id, runStableFit);
       return fresh;
     };
+    // Height-only changes (agent pill, banners) never alter cols/rows, and
+    // happy-dom/test rects are 0x0: only skip when we have a real previous
+    // sample proving nothing meaningful moved. Width uses a 2px hysteresis
+    // so scrollbar-appear wobble still reaches the stable-fit deadband.
+    let lastRoWidth = -1;
+    let lastRoHeight = -1;
     const ro = new ResizeObserver(() => {
+      try {
+        const box = containerRef.current!.getBoundingClientRect();
+        const rowPx = 10;
+        const hasSample = lastRoWidth >= 0 && box.width > 0 && box.height > 0;
+        const widthChanged = Math.abs(box.width - lastRoWidth) >= 2;
+        const heightChanged = Math.abs(box.height - lastRoHeight) >= rowPx;
+        if (box.width > 0 && box.height > 0) {
+          lastRoWidth = box.width;
+          lastRoHeight = box.height;
+        }
+        if (hasSample && !widthChanged && !heightChanged) return;
+      } catch {}
       if (!isLayoutAnimating()) {
         const fresh = scheduleStableFit();
+        // Stretch overlay only for real continuous streams (drags): a fresh
+        // discrete refit commits crisply without a scaled stale frame.
         if (!fresh) stretchOverlay();
         return;
       }

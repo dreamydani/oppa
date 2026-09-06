@@ -12,7 +12,11 @@ use crate::pty::utf8_decoder::Utf8ChunkDecoder;
 use parking_lot::Mutex;
 
 pub const MAX_BATCH_BYTES: usize = 32 * 1024;
-pub const DEFAULT_FLUSH_INTERVAL_MS: u64 = 8;
+// Frame-aligned emission: one Data event per 60fps frame at most, so the
+// renderer's per-frame write budget paces bursts as smooth scroll. Idle
+// output still flushes via the batch_first_at window (no added latency when
+// quiet — the interval only bounds continuous streams).
+pub const DEFAULT_FLUSH_INTERVAL_MS: u64 = 16;
 // Bounded tail drain so a wedged reader can never hang session teardown.
 const FINISH_TIMEOUT: Duration = Duration::from_millis(500);
 
