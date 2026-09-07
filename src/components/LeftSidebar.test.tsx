@@ -386,10 +386,11 @@ describe("LeftSidebar", () => {
       screen.getByRole("group", { name: /filter workspaces/i }),
     ).toBeDefined();
 
-    // Neither fixture workspace is worktree-bound: the chip empties the list.
+    // Neither fixture workspace is worktree-bound: the chip empties the list
+    // into the worktrees-specific empty state.
     fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
     expect(screen.queryByText("oppa-alpha")).toBeNull();
-    expect(screen.getByText("No Matches")).toBeDefined();
+    expect(screen.getByText("No worktrees")).toBeDefined();
     // Search box is untouched by chips.
     expect(
       (screen.getByPlaceholderText(/search workspaces/i) as HTMLInputElement).value,

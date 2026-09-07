@@ -212,6 +212,11 @@
   background: var(--tint-hover, rgba(255, 255, 255, 0.04));
 }
 
+.ws-row:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, var(--accent-blue, #58a6ff));
+  outline-offset: -2px;
+}
+
 /* Focused session: rounded tint, no accent bar — the gutter dot is the accent. */
 .ws-row.is-active {
   background: var(--tint-active, rgba(255, 255, 255, 0.10));

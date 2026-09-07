@@ -902,5 +902,120 @@ describe("WorkspaceList", () => {
     const { container } = render(<WorkspaceList />);
     expect(container.querySelector(".ws-row.is-unread")).not.toBeNull();
   });
+
+  it("focuses the pane when Enter is pressed on a row", () => {
+    const focusSpy = vi.spyOn(useTerminalStore.getState(), "focusPane");
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "main pane" }) },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const row = container.querySelector(".ws-row")!;
+    expect(row.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(focusSpy).toHaveBeenCalled();
+  });
+
+  it("pins and closes the row from keyboard shortcuts", () => {
+    const closeSpy = vi.spyOn(useTerminalStore.getState(), "closePane").mockResolvedValue(undefined);
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "main pane" }) },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const row = container.querySelector(".ws-row")!;
+
+    fireEvent.keyDown(row, { key: "p" });
+    expect(screen.getByRole("button", { name: "Unpin main pane" })).toBeDefined();
+
+    fireEvent.keyDown(row, { key: "Delete" });
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
+  it("opens a context menu on right-click with pin and copy-path actions", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "main pane", cwd: "C:/projects/oppa" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    fireEvent.contextMenu(container.querySelector(".ws-row")!);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /copy path/i }));
+    expect(writeText).toHaveBeenCalledWith("C:/projects/oppa");
+    if (clipboardDescriptor) Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+  });
+
+  it("shows an all-caught-up empty state for the attention view", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "quiet pane" }) },
+    });
+
+    render(<WorkspaceList sectionFilter="attention" />);
+    expect(screen.getByText("All caught up")).toBeInTheDocument();
+  });
+
+  it("offers a New Worktree button from the worktrees empty state", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "plain pane" }) },
+    });
+
+    render(<WorkspaceList sectionFilter="worktrees" />);
+    fireEvent.click(screen.getByRole("button", { name: /new worktree/i }));
+    expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
+  });
 });
 

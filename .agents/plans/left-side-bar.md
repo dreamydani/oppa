@@ -28,12 +28,12 @@ Locked decisions: 1) 56px icon rail 2) interleaved + `Worktrees` chip 3) taller 
 - [x] Status: blocked amber dot + waiting hollow dot unhidden; unread rows bold; working dots + done dot kept.
 - Tests: pill, PR badge href, missing, retired, blocked/waiting dots, unread (old silence test replaced as intended behavior change).
 
-## P3 — Productivity wiring
-- [ ] Row keyboard: arrows navigate, `Enter` open, `p` pin, `a` close, `e` expand/collapse-all (cards already have `tabIndex`; extend pattern to rows).
-- [ ] Right-click context menu reusing file-menu pattern (Rename/Pin/Split/Close/Copy path).
-- [ ] Empty states: keep `No Workspaces`; add `No attention`, `No worktrees → Create` (→ `openWorktreeCreate`).
-- Tests: key nav, pin key, menu actions, empty states.
-- // ponytail: skipped DnD + custom menu chrome; reuse `dragState`/`...` menu when asked.
+## P3 — Productivity wiring ✅ DONE
+- [x] Row keyboard: `tabIndex` + Enter/Space focus, `p` pin, Delete/Backspace close (inner buttons keep own keys via closest-guard); focus-visible ring on `--focus-ring`.
+- [x] Right-click row menu reusing `.worktree-card-menu` panel: Focus/Pin/Split/Copy path/Close (+ Esc/outside close). Copy uses `record.path ?? session.cwd`.
+- [x] Empty states: Attention → "All caught up"; Worktrees → "No worktrees" + New Worktree button (→ `openWorktreeCreate`); search keeps "No Matches".
+- [ ] CUT (ponytail): arrow-key roving nav (Tab order suffices); custom menu chrome; DnD.
+- Tests: Enter focus, p/Del shortcuts, context menu + clipboard, 2 empty states.
 
 ## Verify each phase
 `pnpm vitest run src/components/LeftSidebar.test.tsx src/components/workspace/WorkspaceList.test.tsx` + `cargo check` in `src-tauri`. End task with conventional commit (`feat:`/`fix:`).

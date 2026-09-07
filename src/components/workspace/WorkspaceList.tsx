@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
 import type { TabState } from "../../store/slices/paneLayoutSlice";
 import { leafIds } from "../../store/slices/layoutQueries";
@@ -58,6 +58,8 @@ interface WorkspaceRow {
   // Worktree aliveness, straight from the loaded registry (no extra IPC).
   pill?: string;
   prUrl?: string;
+  // Full path for Copy path (worktree path wins, plain cwd otherwise).
+  path?: string;
   missingOnDisk?: boolean;
   retired?: boolean;
   worktreeId?: string;
@@ -89,6 +91,9 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onSplitRow,
   onCloseRow,
   onTogglePin,
+  menuSessionId,
+  onOpenMenu,
+  onCloseMenu,
 }: {
   data: WorkspaceCardData;
   expanded: boolean;
@@ -103,6 +108,9 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onSplitRow: (sessionId: string) => void;
   onCloseRow: (sessionId: string) => void;
   onTogglePin: (sessionId: string) => void;
+  menuSessionId: string | null;
+  onOpenMenu: (sessionId: string) => void;
+  onCloseMenu: () => void;
 }) {
   const title = data.tab.isWizard
     ? data.tab.title || "New Workspace"
@@ -244,9 +252,29 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 // Feeds the [data-motion="stagger"] cascade; motion.css caps it
                 // at --stagger-cap so a long list still finishes arriving fast.
                 style={{ "--row-index": rowIndex } as React.CSSProperties}
+                tabIndex={0}
                 onClick={() => {
                   markAgentStatusSeen(row.sessionId);
                   onFocusRow(row.sessionId);
+                }}
+                // Inner buttons keep their own keys: typing in them must not
+                // also drive the row (Enter would both click and focus).
+                onKeyDown={(e) => {
+                  if ((e.target as HTMLElement).closest("button, a, input")) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    markAgentStatusSeen(row.sessionId);
+                    onFocusRow(row.sessionId);
+                  } else if (e.key === "p") {
+                    onTogglePin(row.sessionId);
+                  } else if (e.key === "Delete" || e.key === "Backspace") {
+                    onCloseRow(row.sessionId);
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onOpenMenu(row.sessionId);
                 }}
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
@@ -351,6 +379,65 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                     onActionFinished={onWorktreeAction}
                   />
                 )}
+                {menuSessionId === row.sessionId && (
+                  <div className="worktree-card-menu ws-row-menu" role="menu" data-motion="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onCloseMenu();
+                        markAgentStatusSeen(row.sessionId);
+                        onFocusRow(row.sessionId);
+                      }}
+                    >
+                      Focus session
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onCloseMenu();
+                        onTogglePin(row.sessionId);
+                      }}
+                    >
+                      {isPinned ? "Unpin" : "Pin"}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onCloseMenu();
+                        onSplitRow(row.sessionId);
+                      }}
+                    >
+                      Split pane
+                    </button>
+                    {row.path && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onCloseMenu();
+                          void navigator.clipboard?.writeText(row.path!).catch(() => {});
+                        }}
+                      >
+                        Copy path
+                      </button>
+                    )}
+                    <div className="worktree-menu-divider" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="danger"
+                      onClick={() => {
+                        onCloseMenu();
+                        onCloseRow(row.sessionId);
+                      }}
+                    >
+                      Close pane
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -405,6 +492,25 @@ export function WorkspaceList({
 
   // Pinned sessions float to the top of their folder (session-scoped).
   const [pinnedSessionIds, setPinnedSessionIds] = useState<ReadonlySet<string>>(new Set());
+  // Row context menu (right-click): one open at a time, row-anchored panel.
+  const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!menuSessionId) return;
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".ws-row-menu")) {
+        setMenuSessionId(null);
+      }
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuSessionId(null);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuSessionId]);
   const togglePin = (sessionId: string) => {
     setPinnedSessionIds((prev) => {
       const next = new Set(prev);
@@ -450,6 +556,7 @@ export function WorkspaceList({
                 : record.workspace_status
               : undefined,
           prUrl: record?.linked_pr_url ?? undefined,
+          path: record?.path ?? session.cwd,
           missingOnDisk: entry?.missing_on_disk ?? false,
           retired: record?.retired ?? false,
           worktreeId: session.worktreeId,
@@ -524,6 +631,34 @@ export function WorkspaceList({
   });
 
   if (visibleCards.length === 0 && (filter.trim() || sectionFilter !== "all")) {
+    // Chip-specific empty states read as progress, not failure.
+    if (sectionFilter === "attention" && !filter.trim()) {
+      return (
+        <div className="sidebar-empty-state">
+          <span className="sidebar-empty-title">All caught up</span>
+          <span className="sidebar-empty-desc">
+            Nothing needs you right now.
+          </span>
+        </div>
+      );
+    }
+    if (sectionFilter === "worktrees" && !filter.trim()) {
+      return (
+        <div className="sidebar-empty-state">
+          <span className="sidebar-empty-title">No worktrees</span>
+          <span className="sidebar-empty-desc">
+            Isolate a task in its own branch checkout.
+          </span>
+          <button
+            type="button"
+            className="sidebar-empty-btn"
+            onClick={() => openWorktreeCreate()}
+          >
+            <PlusIcon size={12} /> New Worktree
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="sidebar-empty-state">
         <span className="sidebar-empty-title">No Matches</span>
@@ -602,10 +737,13 @@ export function WorkspaceList({
             void closePane(path);
           }
         }}
-        onTogglePin={togglePin}
-      />
-    );
-  };
+            onTogglePin={togglePin}
+            menuSessionId={menuSessionId}
+            onOpenMenu={(sessionId) => setMenuSessionId(sessionId)}
+            onCloseMenu={() => setMenuSessionId(null)}
+          />
+        );
+      };
 
   const renderSection = (
     title: string,
