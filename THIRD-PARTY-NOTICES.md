@@ -15,5 +15,14 @@ This project depends on the following third-party software. Full license texts a
 | React | 19.2.8 | https://github.com/facebook/react | MIT |
 | xterm.js (`@xterm/xterm`) | 6.0.0 | https://github.com/xtermjs/xterm.js | MIT |
 | Monaco Editor | 0.56.0 | https://github.com/microsoft/monaco-editor | MIT |
+| sherpa-onnx | 1.13.7 | https://github.com/k2-fsa/sherpa-onnx | Apache-2.0 |
+
+## Adapted designs
+
+| Work | Upstream | License |
+| --- | --- | --- |
+| Voice dictation (speech-model catalog, download metadata, STT lifecycle, dictation UX) | stablyai/orca (© Lovecast Inc.) | MIT |
+
+Design ideas and algorithms are adapted from the upstream project; no code is copied verbatim across languages. Model download metadata (URLs, sizes, hashes) mirrors the upstream catalog.
 
 Transitive dependencies are pinned in `src-tauri/Cargo.lock` and `pnpm-lock.yaml`. To regenerate this list, inspect those lockfiles for the exact resolved versions.

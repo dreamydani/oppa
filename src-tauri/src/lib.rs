@@ -12,6 +12,7 @@ pub mod layout;
 pub mod pty;
 pub mod settings;
 pub mod updater;
+pub mod voice;
 mod workspace_presets;
 
 use pty::manager::PtyManager;
@@ -182,6 +183,17 @@ pub fn run() {
             layout::confirm_save_complete,
             settings::save_settings,
             settings::load_settings,
+            voice::commands::voice_get_catalog,
+            voice::commands::voice_get_model_states,
+            voice::commands::voice_download_model,
+            voice::commands::voice_cancel_download,
+            voice::commands::voice_delete_model,
+            voice::commands::voice_start_dictation,
+            voice::commands::voice_feed_audio,
+            voice::commands::voice_stop_dictation,
+            voice::commands::voice_get_key_status,
+            voice::commands::voice_save_key,
+            voice::commands::voice_clear_key,
             fs::fs_read_dir,
             fs::fs_read_file,
             fs::fs_write_file,
@@ -214,6 +226,19 @@ pub fn run() {
             // The renderer signals that it finished the save via a command.
             // (confirm_save_complete below sets the flag.)
             app.manage(save_done);
+
+            // Voice model manager: ASCII-safe non-roaming cache dir. A missing
+            // dir only degrades downloads (commands error loudly); the temp
+            // fallback keeps dictation setup usable.
+            match voice::model_cache_path::ensure_models_dir() {
+                Ok(models_dir) => {
+                    app.manage(voice::commands::VoiceState::with_models_dir(models_dir));
+                }
+                Err(error) => {
+                    eprintln!("voice model cache unavailable ({error}); downloads will fail");
+                    app.manage(voice::commands::VoiceState::new());
+                }
+            }
 
             // Extension registry: built-ins + user-installed, honoring the
             // persisted disabled set. A missing data dir just skips managing

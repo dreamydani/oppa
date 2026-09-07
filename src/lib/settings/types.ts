@@ -1,8 +1,11 @@
+import type { VoiceSettings } from "../voice/voiceTypes";
+import { DEFAULT_VOICE_SETTINGS } from "../voice/voiceTypes";
+
 export type DefaultCwdMode = "home" | "last_active" | "custom";
 export type StartupBehavior = "restore_previous" | "workspace_launcher" | "fresh_terminal";
 export type TabSwitchMode = "sequential" | "mru";
 export type BrowserSearchEngine = "duckduckgo" | "google" | "bing";
-export type SettingsTabId = "general" | "appearance" | "terminal" | "shortcuts";
+export type SettingsTabId = "general" | "appearance" | "terminal" | "shortcuts" | "voice";
 
 // `(string & {})` admits extension-contributed ids (e.g. "oppa.theme-pack:nord")
 // while keeping literal autocompletion for built-ins.
@@ -69,6 +72,7 @@ export interface GeneralSettings {
 export interface AppSettings {
   general: GeneralSettings;
   appearance: AppearanceSettings;
+  voice: VoiceSettings;
 }
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
@@ -106,4 +110,5 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     autoCheckUpdates: true,
   },
   appearance: DEFAULT_APPEARANCE_SETTINGS,
+  voice: DEFAULT_VOICE_SETTINGS,
 };

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AppSettings, DEFAULT_APP_SETTINGS } from "./types";
+import { DEFAULT_VOICE_SETTINGS } from "../voice/voiceTypes";
 import { TERMINAL_THEMES } from "../theme/terminalThemes";
 
 // Legacy Rust-shaped keys (snake_case) map to the camelCase document shape.
@@ -31,6 +32,46 @@ function normalizeAppearance(raw: Record<string, unknown>): Record<string, unkno
   return out;
 }
 
+// Rust serializes VoiceSettings with snake_case field names; the frontend
+// document is camelCase. Normalize on load so either shape merges cleanly.
+const VOICE_SNAKE_TO_CAMEL: Record<string, string> = {
+  stt_model: "sttModel",
+  models_dir: "modelsDir",
+  dictation_mode: "dictationMode",
+  terminal_confirm_before_insert: "terminalConfirmBeforeInsert",
+  user_models: "userModels",
+  open_ai_api_key_configured: "openAiApiKeyConfigured",
+  microphone_device_id: "microphoneDeviceId",
+  microphone_device_label: "microphoneDeviceLabel",
+};
+
+function normalizeVoice(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  for (const [snake, camel] of Object.entries(VOICE_SNAKE_TO_CAMEL)) {
+    if (out[camel] === undefined && out[snake] !== undefined) {
+      out[camel] = out[snake];
+    }
+    delete out[snake];
+  }
+  // Rust names the model-kind field `model_type` (`type` is reserved in Rust);
+  // the frontend document uses `type`. Accept both on load.
+  const userModels = out.userModels ?? out.user_models;
+  if (Array.isArray(userModels)) {
+    out.userModels = userModels.map((m) => {
+      if (m && typeof m === "object") {
+        const rec = m as Record<string, unknown>;
+        if (rec.type === undefined && rec.model_type !== undefined) {
+          const { model_type, ...rest } = rec;
+          return { ...rest, type: model_type };
+        }
+      }
+      return m;
+    });
+  }
+  delete out.user_models;
+  return out;
+}
+
 function resolveThemeName(id: unknown): string {
   if (typeof id !== "string" || id.length === 0) {
     return DEFAULT_APP_SETTINGS.appearance.themeName;
@@ -59,6 +100,7 @@ export async function loadSettings(): Promise<AppSettings | null> {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const appearance = normalizeAppearance(parsed.appearance || {});
+    const voice = normalizeVoice(parsed.voice || {});
     return {
       general: {
         ...DEFAULT_APP_SETTINGS.general,
@@ -70,6 +112,10 @@ export async function loadSettings(): Promise<AppSettings | null> {
         themeName: resolveThemeName(
           appearance.themeName ?? DEFAULT_APP_SETTINGS.appearance.themeName,
         ),
+      },
+      voice: {
+        ...DEFAULT_VOICE_SETTINGS,
+        ...voice,
       },
     };
   } catch {

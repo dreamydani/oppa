@@ -3840,6 +3840,27 @@ describe("terminalStore", () => {
       expect(updatedState.settings.general.confirmCloseTabWithMultiplePanes).toBe(true);
     });
 
+    it("merges voice settings without clobbering general/appearance", () => {
+      const store = useTerminalStore.getState();
+      store.updateSettings({
+        voice: {
+          enabled: true,
+          sttModel: "parakeet-tdt-0.6b-v3-int8",
+          dictationMode: "hold",
+        },
+      });
+      const updated = useTerminalStore.getState();
+      expect(updated.settings.voice.enabled).toBe(true);
+      expect(updated.settings.voice.sttModel).toBe("parakeet-tdt-0.6b-v3-int8");
+      expect(updated.settings.voice.dictationMode).toBe("hold");
+      // Untouched voice fields keep defaults
+      expect(updated.settings.voice.language).toBe("en");
+      expect(updated.settings.voice.microphoneDeviceId).toBeNull();
+      // Sibling slices intact
+      expect(updated.settings.general.defaultCwdMode).toBe("home");
+      expect(updated.settings.appearance.themeName).toBe("oppa_dark");
+    });
+
     it("debounces saveSettings on updateSettings", async () => {
       vi.useFakeTimers();
       try {

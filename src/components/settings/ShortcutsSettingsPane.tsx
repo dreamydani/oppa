@@ -129,6 +129,13 @@ export const SHORTCUT_CATEGORIES: ShortcutCategory[] = [
     title: "Settings & Help",
     shortcuts: [
       {
+        id: "voice-dictation",
+        name: "Voice Dictation",
+        description:
+          "Start or stop microphone dictation into the focused terminal (Toggle mode), or press-and-hold (Hold mode). Requires Voice enabled and a speech model in Settings > Voice.",
+        combos: [["Cmd/Ctrl", "E"]],
+      },
+      {
         id: "open-settings",
         name: "Open Settings",
         description: "Open application preferences",

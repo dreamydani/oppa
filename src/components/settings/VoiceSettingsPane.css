@@ -1,0 +1,208 @@
+/* Voice settings pane — layout primitives come from GeneralSettingsPane.css;
+   only voice-specific bits live here. */
+
+.voice-stub-note {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #8e8e93);
+  background: var(--bg-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.voice-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-model-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.voice-model-row:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.2));
+}
+
+.voice-model-row.selected {
+  border-color: var(--accent, #4f8cff);
+  background: var(--bg-selected, rgba(79, 140, 255, 0.08));
+}
+
+.voice-model-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.voice-model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.voice-model-cloud {
+  font-size: 12px;
+}
+
+.voice-model-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-foreground, #8e8e93);
+}
+
+.voice-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.voice-model-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  color: var(--muted-foreground, #8e8e93);
+  white-space: nowrap;
+}
+
+.voice-model-badge.recommended {
+  color: var(--accent, #4f8cff);
+  border-color: var(--accent, #4f8cff);
+}
+
+.voice-model-size,
+.voice-model-status {
+  font-size: 11px;
+  color: var(--muted-foreground, #8e8e93);
+  white-space: nowrap;
+}
+
+.voice-model-download {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent, #4f8cff);
+  background: transparent;
+  color: var(--accent, #4f8cff);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-model-download:hover:not(:disabled) {
+  background: var(--bg-selected, rgba(79, 140, 255, 0.12));
+}
+
+.voice-model-download:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.voice-model-cancel,
+.voice-model-delete {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  color: var(--muted-foreground, #8e8e93);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-model-cancel:hover,
+.voice-model-delete:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.2));
+  color: inherit;
+}
+
+.voice-allow-access {
+  margin-top: 8px;
+}
+
+.voice-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.voice-dialog-card {
+  width: min(420px, 100%);
+  border-radius: 12px;
+  background: var(--bg-window, #141416);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voice-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.voice-dialog-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #8e8e93);
+}
+
+.voice-dialog-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.voice-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.voice-dialog-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--error, #ff6b6b);
+}
+
+.voice-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.voice-dialog-spacer {
+  flex: 1;
+}

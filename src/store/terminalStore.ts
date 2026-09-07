@@ -10,6 +10,7 @@
 //   settingsDataSlice      AppSettings document + persistence
 //   worktreeRegistrySlice  worktree/repo cards + fleet spawn IPC
 //   sourceControlSlice     git panel, diff notes, hosted reviews
+//   voiceSlice             speech-model catalog/states + dictation runtime
 //
 // Everything below the store is re-exported so existing import sites
 // (`../store/terminalStore`) keep working unchanged.
@@ -71,6 +72,8 @@ import type {
 } from "./slices/worktreeRegistrySlice";
 import { createSourceControlSlice } from "./slices/sourceControlSlice";
 import type { SourceControlSlice } from "./slices/sourceControlSlice";
+import { createVoiceSlice } from "./slices/voiceSlice";
+import type { VoiceSlice } from "./slices/voiceSlice";
 
 // Re-exported so existing import sites keep working after the layout types
 // moved into `src/lib/pane-manager/layout.ts`.
@@ -133,7 +136,8 @@ export interface TerminalState
     CodeEditorSlice,
     SettingsDataSlice,
     WorktreeRegistrySlice,
-    SourceControlSlice {}
+    SourceControlSlice,
+    VoiceSlice {}
 
 type SliceSet = (
   partial:
@@ -153,6 +157,7 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   ...createSettingsDataSlice(set as SliceSet, get),
   ...createWorktreeRegistrySlice(set as SliceSet, get),
   ...createSourceControlSlice(set as SliceSet, get),
+  ...createVoiceSlice(set as SliceSet, get),
 }));
 
 // ---- Global daemon-event subscriptions (module-level, installed once) ----

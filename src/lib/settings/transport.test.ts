@@ -53,6 +53,7 @@ describe("settings transport", () => {
           customDefaultCwd: "/custom/path",
         },
         appearance: DEFAULT_APP_SETTINGS.appearance,
+        voice: DEFAULT_APP_SETTINGS.voice,
       });
     });
 
@@ -72,6 +73,7 @@ describe("settings transport", () => {
           themeName: "tokyo_night",
           fontSize: 16,
         },
+        voice: DEFAULT_APP_SETTINGS.voice,
       });
     });
 
@@ -144,6 +146,64 @@ describe("settings transport", () => {
       invokeMock.mockResolvedValueOnce(JSON.stringify(bad));
       const result = await loadSettings();
       expect(result?.appearance.themeName).toBe("oppa_dark");
+    });
+
+    it("merges partial voice settings with defaults", async () => {
+      const partial = {
+        voice: {
+          enabled: true,
+          sttModel: "parakeet-tdt-0.6b-v3-int8",
+          dictationMode: "hold",
+          microphoneDeviceId: "mic-1",
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(partial));
+      const result = await loadSettings();
+      expect(result).toEqual({
+        general: DEFAULT_APP_SETTINGS.general,
+        appearance: DEFAULT_APP_SETTINGS.appearance,
+        voice: {
+          ...DEFAULT_APP_SETTINGS.voice,
+          enabled: true,
+          sttModel: "parakeet-tdt-0.6b-v3-int8",
+          dictationMode: "hold",
+          microphoneDeviceId: "mic-1",
+        },
+      });
+    });
+
+    it("defaults voice settings when the voice key is absent (legacy save)", async () => {
+      const legacy = {
+        general: { defaultCwdMode: "home" },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(legacy));
+      const result = await loadSettings();
+      expect(result?.voice).toEqual(DEFAULT_APP_SETTINGS.voice);
+    });
+
+    it("normalizes snake_case legacy voice keys to camelCase", async () => {
+      const legacy = {
+        voice: {
+          enabled: true,
+          stt_model: "whisper-tiny",
+          models_dir: "/models",
+          dictation_mode: "hold",
+          terminal_confirm_before_insert: true,
+          open_ai_api_key_configured: true,
+          microphone_device_id: "mic-9",
+          microphone_device_label: "USB Mic",
+        },
+      };
+      invokeMock.mockResolvedValueOnce(JSON.stringify(legacy));
+      const result = await loadSettings();
+      expect(result?.voice.sttModel).toBe("whisper-tiny");
+      expect(result?.voice.modelsDir).toBe("/models");
+      expect(result?.voice.dictationMode).toBe("hold");
+      expect(result?.voice.terminalConfirmBeforeInsert).toBe(true);
+      expect(result?.voice.openAiApiKeyConfigured).toBe(true);
+      expect(result?.voice.microphoneDeviceId).toBe("mic-9");
+      expect(result?.voice.microphoneDeviceLabel).toBe("USB Mic");
+      expect(result?.voice.enabled).toBe(true);
     });
 
     it("returns null if load_settings returns null", async () => {

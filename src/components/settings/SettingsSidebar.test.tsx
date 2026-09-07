@@ -20,11 +20,13 @@ describe("SettingsSidebar", () => {
 
     const generalBtn = screen.getByRole("button", { name: /general/i });
     const appearanceBtn = screen.getByRole("button", { name: /appearance/i });
+    const voiceBtn = screen.getByRole("button", { name: /^voice$/i });
     const terminalBtn = screen.getByRole("button", { name: /terminal/i });
     const shortcutsBtn = screen.getByRole("button", { name: /shortcuts/i });
 
     expect(generalBtn).toBeInTheDocument();
     expect(appearanceBtn).toBeInTheDocument();
+    expect(voiceBtn).toBeInTheDocument();
     expect(terminalBtn).toBeInTheDocument();
     expect(shortcutsBtn).toBeInTheDocument();
   });
@@ -48,6 +50,11 @@ describe("SettingsSidebar", () => {
     const appearanceBtn = screen.getByRole("button", { name: /appearance/i });
     fireEvent.click(appearanceBtn);
     expect(useTerminalStore.getState().activeSettingsTab).toBe("appearance");
+
+    const voiceBtn = screen.getByRole("button", { name: /^voice$/i });
+    expect(voiceBtn).not.toBeDisabled();
+    fireEvent.click(voiceBtn);
+    expect(useTerminalStore.getState().activeSettingsTab).toBe("voice");
 
     const shortcutsBtn = screen.getByRole("button", { name: /shortcuts/i });
     fireEvent.click(shortcutsBtn);

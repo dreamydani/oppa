@@ -3,6 +3,7 @@ import { SettingsSidebar } from "./SettingsSidebar";
 import { GeneralSettingsPane } from "./GeneralSettingsPane";
 import { ShortcutsSettingsPane } from "./ShortcutsSettingsPane";
 import { AppearanceSettingsPane } from "./AppearanceSettingsPane";
+import { VoiceSettingsPane } from "./VoiceSettingsPane";
 import { useTerminalStore } from "../../store/terminalStore";
 import "./SettingsView.css";
 
@@ -23,6 +24,7 @@ export function SettingsView(): React.ReactElement {
       >
         {activeSettingsTab === "general" && <GeneralSettingsPane />}
         {activeSettingsTab === "appearance" && <AppearanceSettingsPane />}
+        {activeSettingsTab === "voice" && <VoiceSettingsPane />}
         {activeSettingsTab === "shortcuts" && <ShortcutsSettingsPane />}
         {activeSettingsTab === "terminal" && (
           <div className="settings-pane settings-placeholder-pane">

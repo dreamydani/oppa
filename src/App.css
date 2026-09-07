@@ -20,12 +20,6 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-[data-theme="light"] .settings-titlebar-heading {
-  background-color: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
-  color: #18181b;
-}
-
 [data-theme="light"] .settings-content-area::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
 }
@@ -119,38 +113,6 @@
 [data-theme="light"] .settings-select option {
   background: #ffffff;
   color: #18181b;
-}
-
-[data-theme="light"] .settings-sidebar {
-  background-color: var(--bg-sidebar);
-  border-right-color: var(--border-divider);
-}
-
-[data-theme="light"] .settings-sidebar-header {
-  border-bottom-color: var(--border-divider);
-}
-
-[data-theme="light"] .settings-back-btn {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.08);
-  color: var(--text-primary);
-}
-
-[data-theme="light"] .settings-back-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #000000;
-}
-
-[data-theme="light"] .settings-nav-item:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.04);
-  color: var(--text-primary);
-}
-
-[data-theme="light"] .settings-nav-item.active {
-  background: #ffffff;
-  color: var(--text-primary);
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 [data-theme="light"] .settings-section-divider {
@@ -263,24 +225,6 @@
   position: relative;
   z-index: 1;
 }
-
-.settings-titlebar-heading {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--text-primary, #ededec);
-  background-color: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 4px 14px;
-  border-radius: 8px;
-  user-select: none;
-  -webkit-app-region: no-drag;
-}
-
 .mode-tab {
   font-size: 13px;
   font-weight: 500;
