@@ -19,6 +19,9 @@ vi.mock("../../lib/voice/transport", async (importOriginal) => {
     downloadVoiceModel: vi.fn(),
     cancelVoiceDownload: vi.fn(),
     deleteVoiceModel: vi.fn(),
+    getVoiceKeyStatus: vi.fn(),
+    saveVoiceApiKey: vi.fn(),
+    clearVoiceApiKey: vi.fn(),
     onVoiceDownloadProgress: vi.fn(),
   };
 });
@@ -38,6 +41,9 @@ const downloadMock = vi.mocked(voiceTransport.downloadVoiceModel);
 const cancelMock = vi.mocked(voiceTransport.cancelVoiceDownload);
 const deleteMock = vi.mocked(voiceTransport.deleteVoiceModel);
 const onProgressMock = vi.mocked(voiceTransport.onVoiceDownloadProgress);
+const getKeyStatusMock = vi.mocked(voiceTransport.getVoiceKeyStatus);
+const saveKeyMock = vi.mocked(voiceTransport.saveVoiceApiKey);
+const clearKeyMock = vi.mocked(voiceTransport.clearVoiceApiKey);
 const listMicsMock = vi.mocked(micDevicesModule.listMicrophones);
 const requestAccessMock = vi.mocked(micDevicesModule.requestMicrophoneAccess);
 
@@ -99,6 +105,9 @@ describe("VoiceSettingsPane", () => {
     getCatalogMock.mockResolvedValue(CATALOG);
     getStatesMock.mockResolvedValue([]);
     downloadMock.mockResolvedValue(undefined);
+    getKeyStatusMock.mockResolvedValue({ configured: false });
+    saveKeyMock.mockResolvedValue({ configured: true });
+    clearKeyMock.mockResolvedValue({ configured: false });
     onProgressMock.mockResolvedValue(vi.fn());
   });
 
@@ -334,11 +343,68 @@ describe("VoiceSettingsPane", () => {
     expect(screen.getByRole("option", { name: "USB Mic (unplugged)" })).toBeInTheDocument();
   });
 
-  it("shows the OpenAI row as not configured with a disabled Configure button", async () => {
+  it("manages the OpenAI key: dialog gating, save selects, clear resets", async () => {
     render(<VoiceSettingsPane />);
     await act(async () => {});
 
-    expect(screen.getByText(/no openai api key configured/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /configure/i })).toBeDisabled();
+    // Picking a cloud model without a key opens the dialog, defers selection.
+    fireEvent.click(screen.getByRole("radio", { name: /gpt-4o mini transcribe/i }));
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("");
+    expect(screen.getByRole("dialog", { name: /openai api key/i })).toBeInTheDocument();
+
+    // Save selects the pending model and marks the key configured.
+    fireEvent.change(screen.getByPlaceholderText("sk-…"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await act(async () => {});
+    expect(saveKeyMock).toHaveBeenCalledWith("sk-test");
+    const voice = useTerminalStore.getState().settings.voice;
+    expect(voice.openAiApiKeyConfigured).toBe(true);
+    expect(voice.sttModel).toBe("openai-gpt-4o-mini-transcribe");
+    expect(screen.queryByRole("dialog", { name: /openai api key/i })).not.toBeInTheDocument();
+
+    // Clear resets a cloud selection and the flag.
+    fireEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+    await act(async () => {});
+    expect(clearKeyMock).toHaveBeenCalled();
+    expect(useTerminalStore.getState().settings.voice.openAiApiKeyConfigured).toBe(false);
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("");
+  });
+
+  it("selects a cloud model directly when the key is configured", async () => {
+    getKeyStatusMock.mockResolvedValue({ configured: true });
+    useTerminalStore.setState({
+      settings: {
+        ...JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+        voice: { ...DEFAULT_APP_SETTINGS.voice, openAiApiKeyConfigured: true },
+      },
+    });
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("radio", { name: /gpt-4o mini transcribe/i }));
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe(
+      "openai-gpt-4o-mini-transcribe",
+    );
+    expect(screen.queryByRole("dialog", { name: /openai api key/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps a local selection when the key is cleared", async () => {
+    getKeyStatusMock.mockResolvedValue({ configured: true });
+    useTerminalStore.setState({
+      settings: {
+        ...JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+        voice: {
+          ...DEFAULT_APP_SETTINGS.voice,
+          openAiApiKeyConfigured: true,
+          sttModel: "parakeet-tdt-0.6b-v3-int8",
+        },
+      },
+    });
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+    await act(async () => {});
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("parakeet-tdt-0.6b-v3-int8");
   });
 });

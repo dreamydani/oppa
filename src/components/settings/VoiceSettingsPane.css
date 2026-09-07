@@ -143,3 +143,66 @@
 .voice-allow-access {
   margin-top: 8px;
 }
+
+.voice-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.voice-dialog-card {
+  width: min(420px, 100%);
+  border-radius: 12px;
+  background: var(--bg-window, #141416);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voice-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.voice-dialog-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #8e8e93);
+}
+
+.voice-dialog-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.voice-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.voice-dialog-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--error, #ff6b6b);
+}
+
+.voice-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.voice-dialog-spacer {
+  flex: 1;
+}

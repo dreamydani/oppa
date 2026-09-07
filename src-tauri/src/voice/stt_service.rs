@@ -4,7 +4,12 @@
 // sherpa work runs on a per-session worker thread fed by an mpsc channel;
 // the Tauri async runtime only awaits joins with timeouts.
 
-use crate::voice::model_catalog::get_catalog_model;
+use crate::voice::model_catalog::{get_catalog_model, SpeechModelProvider};
+use crate::voice::openai_api_key_store::OpenAiKeyStore;
+use crate::voice::openai_transcription_client::{
+    OpenAiTranscriptionSession, CLOUD_TRANSCRIPTION_SAMPLE_RATE, MAX_CLOUD_AUDIO_SECONDS,
+    TRANSCRIPTION_URL,
+};
 use crate::voice::stt_audio_resample::{resample_to_16k, STT_SAMPLE_RATE};
 use crate::voice::stt_engine::{
     EngineLoader, EngineSession, LoadedEngine, SherpaEngineLoader, SttEvent,
@@ -87,16 +92,43 @@ struct ActiveSession {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+struct CloudSession {
+    owner: String,
+    model_id: String,
+    api_key: String,
+    pcm: Vec<f32>,
+    audio_samples: u64,
+    overflowed: bool,
+    emit: SttEmitter,
+}
+
+enum SessionKind {
+    Local(ActiveSession),
+    Cloud(CloudSession),
+}
+
+impl SessionKind {
+    fn owner(&self) -> &str {
+        match self {
+            SessionKind::Local(session) => &session.owner,
+            SessionKind::Cloud(session) => &session.owner,
+        }
+    }
+}
+
 struct ServiceInner {
     engine: Option<Arc<LoadedEngine>>,
     engine_key: Option<String>,
-    session: Option<ActiveSession>,
+    session: Option<SessionKind>,
     starting_owner: Option<String>,
     idle_generation: u64,
 }
 
 pub struct SttService {
     models_dir: PathBuf,
+    key_store: OpenAiKeyStore,
+    http_client: Option<reqwest::Client>,
+    transcription_url: Mutex<String>,
     loader: Arc<dyn EngineLoader>,
     inner: Mutex<ServiceInner>,
 }
@@ -107,8 +139,12 @@ impl SttService {
     }
 
     pub fn with_loader(models_dir: PathBuf, loader: Arc<dyn EngineLoader>) -> Self {
+        let key_store = OpenAiKeyStore::new(OpenAiKeyStore::default_path(&models_dir));
         Self {
             models_dir,
+            key_store,
+            http_client: crate::voice::http_client::build_voice_http_client(),
+            transcription_url: Mutex::new(TRANSCRIPTION_URL.to_string()),
             loader,
             inner: Mutex::new(ServiceInner {
                 engine: None,
@@ -120,6 +156,16 @@ impl SttService {
         }
     }
 
+    #[cfg(test)]
+    pub fn set_transcription_url(&self, url: &str) {
+        *self.transcription_url.lock().expect("url lock") = url.to_string();
+    }
+
+    #[cfg(test)]
+    pub fn test_key_store(&self) -> &OpenAiKeyStore {
+        &self.key_store
+    }
+
     /// Model id of the loaded (warm or active) engine, for the deletion guard.
     pub fn loaded_model_id(&self) -> Option<String> {
         self.inner
@@ -128,6 +174,18 @@ impl SttService {
             .engine
             .as_ref()
             .map(|e| e.model_id.clone())
+    }
+
+    pub fn key_configured(&self) -> bool {
+        self.key_store.has_key()
+    }
+
+    pub fn save_api_key(&self, api_key: &str) -> Result<(), String> {
+        self.key_store.save_key(api_key)
+    }
+
+    pub fn clear_api_key(&self) {
+        self.key_store.clear_key();
     }
 
     pub fn idle_generation(&self) -> u64 {
@@ -155,7 +213,12 @@ impl SttService {
         hotwords_file: Option<PathBuf>,
         emit: SttEmitter,
     ) -> Result<(), SttError> {
-        get_catalog_model(model_id).ok_or_else(|| SttError::UnknownModel(model_id.into()))?;
+        let manifest =
+            get_catalog_model(model_id).ok_or_else(|| SttError::UnknownModel(model_id.into()))?;
+
+        if manifest.provider == SpeechModelProvider::Openai {
+            return self.start_cloud_dictation(model_id, owner, emit);
+        }
 
         let hotwords_key = hotwords_key(&hotwords_file);
         let engine_key = format!("{model_id}\0{hotwords_key}");
@@ -163,7 +226,7 @@ impl SttService {
         let needs_load = {
             let mut inner = self.inner.lock().expect("stt lock");
             if let Some(active) = inner.session.as_ref() {
-                if active.owner != owner {
+                if active.owner() != owner {
                     return Err(SttError::AlreadyActive);
                 }
                 return Ok(());
@@ -232,12 +295,56 @@ impl SttService {
         let thread = std::thread::spawn(move || {
             worker_pump(&mut session, receiver, &worker_emit);
         });
-        inner.session = Some(ActiveSession {
+        inner.session = Some(SessionKind::Local(ActiveSession {
             owner,
             sender,
             thread: Some(thread),
-        });
+        }));
         inner.starting_owner = None;
+        drop(inner);
+
+        emit.emit(SttEvent::Ready);
+        Ok(())
+    }
+
+    /// Cloud transcription session (Slice 7): no model files, no worker
+    /// thread — audio accumulates in memory and transcribes on stop. The
+    /// warm local engine is evicted first (single session resource, Orca
+    /// parity: one worker *or* cloud session at a time).
+    fn start_cloud_dictation(
+        &self,
+        model_id: &str,
+        owner: String,
+        emit: SttEmitter,
+    ) -> Result<(), SttError> {
+        let mut inner = self.inner.lock().expect("stt lock");
+        if let Some(active) = inner.session.as_ref() {
+            if active.owner() != owner {
+                return Err(SttError::AlreadyActive);
+            }
+            return Ok(());
+        }
+        if let Some(starting) = inner.starting_owner.as_ref() {
+            if *starting != owner {
+                return Err(SttError::AlreadyActive);
+            }
+            return Ok(());
+        }
+        // The key is read once here: clearing mid-session must not strand an
+        // active dictation (Orca parity — the session keeps its key).
+        let api_key = self.key_store.read_key().map_err(SttError::ModelNotReady)?;
+        inner.engine = None;
+        inner.engine_key = None;
+        inner.idle_generation += 1;
+        inner.session = Some(SessionKind::Cloud(CloudSession {
+            owner,
+            model_id: model_id.into(),
+            api_key,
+            pcm: Vec::new(),
+            audio_samples: 0,
+            overflowed: false,
+            emit: emit.clone(),
+        }));
         drop(inner);
 
         emit.emit(SttEvent::Ready);
@@ -248,21 +355,39 @@ impl SttService {
         if samples.is_empty() {
             return;
         }
-        let sender = {
-            let inner = self.inner.lock().expect("stt lock");
-            match inner.session.as_ref() {
-                Some(session) if session.owner == owner => session.sender.clone(),
-                _ => return,
-            }
-        };
         let resampled = resample_to_16k(&samples, sample_rate);
         if resampled.is_empty() {
             return;
         }
-        // Why: the channel is unbounded and decode outruns capture, so a
-        // disconnected receiver means teardown is in flight — drop rather
-        // than block the Tauri command.
-        let _ = sender.send(WorkerMsg::Audio(resampled));
+        let mut inner = self.inner.lock().expect("stt lock");
+        let Some(session) = inner.session.as_mut() else {
+            return;
+        };
+        if session.owner() != owner {
+            return;
+        }
+        match session {
+            SessionKind::Local(active) => {
+                let sender = active.sender.clone();
+                drop(inner);
+                // Why: the channel is unbounded and decode outruns capture, so
+                // a disconnected receiver means teardown is in flight — drop
+                // rather than block the Tauri command.
+                let _ = sender.send(WorkerMsg::Audio(resampled));
+            }
+            SessionKind::Cloud(cloud) => {
+                cloud.audio_samples += resampled.len() as u64;
+                if cloud.audio_samples
+                    > MAX_CLOUD_AUDIO_SECONDS * CLOUD_TRANSCRIPTION_SAMPLE_RATE as u64
+                {
+                    // Past the 10-minute cap: flag overflow and drop audio
+                    // (the stop path reports it instead of transcribing).
+                    cloud.overflowed = true;
+                    return;
+                }
+                cloud.pcm.extend_from_slice(&resampled);
+            }
+        }
     }
 
     pub async fn stop_dictation(&self, owner: &str) -> Result<(), SttError> {
@@ -273,12 +398,19 @@ impl SttService {
                 inner.starting_owner = None;
                 None
             } else {
-                inner.session.take_if(|s| s.owner == owner)
+                inner.session.take_if(|s| s.owner() == owner)
             }
         };
-        let Some(mut session) = session else {
+        let Some(session) = session else {
             return Ok(());
         };
+        match session {
+            SessionKind::Local(mut active) => self.stop_local_session(&mut active).await,
+            SessionKind::Cloud(cloud) => self.stop_cloud_session(cloud).await,
+        }
+    }
+
+    async fn stop_local_session(&self, session: &mut ActiveSession) -> Result<(), SttError> {
         let _ = session.sender.send(WorkerMsg::Finish);
         if let Some(thread) = session.thread.take() {
             let join = tokio::task::spawn_blocking(move || thread.join());
@@ -299,6 +431,44 @@ impl SttService {
         Ok(())
     }
 
+    async fn stop_cloud_session(&self, cloud: CloudSession) -> Result<(), SttError> {
+        let CloudSession {
+            model_id,
+            api_key,
+            pcm,
+            overflowed,
+            emit,
+            ..
+        } = cloud;
+        if overflowed {
+            emit.emit(SttEvent::Error(
+                "Cloud transcription is limited to 10 minutes per dictation".into(),
+            ));
+            emit.emit(SttEvent::Stopped);
+            return Ok(());
+        }
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| SttError::Engine("http_unavailable".into()))?;
+        let url = self.transcription_url.lock().expect("url lock").clone();
+        let mut session = OpenAiTranscriptionSession::new(&model_id);
+        // Fits by construction: overflow is flagged (not stored) in feed.
+        session.feed_audio(&pcm).map_err(SttError::Engine)?;
+        match session.finish_to(&client, &api_key, &url).await {
+            Ok(text) => {
+                if !text.trim().is_empty() {
+                    emit.emit(SttEvent::Final(text));
+                }
+            }
+            Err(reason) => {
+                emit.emit(SttEvent::Error(reason));
+            }
+        }
+        emit.emit(SttEvent::Stopped);
+        Ok(())
+    }
+
     fn teardown_engine(&self) {
         let mut inner = self.inner.lock().expect("stt lock");
         inner.engine = None;
@@ -312,7 +482,7 @@ impl SttService {
             .expect("stt lock")
             .session
             .as_ref()
-            .map(|s| s.owner.clone())
+            .map(|s| s.owner().to_string())
     }
 }
 
@@ -666,5 +836,192 @@ mod tests {
         assert!(!service.expire_idle(generation + 99));
         assert!(service.expire_idle(generation));
         assert!(service.loaded_model_id().is_none());
+    }
+
+    /// Isolated service whose key file lives under a temp dir.
+    fn cloud_test_service() -> (Arc<SttService>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let loader = Arc::new(FakeLoader::succeeding());
+        let service = Arc::new(SttService::with_loader(
+            dir.path().join("voice-models"),
+            loader as Arc<dyn EngineLoader>,
+        ));
+        (service, dir)
+    }
+
+    /// Single-shot transcription mock: reads one request, answers JSON text.
+    async fn start_text_mock(json: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 8192];
+            loop {
+                match socket.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        raw.extend_from_slice(&buf[..n]);
+                        if raw.windows(4).any(|w| w == b"\r\n\r\n") && raw.len() > 1024 {
+                            // Headers done; drain a little body then answer.
+                            break;
+                        }
+                        if raw.len() > 256 * 1024 {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
+                json.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        format!("http://{addr}/v1/audio/transcriptions")
+    }
+
+    #[tokio::test]
+    async fn cloud_requires_a_key() {
+        let (service, _dir) = cloud_test_service();
+        let collected = Collected::new();
+        let err = service
+            .start_dictation(
+                "openai-gpt-4o-mini-transcribe",
+                "desktop:a".into(),
+                None,
+                collected.emitter,
+            )
+            .await
+            .expect_err("no key");
+        assert_eq!(err, SttError::ModelNotReady("missing_api_key".into()));
+        assert!(service.test_session_owner().is_none());
+    }
+
+    #[tokio::test]
+    async fn cloud_transcribes_on_stop_with_stored_key() {
+        let (service, _dir) = cloud_test_service();
+        service
+            .test_key_store()
+            .save_key("sk-test")
+            .expect("save key");
+        service.set_transcription_url(&start_text_mock(r#"{"text":"hi cloud"}"#).await);
+        let collected = Collected::new();
+
+        service
+            .start_dictation(
+                "openai-gpt-4o-mini-transcribe",
+                "desktop:a".into(),
+                None,
+                collected.emitter.clone(),
+            )
+            .await
+            .expect("cloud start");
+        assert_eq!(service.test_session_owner().as_deref(), Some("desktop:a"));
+        service.feed_audio(vec![0.1; 1600], 16000, "desktop:a");
+        service.feed_audio(vec![0.2; 1600], 16000, "desktop:intruder");
+        service.stop_dictation("desktop:a").await.expect("stop");
+
+        let kinds = collected.kinds();
+        assert_eq!(kinds.first(), Some(&"ready"));
+        assert_eq!(kinds.last(), Some(&"stopped"));
+        let finals: Vec<String> = collected
+            .events
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter_map(|e| match e {
+                SttEvent::Final(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finals, vec!["hi cloud".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn cloud_session_survives_key_clear_and_conflicts_like_local() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let service = Arc::new(SttService::with_loader(
+            dir.path().join("voice-models"),
+            Arc::new(FakeLoader::succeeding()) as Arc<dyn EngineLoader>,
+        ));
+        service.test_key_store().save_key("sk-test").expect("save");
+        service.set_transcription_url(&start_text_mock(r#"{"text":"ok"}"#).await);
+        let collected = Collected::new();
+
+        // Local first: cloud start from another owner conflicts.
+        service
+            .start_dictation(
+                "whisper-tiny",
+                "desktop:local".into(),
+                None,
+                collected.emitter.clone(),
+            )
+            .await
+            .expect("local start");
+        // Cloud start evicts nothing while a session is active — it conflicts.
+        let err = service
+            .start_dictation(
+                "openai-gpt-4o-mini-transcribe",
+                "desktop:cloud".into(),
+                None,
+                collected.emitter.clone(),
+            )
+            .await
+            .expect_err("conflict");
+        assert_eq!(err, SttError::AlreadyActive);
+        service
+            .stop_dictation("desktop:local")
+            .await
+            .expect("stop local");
+
+        // Cloud start evicts the warm local engine (single session resource).
+        service
+            .start_dictation(
+                "openai-gpt-4o-mini-transcribe",
+                "desktop:cloud".into(),
+                None,
+                collected.emitter.clone(),
+            )
+            .await
+            .expect("cloud start");
+        assert!(service.loaded_model_id().is_none());
+        // Clearing mid-session keeps the in-memory key: stop still transcribes.
+        service.test_key_store().clear_key();
+        service.feed_audio(vec![0.1; 160], 16000, "desktop:cloud");
+        service
+            .stop_dictation("desktop:cloud")
+            .await
+            .expect("stop cloud");
+        let finals = collected
+            .events
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter_map(|e| match e {
+                SttEvent::Final(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        // The collector is shared with the earlier local session ("stub
+        // final"); the cloud session appends its own transcript.
+        assert_eq!(finals.last().map(String::as_str), Some("ok"));
+        // Next cloud start requires the key again.
+        let err = service
+            .start_dictation(
+                "openai-gpt-4o-mini-transcribe",
+                "desktop:cloud".into(),
+                None,
+                collected.emitter,
+            )
+            .await
+            .expect_err("key gone");
+        assert_eq!(err, SttError::ModelNotReady("missing_api_key".into()));
     }
 }

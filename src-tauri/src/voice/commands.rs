@@ -87,7 +87,19 @@ pub fn voice_get_catalog() -> Result<Vec<SpeechModelManifest>, String> {
 pub fn voice_get_model_states(
     state: State<'_, VoiceState>,
 ) -> Result<Vec<SpeechModelState>, String> {
-    Ok(state.manager().get_model_states())
+    let mut states = state.manager().get_model_states();
+    // Cloud rows carry no files: ready iff a key is configured (Slice 7
+    // refines nothing further — this IS the rule).
+    if state.service().key_configured() {
+        for model_state in states.iter_mut() {
+            if get_catalog_model(&model_state.id).is_some_and(|m| {
+                m.provider == crate::voice::model_catalog::SpeechModelProvider::Openai
+            }) {
+                model_state.status = SpeechModelStatus::Ready;
+            }
+        }
+    }
+    Ok(states)
 }
 
 #[tauri::command(async)]
@@ -155,12 +167,15 @@ pub async fn voice_start_dictation(
     require_known_model(&model_id)?;
     let session_id = desktop_session(session_id);
     let owner = format!("desktop:{session_id}");
+    let is_cloud = get_catalog_model(&model_id)
+        .is_some_and(|m| m.provider == crate::voice::model_catalog::SpeechModelProvider::Openai);
 
-    // Hotwords biasing file (`<word> :2.0` per line, Orca parity). Written
-    // before engine load, unlinked right after start resolves.
-    let hotwords_file = match hotwords.as_deref().unwrap_or(&[]) {
-        [] => None,
-        words => {
+    // Hotwords biasing file (`<word> :2.0` per line, Orca parity). Local
+    // engines only — cloud sessions carry no hotwords. Written before engine
+    // load, unlinked right after start resolves.
+    let hotwords_file = match (is_cloud, hotwords.as_deref().unwrap_or(&[])) {
+        (true, _) | (_, []) => None,
+        (false, words) => {
             let models_dir = state.manager().models_dir().to_path_buf();
             Some(write_hotwords_file(&models_dir, words).map_err(|e| format!("io:{e}"))?)
         }
@@ -275,22 +290,19 @@ pub async fn voice_stop_dictation(
 }
 
 #[tauri::command(async)]
-pub fn voice_get_key_status() -> Result<bool, String> {
-    // Real key store lands in Slice 7.
-    Ok(false)
+pub fn voice_get_key_status(state: State<'_, VoiceState>) -> Result<bool, String> {
+    Ok(state.service().key_configured())
 }
 
 #[tauri::command(async)]
-pub fn voice_save_key(key: String) -> Result<bool, String> {
-    if key.trim().is_empty() {
-        return Err("invalid_api_key".into());
-    }
-    // Real key store lands in Slice 7; acknowledge the shape only.
+pub fn voice_save_key(state: State<'_, VoiceState>, key: String) -> Result<bool, String> {
+    state.service().save_api_key(&key)?;
     Ok(true)
 }
 
 #[tauri::command(async)]
-pub fn voice_clear_key() -> Result<bool, String> {
+pub fn voice_clear_key(state: State<'_, VoiceState>) -> Result<bool, String> {
+    state.service().clear_api_key();
     Ok(false)
 }
 

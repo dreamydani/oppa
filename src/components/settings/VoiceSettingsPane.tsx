@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
-import { onVoiceDownloadProgress } from "../../lib/voice/transport";
+import {
+  clearVoiceApiKey,
+  getVoiceKeyStatus,
+  onVoiceDownloadProgress,
+  saveVoiceApiKey,
+} from "../../lib/voice/transport";
+import { VoiceOpenAiDialog } from "./VoiceOpenAiDialog";
 import {
   buildVoiceMicrophoneSelectOptions,
   listMicrophones,
@@ -148,6 +154,11 @@ export function VoiceSettingsPane(): React.ReactElement {
   const cancelDownload = useTerminalStore((s) => s.cancelDownload);
   const deleteVoiceModel = useTerminalStore((s) => s.deleteVoiceModel);
   const applyModelProgress = useTerminalStore((s) => s.applyModelProgress);
+  const showVoiceNotice = useTerminalStore((s) => s.showVoiceNotice);
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const [pendingCloudModelId, setPendingCloudModelId] = useState<string | null>(null);
+  const [keyPending, setKeyPending] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const [micDevices, setMicDevices] = useState<VoiceMicrophoneDevice[]>([]);
   // False until enumeration has produced a usable list — an un-enumerated
   // list must not flag the preferred mic as unplugged (Orca parity).
@@ -159,6 +170,16 @@ export function VoiceSettingsPane(): React.ReactElement {
   useEffect(() => {
     void refreshCatalog();
     void refreshModelStates();
+    // Key probe: the persisted flag can lag the backend (e.g. key cleared
+    // outside settings). Sync silently, then refresh cloud row states.
+    void getVoiceKeyStatus()
+      .then(({ configured }) => {
+        if (configured !== useTerminalStore.getState().settings.voice.openAiApiKeyConfigured) {
+          useTerminalStore.getState().updateSettings({ voice: { openAiApiKeyConfigured: configured } });
+          void refreshModelStates();
+        }
+      })
+      .catch(() => {});
     let unlisten: (() => void) | null = null;
     void onVoiceDownloadProgress(({ modelId, progress }) => {
       applyModelProgress(modelId, progress);
@@ -236,7 +257,65 @@ export function VoiceSettingsPane(): React.ReactElement {
   };
 
   const setModel = (modelId: string) => {
+    const model = catalog.find((m) => m.id === modelId);
+    // Cloud models need a key first: open the dialog and select only after save.
+    if (model?.provider === "openai" && !voice.openAiApiKeyConfigured) {
+      setPendingCloudModelId(modelId);
+      setKeyError(null);
+      setKeyDialogOpen(true);
+      return;
+    }
     updateSettings({ voice: { sttModel: modelId } });
+  };
+
+  const openKeyDialog = () => {
+    setPendingCloudModelId(null);
+    setKeyError(null);
+    setKeyDialogOpen(true);
+  };
+
+  const saveKey = async (draft: string) => {
+    setKeyPending(true);
+    setKeyError(null);
+    try {
+      await saveVoiceApiKey(draft);
+      updateSettings({
+        voice: {
+          openAiApiKeyConfigured: true,
+          ...(pendingCloudModelId ? { sttModel: pendingCloudModelId } : {}),
+        },
+      });
+      setKeyDialogOpen(false);
+      setPendingCloudModelId(null);
+      await refreshModelStates();
+      showVoiceNotice("OpenAI API key saved");
+    } catch (err) {
+      setKeyError(err instanceof Error ? err.message : "Failed to save OpenAI API key");
+    } finally {
+      setKeyPending(false);
+    }
+  };
+
+  const clearKey = async () => {
+    setKeyPending(true);
+    try {
+      await clearVoiceApiKey();
+      const selected = catalog.find((m) => m.id === voice.sttModel);
+      updateSettings({
+        voice: {
+          openAiApiKeyConfigured: false,
+          ...(selected?.provider === "openai" ? { sttModel: "" } : {}),
+        },
+      });
+      setKeyDialogOpen(false);
+      setPendingCloudModelId(null);
+      await refreshModelStates();
+      showVoiceNotice("OpenAI API key cleared");
+    } catch (err) {
+      setKeyError(err instanceof Error ? err.message : "Failed to clear OpenAI API key");
+    } finally {
+      setKeyPending(false);
+    }
   };
 
   const handleDownload = (modelId: string) => {
@@ -409,24 +488,46 @@ export function VoiceSettingsPane(): React.ReactElement {
                 <span className="settings-row-label">API key</span>
                 <span className="settings-row-desc">
                   {voice.openAiApiKeyConfigured
-                    ? "An OpenAI API key is configured for cloud transcription."
-                    : "No OpenAI API key configured. Cloud models need one — key setup arrives in a later slice."}
+                    ? "An OpenAI API key is configured for cloud transcription. Usage bills to your OpenAI account."
+                    : "No OpenAI API key configured. Cloud models need one — usage bills to your OpenAI account."}
                 </span>
               </div>
               <div className="settings-row-control">
                 <button
                   type="button"
                   className="settings-segmented-btn"
-                  disabled
-                  title="Available in a later slice"
+                  onClick={openKeyDialog}
                 >
-                  Configure
+                  {voice.openAiApiKeyConfigured ? "Change" : "Configure"}
                 </button>
+                {voice.openAiApiKeyConfigured && (
+                  <button
+                    type="button"
+                    className="settings-segmented-btn"
+                    disabled={keyPending}
+                    onClick={() => void clearKey()}
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             </div>
           </section>
         </div>
       </div>
+
+      <VoiceOpenAiDialog
+        open={keyDialogOpen}
+        configured={voice.openAiApiKeyConfigured}
+        pending={keyPending}
+        error={keyError}
+        onClose={() => {
+          setKeyDialogOpen(false);
+          setPendingCloudModelId(null);
+        }}
+        onSave={(draft) => void saveKey(draft)}
+        onClear={() => void clearKey()}
+      />
     </div>
   );
 }

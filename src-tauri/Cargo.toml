@@ -43,7 +43,7 @@ tauri-plugin-process = "2"
 # already in the lockfile instead of duplicating a second reqwest major.
 # rustls-no-provider matches the plugin's TLS stack (rustls + ring, provider
 # installed at request time) and keeps HTTPS working on GitHub.
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "multipart", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Local speech-to-text engine (Slice 5). Official safe bindings; static
 # linking is the default — the build script fetches the matching prebuilt
