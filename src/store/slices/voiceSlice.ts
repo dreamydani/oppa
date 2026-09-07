@@ -37,6 +37,11 @@ export interface VoiceSlice {
   downloadModel: (modelId: string) => Promise<void>;
   cancelDownload: (modelId: string) => Promise<void>;
   deleteVoiceModel: (modelId: string) => Promise<void>;
+  // Transient controller notices (Oppa has no global toast stack; the
+  // controller renders these next to the dictation pill and auto-expires).
+  voiceNotice: { id: number; text: string; action?: "open-voice-settings" } | null;
+  showVoiceNotice: (text: string, action?: "open-voice-settings") => void;
+  dismissVoiceNotice: (id: number) => void;
 }
 
 export function createVoiceSlice(
@@ -48,6 +53,7 @@ export function createVoiceSlice(
     modelStates: [],
     dictationState: "idle",
     partialTranscript: "",
+    voiceNotice: null,
 
     refreshCatalog: async () => {
       try {
@@ -72,6 +78,16 @@ export function createVoiceSlice(
     setPartialTranscript: (text) => {
       if (get().partialTranscript === text) return;
       set({ partialTranscript: text });
+    },
+
+    showVoiceNotice: (text, action) => {
+      set({ voiceNotice: { id: Date.now() + Math.random(), text, action } });
+    },
+
+    dismissVoiceNotice: (id) => {
+      if (get().voiceNotice?.id === id) {
+        set({ voiceNotice: null });
+      }
     },
 
     applyModelProgress: (modelId, progress) => {

@@ -20,6 +20,7 @@ const EditorViewport = lazy(() =>
 );
 import { SettingsView } from "./components/settings/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { DictationController } from "./components/voice/DictationController";
 import { startUpdateScheduler } from "./lib/updateScheduler";
 import { useTerminalStore } from "./store/terminalStore";
 import {
@@ -494,6 +495,8 @@ function App() {
       {/* Stable-startup update card (the scheduler owns checks; dev builds
           and offline runs render nothing). */}
       <UpdateBanner />
+      {/* Voice dictation: always mounted, renders only while dictating. */}
+      <DictationController />
       </div>
     </ErrorBoundary>
   );
