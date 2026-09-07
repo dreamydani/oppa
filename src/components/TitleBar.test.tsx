@@ -26,10 +26,10 @@ describe("TitleBar", () => {
     });
   });
 
-  it("renders Settings title and hides mode switcher pill when isSettingsOpen is true", () => {
+  it("hides mode switcher pill and Settings heading when isSettingsOpen is true", () => {
     useTerminalStore.setState({ isSettingsOpen: true });
     const { container } = render(<TitleBar />);
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.queryByText("Settings")).toBeNull();
     expect(container.querySelector(".mode-switcher-pill")).toBeNull();
   });
 

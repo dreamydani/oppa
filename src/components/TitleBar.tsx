@@ -68,11 +68,7 @@ export function TitleBar(): ReactElement {
       </div>
 
       <div className="title-bar-center" data-tauri-drag-region>
-        {isSettingsOpen ? (
-          <span className="settings-titlebar-heading" data-testid="settings-titlebar-heading">
-            Settings
-          </span>
-        ) : (
+        {!isSettingsOpen && (
           <div
             className="mode-switcher-pill"
             data-tauri-drag-region="false"
