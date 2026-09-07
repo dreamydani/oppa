@@ -159,12 +159,19 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
         className="ws-card-header"
         onClick={() => {
           onSelect(data.tab.id);
-          onToggleExpand(data.tab.id);
+          // Single-row cards stay open: collapsing would hide their only row
+          // behind a chevron that doesn't render.
+          if (data.rows.length > 1) onToggleExpand(data.tab.id);
         }}
         role="button"
         tabIndex={0}
         aria-expanded={data.rows.length > 0 ? expanded : undefined}
-        onKeyDown={(e) => e.key === "Enter" && onSelect(data.tab.id)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onSelect(data.tab.id);
+          if (data.rows.length > 1) onToggleExpand(data.tab.id);
+        }}
       >
         <span
           className="ws-card-avatar"
@@ -481,12 +488,14 @@ export function WorkspaceList({
   }, [tabs, activeTabId]);
 
   // Component-local collapse state; default: active expanded, others collapsed.
+  // Overrides store COLLAPSED (render reads expanded = !override), so the
+  // new value is the pre-toggle expanded — storing its negation no-ops.
   const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
   const toggleExpand = (tabId: string) => {
     setCollapsedOverrides((prev) => {
       const isDefaultExpanded = tabId === useTerminalStore.getState().activeTabId;
       const currentlyExpanded = prev[tabId] === undefined ? isDefaultExpanded : !prev[tabId];
-      return { ...prev, [tabId]: !currentlyExpanded };
+      return { ...prev, [tabId]: currentlyExpanded };
     });
   };
 

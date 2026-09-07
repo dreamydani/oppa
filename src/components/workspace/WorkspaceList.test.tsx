@@ -981,8 +981,7 @@ describe("WorkspaceList", () => {
     if (clipboardDescriptor) Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
   });
 
-  it("shows an all-caught-up empty state for the attention view", () => {
-    useTerminalStore.setState({
+  it("shows an all-caught-up empty state for the attention view", () => {    useTerminalStore.setState({
       tabs: [
         {
           id: "tab-1",
@@ -1016,6 +1015,76 @@ describe("WorkspaceList", () => {
     render(<WorkspaceList sectionFilter="worktrees" />);
     fireEvent.click(screen.getByRole("button", { name: /new worktree/i }));
     expect(useTerminalStore.getState().isWorktreeCreateOpen).toBe(true);
+  });
+
+  function twoCardState() {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "alpha",
+          layout: {
+            type: "split" as const,
+            dir: "v" as const,
+            ratio: 0.5,
+            a: { type: "leaf" as const, id: "s-1" },
+            b: { type: "leaf" as const, id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+        {
+          id: "tab-2",
+          title: "beta",
+          layout: { type: "leaf" as const, id: "s-3" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "one" }),
+        "s-2": session({ id: "s-2", title: "two" }),
+        "s-3": session({ id: "s-3", title: "three" }),
+      },
+    });
+  }
+
+  it("collapses the active card and re-expands it on header click", () => {
+    twoCardState();
+    const { container } = render(<WorkspaceList />);
+    const header = screen.getByText("alpha").closest(".ws-card-header")!;
+
+    expect(screen.getByText("one")).toBeInTheDocument();
+    fireEvent.click(header);
+    expect(screen.queryByText("one")).not.toBeInTheDocument();
+    expect(header.querySelector(".ws-card-chevron.expanded")).toBeNull();
+
+    fireEvent.click(header);
+    expect(screen.getByText("one")).toBeInTheDocument();
+    expect(
+      container.querySelector(".ws-card-chevron.expanded"),
+    ).not.toBeNull();
+  });
+
+  it("expands an inactive card on header click", () => {
+    twoCardState();
+    render(<WorkspaceList />);
+
+    // beta is collapsed by default: its single row is hidden.
+    expect(screen.queryByText("three")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("beta").closest(".ws-card-header")!);
+    expect(screen.getByText("three")).toBeInTheDocument();
+  });
+
+  it("toggles the card from the keyboard", () => {
+    twoCardState();
+    render(<WorkspaceList />);
+    const header = screen.getByText("alpha").closest(".ws-card-header")!;
+
+    fireEvent.keyDown(header, { key: "Enter" });
+    expect(screen.queryByText("one")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(header, { key: "Enter" });
+    expect(screen.getByText("one")).toBeInTheDocument();
   });
 });
 
