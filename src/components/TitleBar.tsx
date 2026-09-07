@@ -50,15 +50,18 @@ export function TitleBar(): ReactElement {
   return (
     <header className="title-bar" data-tauri-drag-region>
       <div className="title-bar-left">
-        <button
-          type="button"
-          className={`title-bar-icon-btn ${leftOpen ? "active" : ""}`}
-          onClick={toggleLeft}
-          title="Toggle Left Sidebar"
-          aria-label="Toggle Left Sidebar"
-        >
-          <PanelLeftIcon />
-        </button>
+        {/* Sidebar toggles only apply to the workbench; settings mounts neither sidebar. */}
+        {!isSettingsOpen && (
+          <button
+            type="button"
+            className={`title-bar-icon-btn ${leftOpen ? "active" : ""}`}
+            onClick={toggleLeft}
+            title="Toggle Left Sidebar"
+            aria-label="Toggle Left Sidebar"
+          >
+            <PanelLeftIcon />
+          </button>
+        )}
         {showTitlebarLogo && (
           <div className="app-brand-container">
             <img src="/logo.png" alt="oppa" className="app-brand-logo-img" />
@@ -69,65 +72,67 @@ export function TitleBar(): ReactElement {
 
       <div className="title-bar-center" data-tauri-drag-region>
         {!isSettingsOpen && (
-          <div
-            className="mode-switcher-pill"
-            data-tauri-drag-region="false"
-            ref={modeIndicator.stripRef}
-          >
-            <span
-              className="mode-switcher-indicator"
-              data-motion="indicator"
-              data-state="open"
-              style={modeIndicator.style}
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
-              data-active={activeAppMode === "browser" ? "true" : undefined}
-              onClick={() => setAppMode("browser")}
-              title="Browser"
-              aria-label="Browser"
-              aria-pressed={activeAppMode === "browser"}
+            <div
+              className="mode-switcher-pill"
+              data-tauri-drag-region="false"
+              ref={modeIndicator.stripRef}
             >
-              Browser
-            </button>
-            <button
-              type="button"
-              className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
-              data-active={activeAppMode === "terminal" ? "true" : undefined}
-              onClick={() => setAppMode("terminal")}
-              title="Terminal"
-              aria-label="Terminal"
-              aria-pressed={activeAppMode === "terminal"}
-            >
-              Terminal
-            </button>
-            <button
-              type="button"
-              className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
-              data-active={activeAppMode === "editor" ? "true" : undefined}
-              onClick={() => setAppMode("editor")}
-              title="Editor"
-              aria-label="Editor"
-              aria-pressed={activeAppMode === "editor"}
-            >
-              Editor
-            </button>
-          </div>
+              <span
+                className="mode-switcher-indicator"
+                data-motion="indicator"
+                data-state="open"
+                style={modeIndicator.style}
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                className={`mode-tab ${activeAppMode === "browser" ? "active" : ""}`}
+                data-active={activeAppMode === "browser" ? "true" : undefined}
+                onClick={() => setAppMode("browser")}
+                title="Browser"
+                aria-label="Browser"
+                aria-pressed={activeAppMode === "browser"}
+              >
+                Browser
+              </button>
+              <button
+                type="button"
+                className={`mode-tab ${activeAppMode === "terminal" ? "active" : ""}`}
+                data-active={activeAppMode === "terminal" ? "true" : undefined}
+                onClick={() => setAppMode("terminal")}
+                title="Terminal"
+                aria-label="Terminal"
+                aria-pressed={activeAppMode === "terminal"}
+              >
+                Terminal
+              </button>
+              <button
+                type="button"
+                className={`mode-tab ${activeAppMode === "editor" ? "active" : ""}`}
+                data-active={activeAppMode === "editor" ? "true" : undefined}
+                onClick={() => setAppMode("editor")}
+                title="Editor"
+                aria-label="Editor"
+                aria-pressed={activeAppMode === "editor"}
+              >
+                Editor
+              </button>
+            </div>
         )}
       </div>
 
       <div className="title-bar-right">
-        <button
-          type="button"
-          className={`title-bar-icon-btn ${rightOpen ? "active" : ""}`}
-          onClick={toggleRight}
-          title="Toggle Right Sidebar"
-          aria-label="Toggle Right Sidebar"
-        >
-          <PanelRightIcon />
-        </button>
+        {!isSettingsOpen && (
+          <button
+            type="button"
+            className={`title-bar-icon-btn ${rightOpen ? "active" : ""}`}
+            onClick={toggleRight}
+            title="Toggle Right Sidebar"
+            aria-label="Toggle Right Sidebar"
+          >
+            <PanelRightIcon />
+          </button>
+        )}
         <div className="window-controls">
           <button
             type="button"

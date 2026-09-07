@@ -26,11 +26,13 @@ describe("TitleBar", () => {
     });
   });
 
-  it("hides mode switcher pill and Settings heading when isSettingsOpen is true", () => {
+  it("hides mode pill, sidebar toggles, and Settings heading when isSettingsOpen is true", () => {
     useTerminalStore.setState({ isSettingsOpen: true });
     const { container } = render(<TitleBar />);
     expect(screen.queryByText("Settings")).toBeNull();
     expect(container.querySelector(".mode-switcher-pill")).toBeNull();
+    expect(screen.queryByTitle("Toggle Left Sidebar")).toBeNull();
+    expect(screen.queryByTitle("Toggle Right Sidebar")).toBeNull();
   });
 
   it("renders oppa brand title and sidebar toggle buttons", () => {
