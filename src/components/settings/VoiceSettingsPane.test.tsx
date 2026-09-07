@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, cleanup } from "@testing-library/react"
 import { VoiceSettingsPane } from "./VoiceSettingsPane";
 import { useTerminalStore } from "../../store/terminalStore";
 import * as voiceTransport from "../../lib/voice/transport";
+import * as micDevicesModule from "../../lib/voice/microphoneDevices";
 import type {
   SpeechModelManifest,
   SpeechModelState,
@@ -20,10 +21,21 @@ vi.mock("../../lib/voice/transport", async (importOriginal) => {
   };
 });
 
+vi.mock("../../lib/voice/microphoneDevices", async (importOriginal) => {
+  const actual = await importOriginal<typeof micDevicesModule>();
+  return {
+    ...actual,
+    listMicrophones: vi.fn().mockResolvedValue([]),
+    requestMicrophoneAccess: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 const getCatalogMock = vi.mocked(voiceTransport.getVoiceCatalog);
 const getStatesMock = vi.mocked(voiceTransport.getVoiceModelStates);
 const downloadMock = vi.mocked(voiceTransport.downloadVoiceModel);
 const onProgressMock = vi.mocked(voiceTransport.onVoiceDownloadProgress);
+const listMicsMock = vi.mocked(micDevicesModule.listMicrophones);
+const requestAccessMock = vi.mocked(micDevicesModule.requestMicrophoneAccess);
 
 const CATALOG: SpeechModelManifest[] = [
   {
@@ -227,10 +239,48 @@ describe("VoiceSettingsPane", () => {
     await act(async () => {});
 
     const micSelect = screen.getByLabelText("Input device") as HTMLSelectElement;
-    fireEvent.change(micSelect, { target: { value: "" } });
+    fireEvent.change(micSelect, { target: { value: "system-default" } });
     const voice = useTerminalStore.getState().settings.voice;
     expect(voice.microphoneDeviceId).toBeNull();
     expect(voice.microphoneDeviceLabel).toBeNull();
+  });
+
+  it("shows Allow access when no devices are listed and rescans on grant", async () => {
+    useTerminalStore.setState({
+      settings: {
+        ...JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+        voice: { ...DEFAULT_APP_SETTINGS.voice, enabled: true },
+      },
+    });
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    expect(screen.getByRole("button", { name: /allow access/i })).toBeInTheDocument();
+    listMicsMock.mockResolvedValue([{ deviceId: "mic-1", label: "USB Mic" }]);
+    fireEvent.click(screen.getByRole("button", { name: /allow access/i }));
+    await act(async () => {});
+
+    expect(requestAccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("option", { name: "USB Mic" })).toBeInTheDocument();
+  });
+
+  it("retains the cached label with unplugged suffix once the list is known", async () => {
+    listMicsMock.mockResolvedValue([{ deviceId: "mic-2", label: "Headset" }]);
+    useTerminalStore.setState({
+      settings: {
+        ...JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+        voice: {
+          ...DEFAULT_APP_SETTINGS.voice,
+          enabled: true,
+          microphoneDeviceId: "mic-1",
+          microphoneDeviceLabel: "USB Mic",
+        },
+      },
+    });
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    expect(screen.getByRole("option", { name: "USB Mic (unplugged)" })).toBeInTheDocument();
   });
 
   it("shows the OpenAI row as not configured with a disabled Configure button", async () => {

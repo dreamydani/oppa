@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useTerminalStore } from "../../store/terminalStore";
 import { onVoiceDownloadProgress } from "../../lib/voice/transport";
+import {
+  buildVoiceMicrophoneSelectOptions,
+  listMicrophones,
+  microphoneDeviceIdFromSelectValue,
+  requestMicrophoneAccess,
+  type VoiceMicrophoneDevice,
+} from "../../lib/voice/microphoneDevices";
 import type {
   DictationMode,
   SpeechModelManifest,
@@ -24,11 +31,6 @@ function statusLabel(state: SpeechModelState | undefined, progress?: number): st
   if (state.status === "extracting") return "Extracting...";
   if (state.status === "ready") return "Ready";
   return state.error ? `Error: ${state.error}` : "Error";
-}
-
-interface MicDevice {
-  deviceId: string;
-  label: string;
 }
 
 function ModelRow({
@@ -112,7 +114,11 @@ export function VoiceSettingsPane(): React.ReactElement {
   const refreshModelStates = useTerminalStore((s) => s.refreshModelStates);
   const downloadModel = useTerminalStore((s) => s.downloadModel);
   const applyModelProgress = useTerminalStore((s) => s.applyModelProgress);
-  const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
+  const [micDevices, setMicDevices] = useState<VoiceMicrophoneDevice[]>([]);
+  // False until enumeration has produced a usable list — an un-enumerated
+  // list must not flag the preferred mic as unplugged (Orca parity).
+  const [devicesKnown, setDevicesKnown] = useState(false);
+  const [requestingAccess, setRequestingAccess] = useState(false);
 
   // Catalog + states come from the backend; progress events patch the store
   // directly so a download storm never triggers a re-fetch loop.
@@ -130,27 +136,15 @@ export function VoiceSettingsPane(): React.ReactElement {
     };
   }, [refreshCatalog, refreshModelStates, applyModelProgress]);
 
-  // List already-permitted devices for the picker; no new permission prompt
-  // in this slice (live capture + permission flow arrive in Slice 3).
+  // Picker listing driven by the device module; rescans on devicechange.
+  // No hot-swap of an active capture here — that is Slice 6's concern.
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      try {
-        if (!navigator.mediaDevices?.enumerateDevices) return;
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        if (cancelled) return;
-        setMicDevices(
-          devices
-            .filter((d) => d.kind === "audioinput")
-            .map((d, i) => ({
-              deviceId: d.deviceId,
-              label: d.label || `Microphone ${i + 1}`,
-            }))
-            .filter((d) => d.deviceId !== ""),
-        );
-      } catch {
-        // Unavailable (no media stack in tests/SSR) — picker keeps System default.
-      }
+      const list = await listMicrophones();
+      if (cancelled) return;
+      setMicDevices(list);
+      if (list.length > 0) setDevicesKnown(true);
     };
     void refresh();
     try {
@@ -168,6 +162,21 @@ export function VoiceSettingsPane(): React.ReactElement {
     };
   }, []);
 
+  const requestAccess = async () => {
+    setRequestingAccess(true);
+    try {
+      await requestMicrophoneAccess();
+      const list = await listMicrophones();
+      setMicDevices(list);
+      setDevicesKnown(true);
+    } catch {
+      // Denial keeps the picker on System default; capture surfaces the
+      // named error when dictation actually starts (Slice 6).
+    } finally {
+      setRequestingAccess(false);
+    }
+  };
+
   const toggleEnabled = () => {
     updateSettings({ voice: { enabled: !voice.enabled } });
   };
@@ -176,14 +185,19 @@ export function VoiceSettingsPane(): React.ReactElement {
     updateSettings({ voice: { dictationMode: mode } });
   };
 
-  const setMicrophone = (deviceId: string) => {
-    if (deviceId === "") {
+  const setMicrophone = (selectValue: string) => {
+    const deviceId = microphoneDeviceIdFromSelectValue(selectValue);
+    if (deviceId === null) {
       updateSettings({ voice: { microphoneDeviceId: null, microphoneDeviceLabel: null } });
       return;
     }
+    // Keep the cached label when re-selecting the currently unplugged device.
     const match = micDevices.find((d) => d.deviceId === deviceId);
+    const label =
+      match?.label ??
+      (deviceId === voice.microphoneDeviceId ? voice.microphoneDeviceLabel : deviceId);
     updateSettings({
-      voice: { microphoneDeviceId: deviceId, microphoneDeviceLabel: match?.label ?? null },
+      voice: { microphoneDeviceId: deviceId, microphoneDeviceLabel: label },
     });
   };
 
@@ -199,11 +213,14 @@ export function VoiceSettingsPane(): React.ReactElement {
 
   const stateById = new Map(modelStates.map((s) => [s.id, s]));
 
-  // Preferred device currently unplugged — keep its cached label visible.
-  const preferredMissing =
-    voice.microphoneDeviceId !== null &&
-    micDevices.length > 0 &&
-    !micDevices.some((d) => d.deviceId === voice.microphoneDeviceId);
+  const micSelect = buildVoiceMicrophoneSelectOptions({
+    devices: micDevices,
+    devicesKnown,
+    preferredDeviceId: voice.microphoneDeviceId,
+    preferredDeviceLabel: voice.microphoneDeviceLabel,
+    systemDefaultLabel: "System default",
+    unavailableSuffix: "unplugged",
+  });
 
   return (
     <div className="settings-pane" role="region" aria-label="Voice Settings">
@@ -288,22 +305,26 @@ export function VoiceSettingsPane(): React.ReactElement {
                 <select
                   aria-label="Input device"
                   className="settings-select"
-                  value={voice.microphoneDeviceId ?? ""}
+                  value={micSelect.selectedValue}
                   onChange={(e) => setMicrophone(e.target.value)}
                   disabled={!voice.enabled}
                 >
-                  <option value="">System default</option>
-                  {preferredMissing && (
-                    <option value={voice.microphoneDeviceId ?? ""}>
-                      {voice.microphoneDeviceLabel ?? "Selected microphone"} (unplugged)
-                    </option>
-                  )}
-                  {micDevices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label}
+                  {micSelect.options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
                     </option>
                   ))}
                 </select>
+                {micDevices.length === 0 && (
+                  <button
+                    type="button"
+                    className="settings-segmented-btn voice-allow-access"
+                    onClick={() => void requestAccess()}
+                    disabled={!voice.enabled || requestingAccess}
+                  >
+                    {requestingAccess ? "Requesting…" : "Allow access"}
+                  </button>
+                )}
               </div>
             </div>
           </section>
