@@ -441,6 +441,15 @@
   padding: 4px 8px 4px 22px;
 }
 
+/* Row context menu: fixed at the cursor so it escapes the scrolling body
+   instead of overlapping rows below (base panel: worktree-card-menu). */
+.ws-row-menu {
+  position: fixed;
+  right: auto;
+  top: auto;
+  margin: 0;
+}
+
 /* Pinned-section rows reuse .ws-row; the pin icon replaces the gutter dot. */
 .ws-pinned-row-icon {
   color: var(--accent-blue, #58a6ff);

@@ -5,6 +5,8 @@ import { leafIds } from "../../store/slices/layoutQueries";
 import { findLeafPath, focus } from "../../lib/pane-manager/layout";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu, prNumberFromUrl, openWorktreeUrl } from "./WorktreeActionsMenu";
+// Viewport-clamped menu math, shared with the Explorer context menu.
+import { computeMenuPosition, menuTransformOrigin } from "../right-sidebar/FileContextMenu";
 import { AgentWorkingDots } from "./AgentWorkingDots";
 import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
 import { ChevronDown, Pin, Sparkles, TriangleAlert } from "lucide-react";
@@ -36,6 +38,79 @@ function avatarHue(key: string): number {
 function cwdBasename(cwd: string | undefined): string | null {
   if (!cwd) return null;
   return cwd.split(/[/\\]/).filter(Boolean).pop() ?? null;
+}
+
+// Row menu size estimates for viewport clamping (6 items); the clamp keeps
+// the panel on screen even when the estimate is off by a row.
+const ROW_MENU_W = 180;
+const ROW_MENU_H = 220;
+
+// Cursor-anchored row menu: fixed positioning escapes the scrolling sidebar
+// body, so the panel never overlaps rows below or clips at the container edge.
+function RowMenu({
+  anchor,
+  row,
+  isPinned,
+  onClose,
+  onFocus,
+  onTogglePin,
+  onSplit,
+  onCloseRow,
+}: {
+  anchor: { x: number; y: number };
+  row: WorkspaceRow;
+  isPinned: boolean;
+  onClose: () => void;
+  onFocus: () => void;
+  onTogglePin: () => void;
+  onSplit: () => void;
+  onCloseRow: () => void;
+}): React.ReactElement {
+  const pos = computeMenuPosition({
+    clickX: anchor.x,
+    clickY: anchor.y,
+    menuW: ROW_MENU_W,
+    menuH: ROW_MENU_H,
+    submenuW: 0,
+    submenuH: 0,
+    viewportW: window.innerWidth,
+    viewportH: window.innerHeight,
+  });
+  const item = (label: string, action: () => void, danger = false) => (
+    <button
+      key={label}
+      type="button"
+      role="menuitem"
+      className={danger ? "danger" : undefined}
+      onClick={() => {
+        onClose();
+        action();
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      className="worktree-card-menu ws-row-menu"
+      role="menu"
+      data-motion="menu"
+      style={{
+        left: pos.x,
+        top: pos.y,
+        transformOrigin: menuTransformOrigin(anchor.x, anchor.y, pos),
+      }}
+    >
+      {item("Focus session", onFocus)}
+      {item(isPinned ? "Unpin" : "Pin", onTogglePin)}
+      {item("Split pane", onSplit)}
+      {row.path && item("Copy path", () => {
+        void navigator.clipboard?.writeText(row.path!).catch(() => {});
+      })}
+      <div className="worktree-menu-divider" />
+      {item("Close pane", onCloseRow, true)}
+    </div>
+  );
 }
 
 // Claude-style compact relative age: 2m, 51m, 1h, 5h, 2d.
@@ -92,6 +167,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onCloseRow,
   onTogglePin,
   menuSessionId,
+  menuAnchor,
   onOpenMenu,
   onCloseMenu,
 }: {
@@ -109,7 +185,8 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
   onCloseRow: (sessionId: string) => void;
   onTogglePin: (sessionId: string) => void;
   menuSessionId: string | null;
-  onOpenMenu: (sessionId: string) => void;
+  menuAnchor: { x: number; y: number } | null;
+  onOpenMenu: (sessionId: string, x: number, y: number) => void;
   onCloseMenu: () => void;
 }) {
   const title = data.tab.isWizard
@@ -281,7 +358,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  onOpenMenu(row.sessionId);
+                  onOpenMenu(row.sessionId, e.clientX, e.clientY);
                 }}
                 title={row.worktreeName ? `${row.worktreeName} · ${row.branch}` : row.title}
               >
@@ -386,64 +463,20 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                     onActionFinished={onWorktreeAction}
                   />
                 )}
-                {menuSessionId === row.sessionId && (
-                  <div className="worktree-card-menu ws-row-menu" role="menu" data-motion="menu">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        onCloseMenu();
-                        markAgentStatusSeen(row.sessionId);
-                        onFocusRow(row.sessionId);
-                      }}
-                    >
-                      Focus session
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        onCloseMenu();
-                        onTogglePin(row.sessionId);
-                      }}
-                    >
-                      {isPinned ? "Unpin" : "Pin"}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        onCloseMenu();
-                        onSplitRow(row.sessionId);
-                      }}
-                    >
-                      Split pane
-                    </button>
-                    {row.path && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          onCloseMenu();
-                          void navigator.clipboard?.writeText(row.path!).catch(() => {});
-                        }}
-                      >
-                        Copy path
-                      </button>
-                    )}
-                    <div className="worktree-menu-divider" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="danger"
-                      onClick={() => {
-                        onCloseMenu();
-                        onCloseRow(row.sessionId);
-                      }}
-                    >
-                      Close pane
-                    </button>
-                  </div>
+                {menuSessionId === row.sessionId && menuAnchor && (
+                  <RowMenu
+                    anchor={menuAnchor}
+                    row={row}
+                    isPinned={isPinned}
+                    onClose={onCloseMenu}
+                    onFocus={() => {
+                      markAgentStatusSeen(row.sessionId);
+                      onFocusRow(row.sessionId);
+                    }}
+                    onTogglePin={() => onTogglePin(row.sessionId)}
+                    onSplit={() => onSplitRow(row.sessionId)}
+                    onCloseRow={() => onCloseRow(row.sessionId)}
+                  />
                 )}
               </div>
             );
@@ -501,25 +534,31 @@ export function WorkspaceList({
 
   // Pinned sessions float to the top of their folder (session-scoped).
   const [pinnedSessionIds, setPinnedSessionIds] = useState<ReadonlySet<string>>(new Set());
-  // Row context menu (right-click): one open at a time, row-anchored panel.
-  const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+  // Row context menu (right-click): one open at a time, cursor-anchored.
+  const [menu, setMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   useEffect(() => {
-    if (!menuSessionId) return;
+    if (!menu) return;
+    const close = () => setMenu(null);
     const closeOnOutsideClick = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest(".ws-row-menu")) {
-        setMenuSessionId(null);
+        setMenu(null);
       }
     };
     const closeOnEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuSessionId(null);
+      if (e.key === "Escape") setMenu(null);
     };
     document.addEventListener("mousedown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
+    // Fixed panels don't follow their anchor: any scroll or resize closes.
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
-  }, [menuSessionId]);
+  }, [menu]);
   const togglePin = (sessionId: string) => {
     setPinnedSessionIds((prev) => {
       const next = new Set(prev);
@@ -747,9 +786,10 @@ export function WorkspaceList({
           }
         }}
             onTogglePin={togglePin}
-            menuSessionId={menuSessionId}
-            onOpenMenu={(sessionId) => setMenuSessionId(sessionId)}
-            onCloseMenu={() => setMenuSessionId(null)}
+            menuSessionId={menu?.sessionId ?? null}
+            menuAnchor={menu ? { x: menu.x, y: menu.y } : null}
+            onOpenMenu={(sessionId, x, y) => setMenu({ sessionId, x, y })}
+            onCloseMenu={() => setMenu(null)}
           />
         );
       };

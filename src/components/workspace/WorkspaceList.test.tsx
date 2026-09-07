@@ -981,6 +981,87 @@ describe("WorkspaceList", () => {
     if (clipboardDescriptor) Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
   });
 
+  it("anchors the context menu at the cursor, fixed above the rows", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "main pane" }) },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    fireEvent.contextMenu(container.querySelector(".ws-row")!, {
+      clientX: 100,
+      clientY: 200,
+    });
+
+    const menu = screen.getByRole("menu");
+    // Fixed positioning comes from the .ws-row-menu stylesheet rule.
+    expect(menu.classList.contains("ws-row-menu")).toBe(true);
+    expect(menu.style.left).toBe("100px");
+    expect(menu.style.top).toBe("200px");
+  });
+
+  it("clamps the context menu inside the viewport near the corner", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "main pane" }) },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    fireEvent.contextMenu(container.querySelector(".ws-row")!, {
+      clientX: window.innerWidth - 10,
+      clientY: window.innerHeight - 10,
+    });
+
+    const menu = screen.getByRole("menu");
+    const left = parseFloat(menu.style.left);
+    const top = parseFloat(menu.style.top);
+    expect(left).toBeLessThan(window.innerWidth - 10);
+    expect(top).toBeLessThan(window.innerHeight - 10);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(top).toBeGreaterThanOrEqual(0);
+  });
+
+  it("closes the context menu when the sidebar scrolls", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "main pane" }) },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    fireEvent.contextMenu(container.querySelector(".ws-row")!, {
+      clientX: 100,
+      clientY: 200,
+    });
+    expect(screen.queryByRole("menu")).not.toBeNull();
+
+    fireEvent.scroll(container.querySelector(".workspace-list")!);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("shows an all-caught-up empty state for the attention view", () => {    useTerminalStore.setState({
       tabs: [
         {
