@@ -84,7 +84,22 @@ pnpm vitest run       # renderer tests
 cargo test -p oppa --lib  # Rust unit tests (run in src-tauri)
 ```
 
+## Isolated Development (Windows)
+
+If you are already running an installed version of Oppa for your daily work, running standard `pnpm tauri dev` connects to your active production daemon.
+
+To run development in an isolated environment without disturbing active terminal sessions, set `OPPA_CHANNEL="dev"`. This runs an isolated daemon pipe (`oppa-daemon-<username>-dev`) and a separate data directory (`com.pc.oppa-dev`):
+
+```powershell
+# Run desktop app with an isolated dev daemon
+$env:OPPA_CHANNEL="dev"; pnpm tauri dev
+
+# Or set it once in your current PowerShell session:
+$env:OPPA_CHANNEL="dev"
+pnpm tauri dev
+```
 Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and the pre-PR checklist.
+
 
 ## Community & Support
 
