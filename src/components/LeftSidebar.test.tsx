@@ -367,8 +367,7 @@ describe("LeftSidebar", () => {
     expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
   });
 
-  it("marks rail avatars needing attention while a session works", () => {
-    useTerminalStore.setState({
+  it("marks rail avatars needing attention while a session works", () => {    useTerminalStore.setState({
       leftSidebarMode: "rail",
       workingBySessionId: { s2: true },
     });
@@ -379,6 +378,25 @@ describe("LeftSidebar", () => {
     const alpha = screen.getByRole("button", { name: /open oppa-alpha/i });
     expect(alpha.querySelector(".sidebar-rail-dot")).toBeNull();
     void container;
+  });
+
+  it("filters the list through section chips without touching search", () => {
+    render(<LeftSidebar />);
+    expect(
+      screen.getByRole("group", { name: /filter workspaces/i }),
+    ).toBeDefined();
+
+    // Neither fixture workspace is worktree-bound: the chip empties the list.
+    fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
+    expect(screen.queryByText("oppa-alpha")).toBeNull();
+    expect(screen.getByText("No Matches")).toBeDefined();
+    // Search box is untouched by chips.
+    expect(
+      (screen.getByPlaceholderText(/search workspaces/i) as HTMLInputElement).value,
+    ).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("oppa-alpha")).toBeDefined();
   });
 });
 

@@ -15,6 +15,45 @@
 }
 
 /* --------------------------------------------------------------------------
+   Sections (Pinned / Active / Recents): sticky uppercase headers + counts.
+   -------------------------------------------------------------------------- */
+.ws-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-section + .ws-section {
+  margin-top: 10px;
+}
+
+.ws-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 8px 2px 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-sidebar, #171717);
+  z-index: 1;
+  user-select: none;
+}
+
+.ws-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #808080);
+}
+
+.ws-section-count {
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-faint, #737373);
+}
+
+/* --------------------------------------------------------------------------
    Workspace Card (seamless container — no box)
    -------------------------------------------------------------------------- */
 .ws-card {
@@ -47,16 +86,27 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted, #9ca3af);
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e6e6e6;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .ws-card-avatar.wizard {
+  width: auto;
+  height: auto;
+  border-radius: 0;
   color: var(--accent-blue, #58a6ff);
+  background: transparent;
+  font-size: inherit;
 }
 
 .ws-card-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-secondary, #9ca3af);
@@ -144,13 +194,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 6px 22px;
+  padding: 5px 8px 5px 22px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-primary, #e6e6e6);
   border: none;
   background: transparent;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
   transition: background-color var(--dur-micro) var(--ease-out),
               color var(--dur-micro) var(--ease-out);
 }
@@ -174,10 +227,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  flex: 1;
-  font-size: 12.5px;
+  font-size: 13px;
   color: inherit;
   font-weight: inherit;
+}
+
+/* Two-line rows: title + cwd/branch context (taller scan-friendly rows). */
+.ws-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.ws-row-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted, #808080);
 }
 
 /* Relative age, right-aligned: 2m / 51m / 1h / 5h */
@@ -302,6 +373,12 @@
   font-size: 11px;
   color: var(--text-muted);
   padding: 4px 8px 4px 22px;
+}
+
+/* Pinned-section rows reuse .ws-row; the pin icon replaces the gutter dot. */
+.ws-pinned-row-icon {
+  color: var(--accent-blue, #58a6ff);
+  flex-shrink: 0;
 }
 
 /* --------------------------------------------------------------------------

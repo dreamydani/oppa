@@ -15,12 +15,13 @@ Locked decisions: 1) 56px icon rail 2) interleaved + `Worktrees` chip 3) taller 
 - Tests first: rail render, B-cycle, persistence, migration (`LeftSidebar.test.tsx`, `terminalStore.test.ts`).
 - // ponytail: collapse local-only first, persist when restart pain reported.
 
-## P1 — Interleaved sections + chips + tall rows
-- [ ] `workspace/WorkspaceList.tsx`: sections Pinned / Active-now / Recents (+ counts, sticky 11px uppercase headers). Chips = preset `searchQuery` values only (`All|Active|Worktrees|Needs-attn`). No filter system.
-- [ ] Card: repo avatar (initial + deterministic hash color) + 13px/600 title + 11px second line (`cwd · branch · ↑↓`). Full path stays in tooltip. Inline rename → `titlePinned`.
-- [ ] `theme.css`: 13px titles, 11px context/mono meta; fix `--text-secondary` undef + `--font-mono` → loaded Geist Mono.
-- Tests: grouping, counts, chip filter, second line, rename pins title.
-- // ponytail: avatar = title[0] + inline-style hash, no util/dep.
+## P1 — Interleaved sections + chips + tall rows ✅ DONE
+- [x] Sections Pinned/Active/Recents + counts, sticky 11px uppercase headers (`WorkspaceList.tsx`, `workspace-list.css`).
+- [x] Filter chips All/Active/Worktrees/Attention narrowing sections (`LeftSidebar.tsx` + CSS); search box untouched.
+- [x] Tall two-line rows (13px title + 11px `cwd · branch` sub, deduped vs titles); repo initial avatar w/ hash hue; 13px card titles.
+- [x] Token fixes: `--text-secondary` defined (both themes), `--font-mono` leads with Geist Mono.
+- [ ] CUT (ponytail): per-row ahead/behind/dirty (no per-row git in store); inline rename (existing rename flows stay); card-collapse persist; DnD.
+- Tests: 7 new (sections, pinned show/hide, 3 chip filters, subtitle) + 1 pin-test scoping fix.
 
 ## P2 — Worktree aliveness (normal + worktree rows)
 - [ ] Worktree row: branch icon, `display_name`, pill `todo|in-progress|in-review|completed`, `→base_ref`, `PR #n` badge if `linked_pr_url`, `⚠ missing`, dim `retired`. Keep existing `...` menu.

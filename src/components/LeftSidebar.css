@@ -153,6 +153,48 @@
 }
 
 /* --------------------------------------------------------------------------
+   Section Filter Chips (chip narrows sections; search stays text authority)
+   -------------------------------------------------------------------------- */
+.sidebar-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 2px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sidebar-filter-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-filter-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-muted, #808080);
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-micro) var(--ease-out),
+              background-color var(--dur-micro) var(--ease-out);
+}
+
+.sidebar-filter-chip:hover {
+  background: var(--tint-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #ffffff);
+}
+
+.sidebar-filter-chip.is-active {
+  background: var(--tint-active, rgba(255, 255, 255, 0.10));
+  color: var(--text-primary, #ffffff);
+}
+
+/* --------------------------------------------------------------------------
    Body Area (Scrollable Workspaces Tree)
    -------------------------------------------------------------------------- */
 .left-sidebar-body {

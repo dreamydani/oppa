@@ -460,8 +460,9 @@ describe("WorkspaceList", () => {
     });
 
     const { container } = render(<WorkspaceList />);
+    // Card rows only: the Pinned section mirrors titles above the cards.
     const rowTitles = () =>
-      Array.from(container.querySelectorAll(".ws-row-title")).map((el) => el.textContent);
+      Array.from(container.querySelectorAll(".ws-card .ws-row-title")).map((el) => el.textContent);
     expect(rowTitles()).toEqual(["first", "second"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Pin second" }));
@@ -597,6 +598,217 @@ describe("WorkspaceList", () => {
     fireEvent.click(closeBtn);
 
     expect(closeSpy).toHaveBeenCalled();
+  });
+
+  it("groups cards under Active and Recents section headers with counts", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "alpha",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-2",
+          title: "beta",
+          layout: { type: "leaf", id: "s-2" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-2",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "alpha term" }),
+        "s-2": session({ id: "s-2", title: "beta term" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    const headers = Array.from(
+      container.querySelectorAll(".ws-section-header"),
+    ).map((el) => el.textContent);
+    expect(headers).toEqual(["Active1", "Recents1"]);
+  });
+
+  it("shows a Pinned section once a session is pinned, hidden again on unpin", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "first" }),
+        "s-2": session({ id: "s-2", title: "second" }),
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-section-pinned")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin second" }));
+    const pinned = container.querySelector(".ws-section-pinned");
+    expect(pinned).not.toBeNull();
+    expect(pinned?.textContent).toContain("second");
+
+    fireEvent.click(screen.getByRole("button", { name: "Unpin second" }));
+    expect(container.querySelector(".ws-section-pinned")).toBeNull();
+  });
+
+  it("sectionFilter=active shows only the active card", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "alpha",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+        {
+          id: "tab-2",
+          title: "beta",
+          layout: { type: "leaf", id: "s-2" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-2",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "alpha term" }),
+        "s-2": session({ id: "s-2", title: "beta term" }),
+      },
+    });
+
+    render(<WorkspaceList sectionFilter="active" />);
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+  });
+
+  it("sectionFilter=worktrees keeps only rows bound to a worktree", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "plain pane", cwd: "C:/projects/oppa" }),
+        "s-2": session({ id: "s-2", title: "agent run", worktreeId: "wt-1" }),
+      },
+      worktrees: [
+        {
+          record: {
+            id: "wt-1",
+            repo_id: "demo",
+            name: "web-runtime-render",
+            display_name: "PERF web runtime render",
+            branch: "perf/render",
+            path: "C:/projects/oppa/wt-1",
+            base_ref: "main",
+            parent_worktree_id: null,
+            child_worktree_ids: [],
+            workspace_status: "in-progress" as const,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: null,
+          },
+          missing_on_disk: false,
+        },
+      ],
+    });
+
+    render(<WorkspaceList sectionFilter="worktrees" />);
+    expect(screen.getByText("PERF web runtime render")).toBeInTheDocument();
+    expect(screen.queryByText("plain pane")).not.toBeInTheDocument();
+  });
+
+  it("sectionFilter=attention keeps only rows that need attention", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "quiet pane" }),
+        "s-2": session({ id: "s-2", title: "busy pane" }),
+      },
+      workingBySessionId: { "s-2": true },
+    });
+
+    render(<WorkspaceList sectionFilter="attention" />);
+    expect(screen.getByText("busy pane")).toBeInTheDocument();
+    expect(screen.queryByText("quiet pane")).not.toBeInTheDocument();
+  });
+
+  it("shows the cwd basename and branch as row context", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          workspaceKey: "C:/projects/oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "agent run", worktreeId: "wt-1", cwd: "C:/projects/oppa/wt-1" }),
+      },
+      worktrees: [
+        {
+          record: {
+            id: "wt-1",
+            repo_id: "demo",
+            name: "web-runtime-render",
+            display_name: "PERF web runtime render",
+            branch: "perf/render",
+            path: "C:/projects/oppa/wt-1",
+            base_ref: "main",
+            parent_worktree_id: null,
+            child_worktree_ids: [],
+            workspace_status: "in-progress" as const,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: null,
+          },
+          missing_on_disk: false,
+        },
+      ],
+    });
+
+    render(<WorkspaceList />);
+    expect(screen.getByText("wt-1 · perf/render")).toBeInTheDocument();
   });
 });
 

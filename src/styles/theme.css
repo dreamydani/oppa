@@ -8,7 +8,7 @@
 [data-theme="dark"] {
   /* Fonts */
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'SF Mono', Consolas, 'Cascadia Code', Menlo, monospace;
+  --font-mono: 'Geist Mono', 'SF Mono', Consolas, 'Cascadia Code', Menlo, monospace;
 
   /* Sizing & Radius */
   --radius-sm: 4px;
@@ -100,6 +100,8 @@
   --border-active: var(--ring, rgba(255, 255, 255, 0.20));
   --text-primary: var(--foreground, #cccccc);
   --text-muted: var(--muted-foreground, #999999);
+  /* Secondary titles (sidebar cards): same value the fallback always gave. */
+  --text-secondary: #9ca3af;
 
   /* Functional Tokens */
   --accent-blue: #58a6ff;
@@ -148,6 +150,7 @@
   --bg-overlay-input: #fbfbfa;
   --text-primary: #18181b;
   --text-muted: #71717a;
+  --text-secondary: #52525b;
   --accent-blue: #0969da;
   --accent-cyan: #0284c7;
   --tint-hover: rgba(0, 0, 0, 0.04);

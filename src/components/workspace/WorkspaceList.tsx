@@ -7,9 +7,36 @@ import { sessionDisplayTitle } from "../TerminalPaneHeader";
 import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
 import { AgentWorkingDots } from "./AgentWorkingDots";
 import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
-import { ChevronDown, Folder, Pin, Sparkles } from "lucide-react";
+import { ChevronDown, Pin, Sparkles } from "lucide-react";
 import "./workspace-list.css";
 
+
+export type SectionFilter = "all" | "active" | "worktrees" | "attention";
+
+// WHY one home: the rail dots, the attention chip, and the pinned section
+// share one predicate so a row never looks urgent in one place and calm in
+// another. Done rides on unread (set when it lands unfocused), so a seen
+// done row stays quiet.
+export function sessionNeedsAttention(sessionId: string): boolean {
+  const s = useTerminalStore.getState();
+  if (s.workingBySessionId[sessionId] || s.unreadBySessionId[sessionId]) {
+    return true;
+  }
+  const state = s.statusBySessionId[sessionId]?.state;
+  return state === "blocked" || state === "waiting";
+}
+
+// Deterministic avatar hue from the workspace key (no util file for 5 lines).
+function avatarHue(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function cwdBasename(cwd: string | undefined): string | null {
+  if (!cwd) return null;
+  return cwd.split(/[/\\]/).filter(Boolean).pop() ?? null;
+}
 
 // Claude-style compact relative age: 2m, 51m, 1h, 5h, 2d.
 function relativeAge(ms: number | undefined): string | null {
@@ -25,6 +52,9 @@ function relativeAge(ms: number | undefined): string | null {
 interface WorkspaceRow {
   sessionId: string;
   title: string;
+  // Second-line context: "cwd-basename · branch" (no per-row git in the
+  // store yet — ponytail: ahead/behind lands with per-row git status).
+  subtitle?: string;
   worktreeId?: string;
   branch?: string;
   worktreeName?: string;
@@ -122,8 +152,14 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
         aria-expanded={data.rows.length > 0 ? expanded : undefined}
         onKeyDown={(e) => e.key === "Enter" && onSelect(data.tab.id)}
       >
-        <span className="ws-card-avatar">
-          <Folder size={13} />
+        <span
+          className="ws-card-avatar"
+          aria-hidden="true"
+          style={{
+            background: `hsl(${avatarHue(data.tab.workspaceKey ?? title)} 30% 28%)`,
+          }}
+        >
+          {(title.trim()[0] ?? "•").toUpperCase()}
         </span>
         <span className="ws-card-title" title={data.tab.workspaceKey ?? title}>
           {title}
@@ -226,7 +262,12 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                 >
                   <Pin size={10} />
                 </button>
-                <span className="ws-row-title">{row.title}</span>
+                <span className="ws-row-text">
+                  <span className="ws-row-title">{row.title}</span>
+                  {row.subtitle && (
+                    <span className="ws-row-sub">{row.subtitle}</span>
+                  )}
+                </span>
                 {age && <span className="ws-row-time">{age}</span>}
                 <div className="ws-row-actions">
                   <button
@@ -271,9 +312,13 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
 
 export interface WorkspaceListProps {
   filter?: string;
+  sectionFilter?: SectionFilter;
 }
 
-export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactElement {
+export function WorkspaceList({
+  filter = "",
+  sectionFilter = "all",
+}: WorkspaceListProps): React.ReactElement {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const sessions = useTerminalStore((s) => s.sessions);
@@ -285,6 +330,7 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
   const closePane = useTerminalStore((s) => s.closePane);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const openWorktreeCreate = useTerminalStore((s) => s.openWorktreeCreate);
+  const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
 
   // Compute active focused leaf session ID in the active tab
   const activeSessionId = useMemo(() => {
@@ -326,15 +372,26 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
     for (const tab of tabs) {
       const ids = tab.isWizard ? [] : leafIds(tab.layout);
       const rows: WorkspaceRow[] = [];
+      const cardTitle = tab.isWizard
+        ? tab.title || "New Workspace"
+        : tab.title || "Workspace";
 
       for (const sessionId of ids) {
         const session = sessions[sessionId];
         if (!session) continue;
         const record = session.worktreeId ? worktreeById.get(session.worktreeId) : undefined;
         const exited = session.status === "exited";
+        const rowTitle = record?.display_name || sessionDisplayTitle(session);
+        // Subtitle shows only new info: parts echoing the row or card title
+        // (typical when the title already is the cwd basename) are dropped.
+        const subtitle =
+          [cwdBasename(session.cwd), record?.branch]
+            .filter((p): p is string => !!p && p !== rowTitle && p !== cardTitle)
+            .join(" · ") || undefined;
         rows.push({
           sessionId,
-          title: record?.display_name || sessionDisplayTitle(session),
+          title: rowTitle,
+          subtitle,
           worktreeId: session.worktreeId,
           branch: record?.branch,
           worktreeName: record?.name,
@@ -343,9 +400,7 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
         });
       }
 
-      const title = tab.isWizard
-        ? tab.title || "New Workspace"
-        : tab.title || "Workspace";
+      const title = cardTitle;
       const workspaceKey = tab.workspaceKey ?? "";
 
       if (query) {
@@ -391,80 +446,154 @@ export function WorkspaceList({ filter = "" }: WorkspaceListProps): React.ReactE
     );
   }
 
-  if (cards.length === 0 && filter.trim()) {
+  // Section filter narrows the searched cards; emptied cards drop out.
+  // Computed before the empty state so a chip that hides everything reads
+  // as "No Matches" instead of a blank list.
+  const visibleCards = cards.flatMap((data) => {
+    if (sectionFilter === "active" && !data.isActive) return [];
+    if (sectionFilter === "worktrees" || sectionFilter === "attention") {
+      const rows = data.rows.filter((r) =>
+        sectionFilter === "worktrees"
+          ? r.worktreeRecord !== undefined
+          : sessionNeedsAttention(r.sessionId),
+      );
+      if (rows.length === 0) return [];
+      return [{ ...data, rows }];
+    }
+    return [data];
+  });
+
+  if (visibleCards.length === 0 && (filter.trim() || sectionFilter !== "all")) {
     return (
       <div className="sidebar-empty-state">
         <span className="sidebar-empty-title">No Matches</span>
         <span className="sidebar-empty-desc">
-          No workspaces matching &quot;{filter}&quot;
+          {filter.trim()
+            ? <>No workspaces matching &quot;{filter}&quot;</>
+            : "No workspaces in this view"}
         </span>
       </div>
     );
   }
 
+  const activeCards = visibleCards.filter((c) => c.isActive);
+  const recentCards = visibleCards.filter((c) => !c.isActive);
+  // Pins stay visible even when their card is collapsed.
+  const pinnedRows = visibleCards.flatMap((c) =>
+    c.rows.filter((r) => pinnedSessionIds.has(r.sessionId)),
+  );
+
+  const focusRowBySession = (sessionId: string) => {
+    const state = useTerminalStore.getState();
+    const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
+    if (!tab) return;
+    if (tab.id !== state.activeTabId) selectTab(tab.id);
+    const path = findLeafPath(tab.layout, sessionId);
+    if (path) focusPane(path);
+  };
+
+  const renderCard = (data: WorkspaceCardData) => {
+    const isDefaultExpanded = data.tab.id === activeTabId;
+    const expanded =
+      collapsedOverrides[data.tab.id] === undefined
+        ? isDefaultExpanded
+        : !collapsedOverrides[data.tab.id];
+    return (
+      <WorkspaceCard
+        key={data.tab.id}
+        data={data}
+        expanded={expanded}
+        activeSessionId={activeSessionId}
+        pinnedSessionIds={pinnedSessionIds}
+        onToggleExpand={toggleExpand}
+        onSelect={(tabId) => selectTab(tabId)}
+        onFocusRow={focusRowBySession}
+        onClose={(tabId) => void closeTab(tabId)}
+        onAddAgent={() => {
+          // Prefill the repo when the workspace's folder matches one;
+          // unresolved folders open the modal unprefilled.
+          const key = data.tab.workspaceKey;
+          const repo = useTerminalStore
+            .getState()
+            .repos.find((r) => r.path === key);
+          openWorktreeCreate(repo ? { repoPath: repo.path } : undefined);
+        }}
+        onWorktreeAction={() => {
+          void useTerminalStore.getState().loadWorktrees().catch(() => {});
+        }}
+        onSplitRow={(sessionId) => {
+          const state = useTerminalStore.getState();
+          const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
+          if (!tab) return;
+          if (tab.id !== state.activeTabId) selectTab(tab.id);
+          const path = findLeafPath(tab.layout, sessionId);
+          if (path) {
+            focusPane(path);
+            void splitPane("v");
+          }
+        }}
+        onCloseRow={(sessionId) => {
+          const state = useTerminalStore.getState();
+          const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
+          if (!tab) return;
+          const path = findLeafPath(tab.layout, sessionId);
+          if (path) {
+            if (tab.id !== state.activeTabId) selectTab(tab.id);
+            void closePane(path);
+          }
+        }}
+        onTogglePin={togglePin}
+      />
+    );
+  };
+
+  const renderSection = (
+    title: string,
+    count: number,
+    className: string,
+    children: React.ReactNode,
+  ) => (
+    <section className={`ws-section ${className}`}>
+      <div className="ws-section-header" aria-hidden="true">
+        <span className="ws-section-title">{title}</span>
+        <span className="ws-section-count">{count}</span>
+      </div>
+      {children}
+    </section>
+  );
+
   return (
     <div className="workspace-list" role="list">
-      {cards.map((data) => {
-        const isDefaultExpanded = data.tab.id === activeTabId;
-        const expanded =
-          collapsedOverrides[data.tab.id] === undefined
-            ? isDefaultExpanded
-            : !collapsedOverrides[data.tab.id];
-        return (
-          <WorkspaceCard
-            key={data.tab.id}
-            data={data}
-            expanded={expanded}
-            activeSessionId={activeSessionId}
-            pinnedSessionIds={pinnedSessionIds}
-            onToggleExpand={toggleExpand}
-            onSelect={(tabId) => selectTab(tabId)}
-            onFocusRow={(sessionId) => {
-              const state = useTerminalStore.getState();
-              const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
-              if (!tab) return;
-              if (tab.id !== state.activeTabId) selectTab(tab.id);
-              const path = findLeafPath(tab.layout, sessionId);
-              if (path) focusPane(path);
-            }}
-            onClose={(tabId) => void closeTab(tabId)}
-            onAddAgent={() => {
-              // Prefill the repo when the workspace's folder matches one;
-              // unresolved folders open the modal unprefilled.
-              const key = data.tab.workspaceKey;
-              const repo = useTerminalStore
-                .getState()
-                .repos.find((r) => r.path === key);
-              openWorktreeCreate(repo ? { repoPath: repo.path } : undefined);
-            }}
-            onWorktreeAction={() => {
-              void useTerminalStore.getState().loadWorktrees().catch(() => {});
-            }}
-            onSplitRow={(sessionId) => {
-              const state = useTerminalStore.getState();
-              const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
-              if (!tab) return;
-              if (tab.id !== state.activeTabId) selectTab(tab.id);
-              const path = findLeafPath(tab.layout, sessionId);
-              if (path) {
-                focusPane(path);
-                void splitPane("v");
-              }
-            }}
-            onCloseRow={(sessionId) => {
-              const state = useTerminalStore.getState();
-              const tab = state.tabs.find((t) => leafIds(t.layout).includes(sessionId));
-              if (!tab) return;
-              const path = findLeafPath(tab.layout, sessionId);
-              if (path) {
-                if (tab.id !== state.activeTabId) selectTab(tab.id);
-                void closePane(path);
-              }
-            }}
-            onTogglePin={togglePin}
-          />
-        );
-      })}
+      {pinnedRows.length > 0 &&
+        renderSection(
+          "Pinned",
+          pinnedRows.length,
+          "ws-section-pinned",
+          pinnedRows.map((row) => (
+            <button
+              key={row.sessionId}
+              type="button"
+              className="ws-row ws-pinned-row"
+              onClick={() => {
+                markAgentStatusSeen(row.sessionId);
+                focusRowBySession(row.sessionId);
+              }}
+              title={row.title}
+            >
+              <Pin size={10} className="ws-pinned-row-icon" aria-hidden="true" />
+              <span className="ws-row-text">
+                <span className="ws-row-title">{row.title}</span>
+                {row.subtitle && (
+                  <span className="ws-row-sub">{row.subtitle}</span>
+                )}
+              </span>
+            </button>
+          )),
+        )}
+      {activeCards.length > 0 &&
+        renderSection("Active", activeCards.length, "", activeCards.map(renderCard))}
+      {recentCards.length > 0 &&
+        renderSection("Recents", recentCards.length, "", recentCards.map(renderCard))}
     </div>
   );
 }

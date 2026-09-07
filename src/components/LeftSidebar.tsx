@@ -9,7 +9,8 @@ import {
   SlideDrawer,
 } from "../lib/layout/sideDrawer";
 import { createRafCoalescer } from "../lib/layout/rafThrottle";
-import { WorkspaceList } from "./workspace/WorkspaceList";
+import { WorkspaceList, sessionNeedsAttention } from "./workspace/WorkspaceList";
+import type { SectionFilter } from "./workspace/WorkspaceList";
 import {
   SearchIcon,
   PlusIcon,
@@ -33,9 +34,6 @@ const isMacPlatform =
 function RailStrip(): React.ReactElement {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
-  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
-  const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
-  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
   const selectTab = useTerminalStore((s) => s.selectTab);
 
   return (
@@ -44,11 +42,9 @@ function RailStrip(): React.ReactElement {
         const title = tab.isWizard
           ? tab.title || "New Workspace"
           : tab.title || "Workspace";
-        const needsAttention = !tab.isWizard && leafIds(tab.layout).some((id) => {
-          if (workingBySessionId[id] || unreadBySessionId[id]) return true;
-          const state = statusBySessionId[id]?.state;
-          return state === "blocked" || state === "waiting";
-        });
+        const needsAttention =
+          !tab.isWizard &&
+          leafIds(tab.layout).some((id) => sessionNeedsAttention(id));
         return (
           <button
             key={tab.id}
@@ -82,6 +78,8 @@ export function LeftSidebar(): React.ReactElement {
   const isRail = leftSidebarMode === "rail";
 
   const [searchQuery, setSearchQuery] = useState("");
+  // Chip filter narrows sections; the search box stays the text authority.
+  const [sectionFilter, setSectionFilter] = useState<SectionFilter>("all");
   // Disables width transitions while drag-resizing so the panel tracks the
   // cursor 1:1 instead of easing behind it.
   const [isResizing, setIsResizing] = useState(false);
@@ -213,11 +211,31 @@ export function LeftSidebar(): React.ReactElement {
               <PlusIcon size={14} />
             </button>
           </div>
+          <div className="sidebar-filter-chips" role="group" aria-label="Filter workspaces">
+            {(
+              [
+                ["all", "All"],
+                ["active", "Active"],
+                ["worktrees", "Worktrees"],
+                ["attention", "Attention"],
+              ] as [SectionFilter, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`sidebar-filter-chip${sectionFilter === value ? " is-active" : ""}`}
+                aria-pressed={sectionFilter === value}
+                onClick={() => setSectionFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
 
         <div className="left-sidebar-body">
-          <WorkspaceList filter={searchQuery} />
+          <WorkspaceList filter={searchQuery} sectionFilter={sectionFilter} />
         </div>
 
         <div className="left-sidebar-footer">
