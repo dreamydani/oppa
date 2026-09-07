@@ -4,10 +4,10 @@ import type { TabState } from "../../store/slices/paneLayoutSlice";
 import { leafIds } from "../../store/slices/layoutQueries";
 import { findLeafPath, focus } from "../../lib/pane-manager/layout";
 import { sessionDisplayTitle } from "../TerminalPaneHeader";
-import { WorktreeActionsMenu } from "./WorktreeActionsMenu";
+import { WorktreeActionsMenu, prNumberFromUrl, openWorktreeUrl } from "./WorktreeActionsMenu";
 import { AgentWorkingDots } from "./AgentWorkingDots";
 import { CloseIcon, PlusIcon, SplitSquareIcon } from "../icons/MinimalIcons";
-import { ChevronDown, Pin, Sparkles } from "lucide-react";
+import { ChevronDown, Pin, Sparkles, TriangleAlert } from "lucide-react";
 import "./workspace-list.css";
 
 
@@ -55,6 +55,11 @@ interface WorkspaceRow {
   // Second-line context: "cwd-basename · branch" (no per-row git in the
   // store yet — ponytail: ahead/behind lands with per-row git status).
   subtitle?: string;
+  // Worktree aliveness, straight from the loaded registry (no extra IPC).
+  pill?: string;
+  prUrl?: string;
+  missingOnDisk?: boolean;
+  retired?: boolean;
   worktreeId?: string;
   branch?: string;
   worktreeName?: string;
@@ -104,6 +109,7 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
     : data.tab.title || "Workspace";
   const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
   const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
   const markAgentStatusSeen = useTerminalStore((s) => s.markAgentStatusSeen);
 
   // Pinned sessions float to the top of their folder; the rest keep order.
@@ -220,19 +226,21 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
             const isFocusedLeaf = data.isActive && row.sessionId === activeSessionId;
             const age = relativeAge(agentEntry?.state_started_at_ms);
             const isPinned = pinnedSessionIds.has(row.sessionId);
-            // Sidebar shows exactly two states: working (animated dot-grid
-            // loader) and done (green dot). Idle, exited, blocked, and waiting
-            // render no indicator so quiet rows stay visually silent.
+            const isUnread = unreadBySessionId[row.sessionId] ?? false;
+            // Sidebar states: working (animated dot-grid), done (green),
+            // blocked (amber), waiting (hollow). Idle and exited stay silent
+            // so quiet rows don't shout.
             const isWorkingState =
               agentEntry?.state === "working" ||
               (!agentEntry && !row.exited && isWorking);
             const isDoneState = agentEntry?.state === "done";
+            const prNumber = row.prUrl ? prNumberFromUrl(row.prUrl) : null;
 
             return (
               <div
                 key={row.sessionId}
                 role="listitem"
-                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isPinned ? " pinned" : ""}`}
+                className={`ws-row${isFocusedLeaf ? " is-active" : ""}${row.exited ? " exited" : ""}${isPinned ? " pinned" : ""}${isUnread ? " is-unread" : ""}${row.retired ? " retired" : ""}${row.missingOnDisk ? " ws-row-missing" : ""}`}
                 // Feeds the [data-motion="stagger"] cascade; motion.css caps it
                 // at --stagger-cap so a long list still finishes arriving fast.
                 style={{ "--row-index": rowIndex } as React.CSSProperties}
@@ -248,6 +256,20 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                     className="ws-status-circle done"
                     title="Status: done"
                     aria-label="Status: done"
+                  />
+                )}
+                {!isPinned && agentEntry?.state === "blocked" && (
+                  <span
+                    className="ws-status-circle blocked"
+                    title="Status: blocked — needs you"
+                    aria-label="Status: blocked"
+                  />
+                )}
+                {!isPinned && agentEntry?.state === "waiting" && (
+                  <span
+                    className="ws-status-circle waiting"
+                    title="Status: waiting"
+                    aria-label="Status: waiting"
                   />
                 )}
                 <button
@@ -269,6 +291,34 @@ const WorkspaceCard = React.memo(function WorkspaceCard({
                   )}
                 </span>
                 {age && <span className="ws-row-time">{age}</span>}
+                {(row.pill || row.prUrl || row.missingOnDisk) && (
+                  <span className="ws-row-badges">
+                    {row.missingOnDisk && (
+                      <span
+                        className="ws-row-missing-mark"
+                        title="Worktree missing on disk"
+                      >
+                        <TriangleAlert size={11} aria-hidden="true" />
+                      </span>
+                    )}
+                    {row.pill && <span className="ws-row-pill">{row.pill}</span>}
+                    {row.prUrl && (
+                      <a
+                        href={row.prUrl}
+                        className="ws-row-pr"
+                        title="Open PR"
+                        aria-label={prNumber ? `Open PR #${prNumber}` : "Open PR"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          if (row.prUrl) openWorktreeUrl(row.prUrl);
+                        }}
+                      >
+                        {prNumber ? `#${prNumber}` : "PR"}
+                      </a>
+                    )}
+                  </span>
+                )}
                 <div className="ws-row-actions">
                   <button
                     type="button"
@@ -365,7 +415,7 @@ export function WorkspaceList({
   };
 
   const cards: WorkspaceCardData[] = useMemo(() => {
-    const worktreeById = new Map(worktrees.map((w) => [w.record.id, w.record]));
+    const worktreeById = new Map(worktrees.map((w) => [w.record.id, w]));
     const query = filter.trim().toLowerCase();
 
     const result: WorkspaceCardData[] = [];
@@ -379,7 +429,8 @@ export function WorkspaceList({
       for (const sessionId of ids) {
         const session = sessions[sessionId];
         if (!session) continue;
-        const record = session.worktreeId ? worktreeById.get(session.worktreeId) : undefined;
+        const entry = session.worktreeId ? worktreeById.get(session.worktreeId) : undefined;
+        const record = entry?.record;
         const exited = session.status === "exited";
         const rowTitle = record?.display_name || sessionDisplayTitle(session);
         // Subtitle shows only new info: parts echoing the row or card title
@@ -392,6 +443,15 @@ export function WorkspaceList({
           sessionId,
           title: rowTitle,
           subtitle,
+          pill:
+            record && !record.retired
+              ? record.base_ref
+                ? `${record.workspace_status} → ${record.base_ref}`
+                : record.workspace_status
+              : undefined,
+          prUrl: record?.linked_pr_url ?? undefined,
+          missingOnDisk: entry?.missing_on_disk ?? false,
+          retired: record?.retired ?? false,
           worktreeId: session.worktreeId,
           branch: record?.branch,
           worktreeName: record?.name,

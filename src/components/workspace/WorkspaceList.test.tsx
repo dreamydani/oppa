@@ -351,48 +351,6 @@ describe("WorkspaceList", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("renders no status indicator for blocked or waiting states (done/working only)", () => {
-    useTerminalStore.setState({
-      tabs: [
-        {
-          id: "tab-1",
-          title: "oppa",
-          layout: {
-            type: "split",
-            dir: "v",
-            ratio: 0.5,
-            a: { type: "leaf", id: "s-1" },
-            b: { type: "leaf", id: "s-2" },
-          },
-          focusedPath: [0],
-        },
-      ],
-      activeTabId: "tab-1",
-      sessions: {
-        "s-1": session({ id: "s-1", title: "blocked pane" }),
-        "s-2": session({ id: "s-2", title: "waiting pane" }),
-      },
-      statusBySessionId: {
-        "s-1": {
-          state: "blocked",
-          state_started_at_ms: 0,
-          updated_at_ms: 0,
-          origin: "hook",
-        },
-        "s-2": {
-          state: "waiting",
-          state_started_at_ms: 0,
-          updated_at_ms: 0,
-          origin: "hook",
-        },
-      },
-    });
-
-    const { container } = render(<WorkspaceList />);
-    expect(container.querySelector(".ws-status-circle")).toBeNull();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
   it("shows the collapse chevron on folder headers only when there are multiple sessions", () => {
     const twoPaneLayout = {
       type: "split",
@@ -770,8 +728,7 @@ describe("WorkspaceList", () => {
     expect(screen.queryByText("quiet pane")).not.toBeInTheDocument();
   });
 
-  it("shows the cwd basename and branch as row context", () => {
-    useTerminalStore.setState({
+  it("shows the cwd basename and branch as row context", () => {    useTerminalStore.setState({
       tabs: [
         {
           id: "tab-1",
@@ -809,6 +766,141 @@ describe("WorkspaceList", () => {
 
     render(<WorkspaceList />);
     expect(screen.getByText("wt-1 · perf/render")).toBeInTheDocument();
+  });
+
+  function worktreeState(overrides = {}) {
+    return {
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          workspaceKey: "C:/projects/oppa",
+          layout: { type: "leaf" as const, id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "agent run", worktreeId: "wt-1", cwd: "C:/projects/oppa/wt-1" }),
+      },
+      worktrees: [
+        {
+          record: {
+            id: "wt-1",
+            repo_id: "demo",
+            name: "web-runtime-render",
+            display_name: "PERF web runtime render",
+            branch: "perf/render",
+            path: "C:/projects/oppa/wt-1",
+            base_ref: "main",
+            parent_worktree_id: null,
+            child_worktree_ids: [],
+            workspace_status: "in-progress" as const,
+            retired: false,
+            created_at_ms: 0,
+            linked_pr_url: null,
+            ...overrides,
+          },
+          missing_on_disk: false,
+        },
+      ],
+    };
+  }
+
+  it("shows the worktree status pill with its base ref", () => {
+    useTerminalStore.setState(worktreeState());
+
+    render(<WorkspaceList />);
+    expect(screen.getByText("in-progress → main")).toBeInTheDocument();
+  });
+
+  it("renders a PR badge linking the worktree pull request", () => {
+    useTerminalStore.setState(
+      worktreeState({ linked_pr_url: "https://example.com/owner/repo/pull/12" }),
+    );
+
+    render(<WorkspaceList />);
+    const badge = screen.getByRole("link", { name: /open PR #12/i });
+    expect(badge.getAttribute("href")).toBe("https://example.com/owner/repo/pull/12");
+  });
+
+  it("marks worktrees missing on disk", () => {
+    const state = worktreeState();
+    state.worktrees[0].missing_on_disk = true;
+    useTerminalStore.setState(state);
+
+    const { container } = render(<WorkspaceList />);
+    const row = container.querySelector(".ws-row");
+    expect(row?.classList.contains("ws-row-missing")).toBe(true);
+    expect(screen.getByTitle(/missing on disk/i)).toBeInTheDocument();
+  });
+
+  it("dims retired worktrees", () => {
+    useTerminalStore.setState(worktreeState({ retired: true }));
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-row.retired")).not.toBeNull();
+  });
+
+  it("renders blocked and waiting status dots instead of silence", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: {
+            type: "split",
+            dir: "v",
+            ratio: 0.5,
+            a: { type: "leaf", id: "s-1" },
+            b: { type: "leaf", id: "s-2" },
+          },
+          focusedPath: [0],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: {
+        "s-1": session({ id: "s-1", title: "blocked pane" }),
+        "s-2": session({ id: "s-2", title: "waiting pane" }),
+      },
+      statusBySessionId: {
+        "s-1": {
+          state: "blocked",
+          state_started_at_ms: 0,
+          updated_at_ms: 0,
+          origin: "hook",
+        },
+        "s-2": {
+          state: "waiting",
+          state_started_at_ms: 0,
+          updated_at_ms: 0,
+          origin: "hook",
+        },
+      },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-status-circle.blocked")).not.toBeNull();
+    expect(container.querySelector(".ws-status-circle.waiting")).not.toBeNull();
+  });
+
+  it("bolds rows with unseen agent updates", () => {
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "tab-1",
+          title: "oppa",
+          layout: { type: "leaf", id: "s-1" },
+          focusedPath: [],
+        },
+      ],
+      activeTabId: "tab-1",
+      sessions: { "s-1": session({ id: "s-1", title: "quiet pane" }) },
+      unreadBySessionId: { "s-1": true },
+    });
+
+    const { container } = render(<WorkspaceList />);
+    expect(container.querySelector(".ws-row.is-unread")).not.toBeNull();
   });
 });
 

@@ -331,6 +331,67 @@
     color-mix(in srgb, var(--status-running, #3fb950) 40%, transparent);
 }
 
+.ws-status-circle.blocked {
+  background: var(--status-warning, #eab308);
+  box-shadow: 0 0 4px
+    color-mix(in srgb, var(--status-warning, #eab308) 40%, transparent);
+}
+
+.ws-status-circle.waiting {
+  background: transparent;
+  border: 1.5px solid var(--text-muted, #808080);
+  width: 6px;
+  height: 6px;
+}
+
+.ws-row.is-unread .ws-row-title {
+  font-weight: 600;
+}
+
+.ws-row.retired {
+  opacity: 0.55;
+}
+
+/* Inline worktree badges: status pill, PR link, missing marker. */
+.ws-row-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ws-row-pill {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #808080);
+  background: var(--tint-hover, rgba(255, 255, 255, 0.06));
+  border-radius: 9999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ws-row-pr {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--accent-blue, #58a6ff);
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.ws-row-pr:hover {
+  text-decoration: underline;
+}
+
+.ws-row-missing-mark {
+  display: inline-flex;
+  color: var(--status-warning, #eab308);
+}
+
 .ws-row-actions {
   display: inline-flex;
   align-items: center;

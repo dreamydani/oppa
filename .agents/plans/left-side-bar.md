@@ -23,11 +23,10 @@ Locked decisions: 1) 56px icon rail 2) interleaved + `Worktrees` chip 3) taller 
 - [ ] CUT (ponytail): per-row ahead/behind/dirty (no per-row git in store); inline rename (existing rename flows stay); card-collapse persist; DnD.
 - Tests: 7 new (sections, pinned show/hide, 3 chip filters, subtitle) + 1 pin-test scoping fix.
 
-## P2 — Worktree aliveness (normal + worktree rows)
-- [ ] Worktree row: branch icon, `display_name`, pill `todo|in-progress|in-review|completed`, `→base_ref`, `PR #n` badge if `linked_pr_url`, `⚠ missing`, dim `retired`. Keep existing `...` menu.
-- [ ] Status: unhide `blocked` (amber) / `waiting` (hollow); render `unreadBySessionId` bold+dot; keep working dots + done dot.
-- Tests: badges, retired/missing, PR link, unread dot.
-- // ponytail: badges from already-loaded store only, no per-row git IPC; add when stale-badge complaint lands.
+## P2 — Worktree aliveness (normal + worktree rows) ✅ DONE
+- [x] Row: status pill (`in-progress → main`), PR `#n` badge (shared `openWorktreeUrl`/`prNumberFromUrl` home in `WorktreeActionsMenu`), missing mark, `retired` dim. `...` menu kept.
+- [x] Status: blocked amber dot + waiting hollow dot unhidden; unread rows bold; working dots + done dot kept.
+- Tests: pill, PR badge href, missing, retired, blocked/waiting dots, unread (old silence test replaced as intended behavior change).
 
 ## P3 — Productivity wiring
 - [ ] Row keyboard: arrows navigate, `Enter` open, `p` pin, `a` close, `e` expand/collapse-all (cards already have `tabIndex`; extend pattern to rows).
