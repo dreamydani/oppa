@@ -45,12 +45,18 @@ tauri-plugin-process = "2"
 # installed at request time) and keeps HTTPS working on GitHub.
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Local speech-to-text engine (Slice 5). Official safe bindings; static
+# linking is the default — the build script fetches the matching prebuilt
+# native lib automatically, so no system dependency or sidecar is needed.
+sherpa-onnx = "1.13.7"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# WAV fixture parsing for the gated voice engine e2e (Slice 5).
+hound = "1"
 # Test-only: pin the baked updater pubkey through the plugin's exact parse
 # chain (same crate+version the updater verifies with, see Cargo.lock).
 minisign-verify = "0.2"

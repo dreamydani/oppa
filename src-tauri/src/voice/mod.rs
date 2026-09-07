@@ -1,5 +1,5 @@
-// Voice dictation backend: speech-model catalog, download states, and
-// (from Slice 5) the STT engine. Slice 2 skeleton: catalog + stub commands.
+// Voice dictation backend: speech-model catalog, downloader, and the local
+// STT engine (Slice 5) behind the Tauri commands.
 
 pub mod commands;
 pub mod model_cache_path;
@@ -7,3 +7,8 @@ pub mod model_catalog;
 pub mod model_deletion;
 pub mod model_download_catalog;
 pub mod model_manager;
+pub mod stt_audio_resample;
+pub mod stt_engine;
+pub mod stt_model_config;
+pub mod stt_offline_chunker;
+pub mod stt_service;

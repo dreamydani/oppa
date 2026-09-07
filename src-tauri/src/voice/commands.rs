@@ -1,27 +1,29 @@
-// Voice dictation commands (Tauri boundary). Downloads are real (Slice 4);
-// local STT (Slice 5) and cloud transcription (Slice 7) replace the remaining
-// stubs command by command; the names, args, and event channels are final.
+// Voice dictation commands (Tauri boundary). Downloads (Slice 4) and local
+// STT (Slice 5) are real; cloud transcription (Slice 7) replaces the last
+// stubs. Names, args, and event channels are final.
 
 use crate::voice::model_catalog::{get_catalog_model, speech_model_catalog, SpeechModelManifest};
 pub use crate::voice::model_manager::{ModelManager, SpeechModelState, SpeechModelStatus};
+use crate::voice::stt_engine::SttEvent;
+use crate::voice::stt_model_config::hotwords_file_content;
+use crate::voice::stt_service::{SttEmitter, SttService};
 use serde::Serialize;
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
-/// Process-wide voice state: the download manager plus the engine's active
-/// model id (set by Slice 5; gates deletion of a model in use).
+/// Process-wide voice state: the download manager plus the dictation service
+/// (warm engine + active session). Both share the models dir.
 pub struct VoiceState {
     manager: ModelManager,
-    active_model: Mutex<Option<String>>,
+    service: Arc<SttService>,
 }
 
 impl VoiceState {
     pub fn with_models_dir(models_dir: PathBuf) -> Self {
         Self {
-            manager: ModelManager::new(models_dir),
-            active_model: Mutex::new(None),
+            manager: ModelManager::new(models_dir.clone()),
+            service: Arc::new(SttService::new(models_dir)),
         }
     }
 
@@ -34,12 +36,8 @@ impl VoiceState {
         &self.manager
     }
 
-    fn is_active_model(&self, model_id: &str) -> bool {
-        self.active_model
-            .lock()
-            .expect("voice active lock")
-            .as_deref()
-            == Some(model_id)
+    pub fn service(&self) -> &Arc<SttService> {
+        &self.service
     }
 }
 
@@ -59,14 +57,12 @@ struct SessionPayload {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)] // Emitted by the STT engine from Slice 5.
 struct TranscriptPayload {
     text: String,
     session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)] // Emitted by the STT engine from Slice 5.
 struct ErrorPayload {
     error: String,
     session_id: String,
@@ -134,7 +130,7 @@ pub fn voice_delete_model(
     model_id: String,
 ) -> Result<(), String> {
     let manager = state.manager();
-    let active = state.is_active_model(&model_id);
+    let active = state.service().loaded_model_id().as_deref() == Some(model_id.as_str());
     let settings_path = crate::pty::snapshot::resolve_gui_data_dir(&app)
         .map(|dir| dir.join("settings.json"))
         .unwrap_or_else(|| PathBuf::from("settings.json"));
@@ -156,23 +152,71 @@ pub async fn voice_start_dictation(
     hotwords: Option<Vec<String>>,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    let _ = state;
-    let _ = hotwords;
     require_known_model(&model_id)?;
     let session_id = desktop_session(session_id);
-    // Stub: report ready now; the stopped event follows shortly so the Slice 6
-    // state machine can already be smoke-tested against the real backend.
-    let _ = app.emit(
-        "voice://ready",
-        SessionPayload {
-            session_id: session_id.clone(),
-        },
-    );
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let _ = app.emit("voice://stopped", SessionPayload { session_id });
-    });
-    Ok(())
+    let owner = format!("desktop:{session_id}");
+
+    // Hotwords biasing file (`<word> :2.0` per line, Orca parity). Written
+    // before engine load, unlinked right after start resolves.
+    let hotwords_file = match hotwords.as_deref().unwrap_or(&[]) {
+        [] => None,
+        words => {
+            let models_dir = state.manager().models_dir().to_path_buf();
+            Some(write_hotwords_file(&models_dir, words).map_err(|e| format!("io:{e}"))?)
+        }
+    };
+
+    let emitter = session_emitter(&app, &session_id);
+    let started = state
+        .service()
+        .start_dictation(&model_id, owner, hotwords_file.clone(), emitter)
+        .await
+        .map_err(|e| e.to_string());
+
+    if let Some(path) = hotwords_file {
+        let _ = std::fs::remove_file(path);
+    }
+    started
+}
+
+/// Content-addressed hotwords file co-located with the models dir (sherpa
+/// cannot read non-ASCII Windows paths either, so the ASCII-safe cache dir
+/// doubles for these temp files — Orca parity).
+fn write_hotwords_file(models_dir: &Path, hotwords: &[String]) -> std::io::Result<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let content =
+        hotwords_file_content(&hotwords.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let path = models_dir.join(format!("speech-hotwords-{}.txt", &digest[..12]));
+    std::fs::write(&path, content)?;
+    Ok(path)
+}
+
+fn session_emitter(app: &AppHandle, session_id: &str) -> SttEmitter {
+    let emitter = app.clone();
+    let session_id = session_id.to_string();
+    SttEmitter::new(move |event| {
+        let session_id = session_id.clone();
+        match event {
+            SttEvent::Ready => {
+                let _ = emitter.emit("voice://ready", SessionPayload { session_id });
+            }
+            SttEvent::Partial(text) => {
+                let _ = emitter.emit("voice://partial", TranscriptPayload { text, session_id });
+            }
+            SttEvent::Final(text) => {
+                let _ = emitter.emit("voice://final", TranscriptPayload { text, session_id });
+            }
+            SttEvent::Stopped => {
+                let _ = emitter.emit("voice://stopped", SessionPayload { session_id });
+            }
+            SttEvent::Error(error) => {
+                let _ = emitter.emit("voice://error", ErrorPayload { error, session_id });
+            }
+        }
+    })
 }
 
 #[tauri::command(async)]
@@ -182,19 +226,20 @@ pub fn voice_feed_audio(
     sample_rate: u32,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    let _ = state;
-    let _ = session_id;
-    validate_audio_wire(&samples_b64, sample_rate)
+    let samples = decode_audio_wire(&samples_b64, sample_rate)?;
+    let owner = format!("desktop:{}", desktop_session(session_id));
+    state.service().feed_audio(samples, sample_rate, &owner);
+    Ok(())
 }
 
 // Sync validation behind `voice_feed_audio` (the `#[tauri::command]` wrapper
 // takes `State<'_>`, which unit tests cannot build, so the pure check lives
 // here and the wrapper delegates to it).
-fn validate_audio_wire(samples_b64: &str, sample_rate: u32) -> Result<(), String> {
+/// Decodes the base64 f32-LE wire shape (Slice 2 contract) to samples.
+fn decode_audio_wire(samples_b64: &str, sample_rate: u32) -> Result<Vec<f32>, String> {
     if sample_rate != 16000 {
         return Err(format!("unsupported_sample_rate:{sample_rate}"));
     }
-    // Validate the base64 f32-LE wire shape now so Slice 3/5 inherit a checked contract.
     let bytes = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
         samples_b64.trim(),
@@ -203,17 +248,29 @@ fn validate_audio_wire(samples_b64: &str, sample_rate: u32) -> Result<(), String
     if bytes.len() % 4 != 0 {
         return Err(format!("invalid_audio:not_f32_le_len:{}", bytes.len()));
     }
-    Ok(())
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
 }
 
 #[tauri::command(async)]
-pub fn voice_stop_dictation(app: AppHandle, session_id: Option<String>) -> Result<(), String> {
-    let _ = app.emit(
-        "voice://stopped",
-        SessionPayload {
-            session_id: desktop_session(session_id),
-        },
-    );
+pub async fn voice_stop_dictation(
+    state: State<'_, VoiceState>,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let owner = format!("desktop:{}", desktop_session(session_id));
+    let service = state.service().clone();
+    service
+        .stop_dictation(&owner)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Idle teardown: a stale generation never evicts a fresh engine.
+    let generation = service.idle_generation();
+    tokio::spawn(async move {
+        tokio::time::sleep(crate::voice::stt_service::idle_timeout()).await;
+        service.expire_idle(generation);
+    });
     Ok(())
 }
 
@@ -281,15 +338,52 @@ mod tests {
     fn feed_audio_accepts_valid_f32_le_wire() {
         // 2 samples of f32 LE zeros.
         let ok = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
-        assert!(validate_audio_wire(&ok, 16000).is_ok());
+        assert!(decode_audio_wire(&ok, 16000).is_ok());
     }
 
     #[test]
     fn feed_audio_rejects_bad_rate_and_bad_base64() {
         let ok = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
-        assert!(validate_audio_wire(&ok, 48000).is_err());
-        assert!(validate_audio_wire("!!!", 16000).is_err());
+        assert!(decode_audio_wire(&ok, 48000).is_err());
+        assert!(decode_audio_wire("!!!", 16000).is_err());
         // Valid base64 but not a multiple of 4 bytes (not f32 LE).
-        assert!(validate_audio_wire("aGk=", 16000).is_err());
+        assert!(decode_audio_wire("aGk=", 16000).is_err());
+    }
+
+    #[test]
+    fn decode_audio_wire_round_trips_f32_le() {
+        let samples = [1.0f32, -0.5, 0.0, 3.25];
+        let mut bytes = Vec::new();
+        for sample in samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+        assert_eq!(
+            decode_audio_wire(&encoded, 16000).expect("decodes"),
+            samples
+        );
+    }
+
+    #[test]
+    fn hotwords_file_is_content_addressed_and_parseable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_hotwords_file(
+            dir.path(),
+            &["oppa".to_string(), "voice dictation".to_string()],
+        )
+        .expect("writes");
+        let name = path.file_name().expect("name").to_string_lossy();
+        assert!(name.starts_with("speech-hotwords-") && name.ends_with(".txt"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("reads"),
+            "oppa :2.0\nvoice dictation :2.0\n"
+        );
+        // Same content → same path (no duplicates across sessions).
+        let again = write_hotwords_file(
+            dir.path(),
+            &["oppa".to_string(), "voice dictation".to_string()],
+        )
+        .expect("rewrites");
+        assert_eq!(path, again);
     }
 }
