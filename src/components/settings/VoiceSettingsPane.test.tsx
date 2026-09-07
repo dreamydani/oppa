@@ -17,6 +17,8 @@ vi.mock("../../lib/voice/transport", async (importOriginal) => {
     getVoiceCatalog: vi.fn(),
     getVoiceModelStates: vi.fn(),
     downloadVoiceModel: vi.fn(),
+    cancelVoiceDownload: vi.fn(),
+    deleteVoiceModel: vi.fn(),
     onVoiceDownloadProgress: vi.fn(),
   };
 });
@@ -33,6 +35,8 @@ vi.mock("../../lib/voice/microphoneDevices", async (importOriginal) => {
 const getCatalogMock = vi.mocked(voiceTransport.getVoiceCatalog);
 const getStatesMock = vi.mocked(voiceTransport.getVoiceModelStates);
 const downloadMock = vi.mocked(voiceTransport.downloadVoiceModel);
+const cancelMock = vi.mocked(voiceTransport.cancelVoiceDownload);
+const deleteMock = vi.mocked(voiceTransport.deleteVoiceModel);
 const onProgressMock = vi.mocked(voiceTransport.onVoiceDownloadProgress);
 const listMicsMock = vi.mocked(micDevicesModule.listMicrophones);
 const requestAccessMock = vi.mocked(micDevicesModule.requestMicrophoneAccess);
@@ -155,6 +159,53 @@ describe("VoiceSettingsPane", () => {
     expect(downloadMock).toHaveBeenCalledWith("zipformer-streaming-en-20m");
     await act(async () => {});
     expect(screen.getByText("Ready")).toBeInTheDocument();
+  });
+
+  it("cancels an in-flight download from the row", async () => {
+    getStatesMock.mockResolvedValue([
+      { id: "zipformer-streaming-en-20m", status: "downloading", progress: 0.4 },
+    ]);
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /cancel zipformer streaming en download/i }));
+    expect(cancelMock).toHaveBeenCalledWith("zipformer-streaming-en-20m");
+    await act(async () => {});
+  });
+
+  it("deletes a ready model and clears a dangling selection", async () => {
+    getStatesMock.mockResolvedValue([
+      { id: "parakeet-tdt-0.6b-v3-int8", status: "ready" },
+    ]);
+    useTerminalStore.setState({
+      settings: {
+        ...JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+        voice: { ...DEFAULT_APP_SETTINGS.voice, sttModel: "parakeet-tdt-0.6b-v3-int8" },
+      },
+    });
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: /delete parakeet tdt v3/i }));
+    expect(deleteMock).toHaveBeenCalledWith("parakeet-tdt-0.6b-v3-int8");
+    await act(async () => {});
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("");
+  });
+
+  it("shows Download as retry on error rows", async () => {
+    getStatesMock.mockResolvedValue([
+      { id: "zipformer-streaming-en-20m", status: "error", error: "checksum_mismatch" },
+    ]);
+    render(<VoiceSettingsPane />);
+    await act(async () => {});
+
+    // Error rows offer Download as the retry affordance (status text hidden).
+    const retry = screen.getByRole("button", { name: /download zipformer streaming en/i });
+    expect(retry).toBeInTheDocument();
+    fireEvent.click(retry);
+    expect(downloadMock).toHaveBeenCalledWith("zipformer-streaming-en-20m");
+    await act(async () => {});
   });
 
   it("subscribes once per mount and unsubscribes on unmount", async () => {

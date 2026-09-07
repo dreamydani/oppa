@@ -108,8 +108,7 @@ pub fn run() {
         // Process plugin (relaunch after install) is channel-independent.
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
-        .manage(browser::manager::BrowserManager::new())
-        .manage(voice::commands::VoiceState::new());
+        .manage(browser::manager::BrowserManager::new());
     // The updater is stable+rc-only: a dev build NEVER checks for updates,
     // so the plugin (which would add its own update-check commands) is not
     // registered on dev. `Channel::current()` is compile-time, so the
@@ -227,6 +226,19 @@ pub fn run() {
             // The renderer signals that it finished the save via a command.
             // (confirm_save_complete below sets the flag.)
             app.manage(save_done);
+
+            // Voice model manager: ASCII-safe non-roaming cache dir. A missing
+            // dir only degrades downloads (commands error loudly); the temp
+            // fallback keeps dictation setup usable.
+            match voice::model_cache_path::ensure_models_dir() {
+                Ok(models_dir) => {
+                    app.manage(voice::commands::VoiceState::with_models_dir(models_dir));
+                }
+                Err(error) => {
+                    eprintln!("voice model cache unavailable ({error}); downloads will fail");
+                    app.manage(voice::commands::VoiceState::new());
+                }
+            }
 
             // Extension registry: built-ins + user-installed, honoring the
             // persisted disabled set. A missing data dir just skips managing

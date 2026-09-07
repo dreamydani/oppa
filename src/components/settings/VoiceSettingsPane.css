@@ -120,6 +120,26 @@
   cursor: default;
 }
 
+.voice-model-cancel,
+.voice-model-delete {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.12));
+  color: var(--muted-foreground, #8e8e93);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-model-cancel:hover,
+.voice-model-delete:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.2));
+  color: inherit;
+}
+
 .voice-allow-access {
   margin-top: 8px;
 }

@@ -70,11 +70,7 @@ fn local(
     }
 }
 
-fn cloud(
-    id: &str,
-    label: &str,
-    description: &str,
-) -> SpeechModelManifest {
+fn cloud(id: &str, label: &str, description: &str) -> SpeechModelManifest {
     SpeechModelManifest {
         id: id.into(),
         model_type: SpeechModelType::Openai,
@@ -153,7 +149,7 @@ pub fn speech_model_catalog() -> Vec<SpeechModelManifest> {
             "Chinese only. Ultra-lightweight 14M-param model, ideal for low-resource devices.",
             SpeechModelType::Transducer,
             "zh",
-            55_716_588,
+            55_616_588,
             true,
             Some("cjkchar"),
             false,
@@ -164,7 +160,7 @@ pub fn speech_model_catalog() -> Vec<SpeechModelManifest> {
             "Korean only. Low-latency real-time streaming.",
             SpeechModelType::Transducer,
             "ko",
-            132_455_201,
+            132_455_211,
             true,
             Some("bpe"),
             false,

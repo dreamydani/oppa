@@ -40,6 +40,8 @@ function ModelRow({
   downloading,
   onSelect,
   onDownload,
+  onCancel,
+  onDelete,
 }: {
   model: SpeechModelManifest;
   state: SpeechModelState | undefined;
@@ -47,10 +49,13 @@ function ModelRow({
   downloading: boolean;
   onSelect: () => void;
   onDownload: () => void;
+  onCancel: () => void;
+  onDelete: () => void;
 }): React.ReactElement {
   const showDownload =
     model.provider === "local" &&
     (!state || state.status === "not-downloaded" || state.status === "error");
+  const showDelete = model.provider === "local" && state?.status === "ready";
   return (
     <div
       role="radio"
@@ -100,6 +105,33 @@ function ModelRow({
             {downloading ? statusLabel(state, state?.progress) : statusLabel(state)}
           </span>
         )}
+        {downloading && (
+          <button
+            type="button"
+            aria-label={`Cancel ${model.label} download`}
+            className="voice-model-cancel"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel();
+            }}
+          >
+            Cancel
+          </button>
+        )}
+        {showDelete && (
+          <button
+            type="button"
+            aria-label={`Delete ${model.label}`}
+            title={`Delete ${model.label}`}
+            className="voice-model-delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            Delete
+          </button>
+        )}
       </span>
     </div>
   );
@@ -113,6 +145,8 @@ export function VoiceSettingsPane(): React.ReactElement {
   const refreshCatalog = useTerminalStore((s) => s.refreshCatalog);
   const refreshModelStates = useTerminalStore((s) => s.refreshModelStates);
   const downloadModel = useTerminalStore((s) => s.downloadModel);
+  const cancelDownload = useTerminalStore((s) => s.cancelDownload);
+  const deleteVoiceModel = useTerminalStore((s) => s.deleteVoiceModel);
   const applyModelProgress = useTerminalStore((s) => s.applyModelProgress);
   const [micDevices, setMicDevices] = useState<VoiceMicrophoneDevice[]>([]);
   // False until enumeration has produced a usable list — an un-enumerated
@@ -209,6 +243,14 @@ export function VoiceSettingsPane(): React.ReactElement {
     // Backend owns the terminal state; failures surface as the row's error
     // status via refresh (no toast infra in settings).
     void downloadModel(modelId).catch(() => {});
+  };
+
+  const handleCancel = (modelId: string) => {
+    void cancelDownload(modelId).catch(() => {});
+  };
+
+  const handleDelete = (modelId: string) => {
+    void deleteVoiceModel(modelId).catch(() => {});
   };
 
   const stateById = new Map(modelStates.map((s) => [s.id, s]));
@@ -349,6 +391,8 @@ export function VoiceSettingsPane(): React.ReactElement {
                     downloading={stateById.get(model.id)?.status === "downloading"}
                     onSelect={() => setModel(model.id)}
                     onDownload={() => handleDownload(model.id)}
+                    onCancel={() => handleCancel(model.id)}
+                    onDelete={() => handleDelete(model.id)}
                   />
                 ))}
               </div>

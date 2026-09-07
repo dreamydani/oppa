@@ -49,6 +49,12 @@ pub struct AgentSessionRef {
 
 const APP_IDENTIFIER: &str = "com.pc.oppa";
 
+/// Shared app identifier for channel-aware data dirs outside the snapshot
+/// module (e.g. the voice model cache, which must not roam).
+pub(crate) const fn app_identifier() -> &'static str {
+    APP_IDENTIFIER
+}
+
 /// Resolve app data dir without a Tauri context (the headless daemon process).
 /// Mirrors tauri's `app_data_dir`: platform data dir + identifier.
 pub fn resolve_app_data_dir() -> Option<PathBuf> {

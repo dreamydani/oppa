@@ -11,11 +11,15 @@ vi.mock("../../lib/voice/transport", () => ({
   getVoiceCatalog: vi.fn(),
   getVoiceModelStates: vi.fn(),
   downloadVoiceModel: vi.fn(),
+  cancelVoiceDownload: vi.fn(),
+  deleteVoiceModel: vi.fn(),
 }));
 
 const getCatalogMock = vi.mocked(voiceTransport.getVoiceCatalog);
 const getStatesMock = vi.mocked(voiceTransport.getVoiceModelStates);
 const downloadMock = vi.mocked(voiceTransport.downloadVoiceModel);
+const cancelMock = vi.mocked(voiceTransport.cancelVoiceDownload);
+const deleteMock = vi.mocked(voiceTransport.deleteVoiceModel);
 
 const CATALOG: SpeechModelManifest[] = [
   {
@@ -121,5 +125,37 @@ describe("voiceSlice", () => {
       "offline",
     );
     expect(useTerminalStore.getState().modelStates).toEqual(STATES);
+  });
+
+  it("cancelDownload invokes the backend then refreshes states", async () => {
+    cancelMock.mockResolvedValueOnce(undefined);
+    await useTerminalStore.getState().cancelDownload("whisper-tiny");
+    expect(cancelMock).toHaveBeenCalledWith("whisper-tiny");
+    expect(useTerminalStore.getState().modelStates).toEqual(STATES);
+  });
+
+  it("deleteVoiceModel clears a dangling sttModel selection", async () => {
+    deleteMock.mockResolvedValueOnce(undefined);
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        voice: { ...useTerminalStore.getState().settings.voice, sttModel: "whisper-tiny" },
+      },
+    });
+    await useTerminalStore.getState().deleteVoiceModel("whisper-tiny");
+    expect(deleteMock).toHaveBeenCalledWith("whisper-tiny");
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("");
+  });
+
+  it("deleteVoiceModel keeps an unrelated sttModel selection", async () => {
+    deleteMock.mockResolvedValueOnce(undefined);
+    useTerminalStore.setState({
+      settings: {
+        ...useTerminalStore.getState().settings,
+        voice: { ...useTerminalStore.getState().settings.voice, sttModel: "parakeet-tdt-0.6b-v3-int8" },
+      },
+    });
+    await useTerminalStore.getState().deleteVoiceModel("whisper-tiny");
+    expect(useTerminalStore.getState().settings.voice.sttModel).toBe("parakeet-tdt-0.6b-v3-int8");
   });
 });

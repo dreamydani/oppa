@@ -1,69 +1,45 @@
-// Voice dictation commands (Tauri boundary). Slice 2 skeleton: the catalog
-// is real, everything else acknowledges with canned events. Real download
-// (Slice 4), local STT (Slice 5), and cloud transcription (Slice 7) replace
-// the stubs command by command; the names, args, and event channels are final.
+// Voice dictation commands (Tauri boundary). Downloads are real (Slice 4);
+// local STT (Slice 5) and cloud transcription (Slice 7) replace the remaining
+// stubs command by command; the names, args, and event channels are final.
 
-use crate::voice::model_catalog::{
-    SpeechModelManifest, get_catalog_model, is_local_speech_model, speech_model_catalog,
-};
+use crate::voice::model_catalog::{get_catalog_model, speech_model_catalog, SpeechModelManifest};
+pub use crate::voice::model_manager::{ModelManager, SpeechModelState, SpeechModelStatus};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum SpeechModelStatus {
-    NotDownloaded,
-    Downloading,
-    Extracting,
-    Ready,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct SpeechModelState {
-    pub id: String,
-    pub status: SpeechModelStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-/// Process-wide voice state: per-model lifecycle plus the stub dictation
-/// session flag. Slice 4/5 promote this to the real ModelManager/SttService.
+/// Process-wide voice state: the download manager plus the engine's active
+/// model id (set by Slice 5; gates deletion of a model in use).
 pub struct VoiceState {
-    states: Mutex<HashMap<String, SpeechModelState>>,
+    manager: ModelManager,
+    active_model: Mutex<Option<String>>,
 }
 
 impl VoiceState {
-    pub fn new() -> Self {
+    pub fn with_models_dir(models_dir: PathBuf) -> Self {
         Self {
-            states: Mutex::new(HashMap::new()),
+            manager: ModelManager::new(models_dir),
+            active_model: Mutex::new(None),
         }
     }
 
-    fn state_for(&self, model_id: &str) -> SpeechModelState {
-        self.states
-            .lock()
-            .expect("voice state lock")
-            .get(model_id)
-            .cloned()
-            .unwrap_or(SpeechModelState {
-                id: model_id.into(),
-                status: SpeechModelStatus::NotDownloaded,
-                progress: None,
-                error: None,
-            })
+    /// Test/dev constructor (temp dir, no shared state).
+    pub fn new() -> Self {
+        Self::with_models_dir(std::env::temp_dir().join("oppa-voice-models"))
     }
 
-    fn set_state(&self, state: SpeechModelState) {
-        self.states
+    pub fn manager(&self) -> &ModelManager {
+        &self.manager
+    }
+
+    fn is_active_model(&self, model_id: &str) -> bool {
+        self.active_model
             .lock()
-            .expect("voice state lock")
-            .insert(state.id.clone(), state);
+            .expect("voice active lock")
+            .as_deref()
+            == Some(model_id)
     }
 }
 
@@ -115,10 +91,7 @@ pub fn voice_get_catalog() -> Result<Vec<SpeechModelManifest>, String> {
 pub fn voice_get_model_states(
     state: State<'_, VoiceState>,
 ) -> Result<Vec<SpeechModelState>, String> {
-    Ok(speech_model_catalog()
-        .iter()
-        .map(|m| state.state_for(&m.id))
-        .collect())
+    Ok(state.manager().get_model_states())
 }
 
 #[tauri::command(async)]
@@ -127,71 +100,51 @@ pub async fn voice_download_model(
     state: State<'_, VoiceState>,
     model_id: String,
 ) -> Result<(), String> {
-    let manifest = require_known_model(&model_id)?;
-    if !is_local_speech_model(&manifest) {
-        return Err(format!("not_downloadable:{model_id}"));
-    }
-    // Stub: walk fake progress so the pane's progress path is exercisable
-    // before the real downloader lands in Slice 4.
-    state.set_state(SpeechModelState {
-        id: model_id.clone(),
-        status: SpeechModelStatus::Downloading,
-        progress: Some(0.0),
-        error: None,
-    });
-    for progress in [0.33, 0.66, 1.0] {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        state.set_state(SpeechModelState {
-            id: model_id.clone(),
-            status: SpeechModelStatus::Downloading,
-            progress: Some(progress),
-            error: None,
-        });
-        let _ = app.emit(
-            "voice://download-progress",
-            DownloadProgressPayload {
-                model_id: model_id.clone(),
-                progress,
-            },
-        );
-    }
-    state.set_state(SpeechModelState {
-        id: model_id,
-        status: SpeechModelStatus::Ready,
-        progress: None,
-        error: None,
-    });
-    Ok(())
+    // Progress fan-out: the manager reports whole-percent steps; each one
+    // rides to the renderer so the pane never polls.
+    // Why AppHandle clone (not the window): a closed settings window must not
+    // retain a callback — Tauri drops emits to dead windows harmlessly.
+    let emitter = app.clone();
+    let report_id = model_id.clone();
+    state
+        .manager()
+        .download_model(&model_id, &|progress| {
+            let _ = emitter.emit(
+                "voice://download-progress",
+                DownloadProgressPayload {
+                    model_id: report_id.clone(),
+                    progress,
+                },
+            );
+        })
+        .await
 }
 
 #[tauri::command(async)]
-pub fn voice_cancel_download(
-    state: State<'_, VoiceState>,
-    model_id: String,
-) -> Result<(), String> {
+pub fn voice_cancel_download(state: State<'_, VoiceState>, model_id: String) -> Result<(), String> {
     require_known_model(&model_id)?;
-    state.set_state(SpeechModelState {
-        id: model_id,
-        status: SpeechModelStatus::NotDownloaded,
-        progress: None,
-        error: None,
-    });
+    state.manager().cancel_download(&model_id);
     Ok(())
 }
 
 #[tauri::command(async)]
 pub fn voice_delete_model(
+    app: AppHandle,
     state: State<'_, VoiceState>,
     model_id: String,
 ) -> Result<(), String> {
-    // Slice 4 adds dir removal + sttModel clearing; the state reset is final.
-    require_known_model(&model_id)?;
-    state.set_state(SpeechModelState {
-        id: model_id,
-        status: SpeechModelStatus::NotDownloaded,
-        progress: None,
-        error: None,
-    });
+    let manager = state.manager();
+    let active = state.is_active_model(&model_id);
+    let settings_path = crate::pty::snapshot::resolve_gui_data_dir(&app)
+        .map(|dir| dir.join("settings.json"))
+        .unwrap_or_else(|| PathBuf::from("settings.json"));
+    crate::voice::model_deletion::delete_local_speech_model(
+        manager.models_dir(),
+        &settings_path,
+        &model_id,
+        active,
+        || manager.delete_model_files(&model_id),
+    )?;
     Ok(())
 }
 
@@ -209,9 +162,12 @@ pub async fn voice_start_dictation(
     let session_id = desktop_session(session_id);
     // Stub: report ready now; the stopped event follows shortly so the Slice 6
     // state machine can already be smoke-tested against the real backend.
-    let _ = app.emit("voice://ready", SessionPayload {
-        session_id: session_id.clone(),
-    });
+    let _ = app.emit(
+        "voice://ready",
+        SessionPayload {
+            session_id: session_id.clone(),
+        },
+    );
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let _ = app.emit("voice://stopped", SessionPayload { session_id });
@@ -251,13 +207,13 @@ fn validate_audio_wire(samples_b64: &str, sample_rate: u32) -> Result<(), String
 }
 
 #[tauri::command(async)]
-pub fn voice_stop_dictation(
-    app: AppHandle,
-    session_id: Option<String>,
-) -> Result<(), String> {
-    let _ = app.emit("voice://stopped", SessionPayload {
-        session_id: desktop_session(session_id),
-    });
+pub fn voice_stop_dictation(app: AppHandle, session_id: Option<String>) -> Result<(), String> {
+    let _ = app.emit(
+        "voice://stopped",
+        SessionPayload {
+            session_id: desktop_session(session_id),
+        },
+    );
     Ok(())
 }
 
@@ -309,24 +265,28 @@ mod tests {
 
     #[test]
     fn model_states_default_to_not_downloaded() {
-        let state = VoiceState::new();
-        let s = state.state_for("whisper-tiny");
-        assert_eq!(s.status, SpeechModelStatus::NotDownloaded);
-        assert_eq!(s.progress, None);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = VoiceState::with_models_dir(dir.path().to_path_buf());
+        let states = state.manager().get_model_states();
+        assert_eq!(states.len(), 12);
+        let tiny = states
+            .iter()
+            .find(|s| s.id == "whisper-tiny")
+            .expect("tiny present");
+        assert_eq!(tiny.status, SpeechModelStatus::NotDownloaded);
+        assert_eq!(tiny.progress, None);
     }
 
     #[test]
     fn feed_audio_accepts_valid_f32_le_wire() {
         // 2 samples of f32 LE zeros.
-        let ok =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
+        let ok = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
         assert!(validate_audio_wire(&ok, 16000).is_ok());
     }
 
     #[test]
     fn feed_audio_rejects_bad_rate_and_bad_base64() {
-        let ok =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
+        let ok = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 8]);
         assert!(validate_audio_wire(&ok, 48000).is_err());
         assert!(validate_audio_wire("!!!", 16000).is_err());
         // Valid base64 but not a multiple of 4 bytes (not f32 LE).

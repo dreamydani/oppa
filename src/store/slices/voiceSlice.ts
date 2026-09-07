@@ -3,6 +3,8 @@
 // settingsDataSlice; this is the backend-driven + session-driven half.
 
 import {
+  cancelVoiceDownload,
+  deleteVoiceModel,
   downloadVoiceModel,
   getVoiceCatalog,
   getVoiceModelStates,
@@ -33,6 +35,8 @@ export interface VoiceSlice {
   // progress storm never thrashes subscribers (Orca stabilisation parity).
   applyModelProgress: (modelId: string, progress: number) => void;
   downloadModel: (modelId: string) => Promise<void>;
+  cancelDownload: (modelId: string) => Promise<void>;
+  deleteVoiceModel: (modelId: string) => Promise<void>;
 }
 
 export function createVoiceSlice(
@@ -95,10 +99,28 @@ export function createVoiceSlice(
       try {
         await downloadVoiceModel(modelId);
       } finally {
-        // The backend owns terminal state (ready/error); re-read it rather
+        // The backend owns the terminal state (ready/error); re-read it rather
         // than guessing from invoke resolution.
         await get().refreshModelStates();
       }
+    },
+
+    cancelDownload: async (modelId) => {
+      try {
+        await cancelVoiceDownload(modelId);
+      } finally {
+        await get().refreshModelStates();
+      }
+    },
+
+    deleteVoiceModel: async (modelId) => {
+      await deleteVoiceModel(modelId);
+      // The backend clears settings.json; mirror it in memory so a dangling
+      // selection never points at a deleted model.
+      if (get().settings.voice.sttModel === modelId) {
+        get().updateSettings({ voice: { sttModel: "" } });
+      }
+      await get().refreshModelStates();
     },
   };
 }
