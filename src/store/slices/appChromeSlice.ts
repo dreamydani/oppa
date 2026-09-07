@@ -15,8 +15,10 @@ export interface WorktreeCreatePrefill {
   repoPath?: string;
 }
 
+export type LeftSidebarMode = "open" | "rail" | "hidden";
+
 export interface AppChromeSlice {
-  leftSidebarOpen: boolean;
+  leftSidebarMode: LeftSidebarMode;
   leftSidebarWidth: number;
   rightSidebarOpen: boolean;
   rightSidebarWidth: number;
@@ -41,7 +43,7 @@ export function createAppChromeSlice(
   get: () => TerminalState,
 ): AppChromeSlice {
   return {
-    leftSidebarOpen: true,
+    leftSidebarMode: "open",
     leftSidebarWidth: 240,
     rightSidebarOpen: false,
     rightSidebarWidth: 280,
@@ -51,8 +53,17 @@ export function createAppChromeSlice(
     isSettingsOpen: false,
     activeSettingsTab: "general",
 
+    // WHY cycle, not flip: Cmd/Ctrl+B walks open -> rail -> hidden so the
+    // icon rail stays one keypress away instead of needing a second shortcut.
     toggleLeftSidebar: () => {
-      set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen }));
+      set((state) => ({
+        leftSidebarMode:
+          state.leftSidebarMode === "open"
+            ? "rail"
+            : state.leftSidebarMode === "rail"
+              ? "hidden"
+              : "open",
+      }));
       triggerDebouncedSaveLayout(get);
     },
 

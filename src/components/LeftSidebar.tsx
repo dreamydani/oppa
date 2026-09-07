@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useTerminalStore } from "../store/terminalStore";
+import { leafIds } from "../store/slices/layoutQueries";
 import {
   SIDEBAR_CLOSE_MS,
   SIDEBAR_OPEN_MS,
@@ -20,17 +21,65 @@ import "./LeftSidebar.css";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 420;
+// Fixed icon-rail width: avatars only, no resize (matches opencode's old rail).
+const RAIL_WIDTH = 56;
 
 const isMacPlatform =
   typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
+// Icon rail: one avatar per workspace, attention dot when a tab's session is
+// working, unread, blocked, or waiting. Click selects; full actions live in
+// the open sidebar.
+function RailStrip(): React.ReactElement {
+  const tabs = useTerminalStore((s) => s.tabs);
+  const activeTabId = useTerminalStore((s) => s.activeTabId);
+  const statusBySessionId = useTerminalStore((s) => s.statusBySessionId);
+  const workingBySessionId = useTerminalStore((s) => s.workingBySessionId);
+  const unreadBySessionId = useTerminalStore((s) => s.unreadBySessionId);
+  const selectTab = useTerminalStore((s) => s.selectTab);
+
+  return (
+    <div className="sidebar-rail" role="list" aria-label="Workspaces">
+      {tabs.map((tab) => {
+        const title = tab.isWizard
+          ? tab.title || "New Workspace"
+          : tab.title || "Workspace";
+        const needsAttention = !tab.isWizard && leafIds(tab.layout).some((id) => {
+          if (workingBySessionId[id] || unreadBySessionId[id]) return true;
+          const state = statusBySessionId[id]?.state;
+          return state === "blocked" || state === "waiting";
+        });
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            className={`sidebar-rail-item${tab.id === activeTabId ? " is-active" : ""}`}
+            title={title}
+            aria-label={`Open ${title}`}
+            aria-current={tab.id === activeTabId ? "true" : undefined}
+            onClick={() => selectTab(tab.id)}
+          >
+            <span className="sidebar-rail-avatar" aria-hidden="true">
+              {(title.trim()[0] ?? "•").toUpperCase()}
+            </span>
+            {needsAttention && (
+              <span className="sidebar-rail-dot" aria-hidden="true" />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function LeftSidebar(): React.ReactElement {
   const leftSidebarWidth = useTerminalStore((s) => s.leftSidebarWidth);
   const setLeftSidebarWidth = useTerminalStore((s) => s.setLeftSidebarWidth);
-  const leftSidebarOpen = useTerminalStore((s) => s.leftSidebarOpen);
+  const leftSidebarMode = useTerminalStore((s) => s.leftSidebarMode);
   const openSettings = useTerminalStore((s) => s.openSettings);
   const createWizardTab = useTerminalStore((s) => s.createWizardTab);
   const sessions = useTerminalStore((s) => s.sessions);
+  const isRail = leftSidebarMode === "rail";
 
   const [searchQuery, setSearchQuery] = useState("");
   // Disables width transitions while drag-resizing so the panel tracks the
@@ -79,9 +128,9 @@ export function LeftSidebar(): React.ReactElement {
       suppressMotion: () =>
         !document.querySelector(".app-container.app-booted"),
     });
-    drawer.sync(leftSidebarOpen);
+    drawer.sync(leftSidebarMode !== "hidden");
     return () => drawer.dispose();
-  }, [leftSidebarOpen]);
+  }, [leftSidebarMode]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -114,9 +163,12 @@ export function LeftSidebar(): React.ReactElement {
 
     <aside
       ref={asideRef}
-      className={`left-sidebar${isResizing ? " is-resizing" : ""}`}
-      style={{ "--sidebar-w": `${leftSidebarWidth}px` } as React.CSSProperties}
+      className={`left-sidebar${isResizing ? " is-resizing" : ""}${isRail ? " is-rail" : ""}`}
+      style={{ "--sidebar-w": `${isRail ? RAIL_WIDTH : leftSidebarWidth}px` } as React.CSSProperties}
     >
+      {isRail ? (
+        <RailStrip />
+      ) : (
       <div ref={innerRef} className="sidebar-slide-inner">
         <div className="left-sidebar-top">
           <div className="sidebar-search-strip">
@@ -197,13 +249,16 @@ export function LeftSidebar(): React.ReactElement {
           </div>
         </div>
       </div>
+      )}
 
+      {!isRail && (
       <div
         className="resize-handle-right"
         onMouseDown={handleMouseDown}
         role="separator"
         aria-orientation="vertical"
       />
+      )}
     </aside>
   );
 }

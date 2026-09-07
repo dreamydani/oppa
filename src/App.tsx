@@ -153,9 +153,9 @@ function App() {
       }
       const currentSettings = useTerminalStore.getState().settings;
       if (currentSettings.appearance.sidebarOnLaunch === "collapsed") {
-        useTerminalStore.setState({ leftSidebarOpen: false });
+        useTerminalStore.setState({ leftSidebarMode: "hidden" });
       } else if (currentSettings.appearance.sidebarOnLaunch === "open") {
-        useTerminalStore.setState({ leftSidebarOpen: true });
+        useTerminalStore.setState({ leftSidebarMode: "open" });
       }
       if (currentSettings.general.startupBehavior === "workspace_launcher") {
         // The wizard is the launcher now; a launcher tab opens on boot.

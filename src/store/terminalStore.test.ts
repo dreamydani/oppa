@@ -194,7 +194,7 @@ describe("terminalStore", () => {
       cachedScrollbacks: {},
       restoredScrollbacks: {},
       ready: false,
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       leftSidebarWidth: 240,
       rightSidebarOpen: false,
       rightSidebarWidth: 280,
@@ -1330,7 +1330,7 @@ describe("terminalStore", () => {
     it("persists and restores UI sidebar, app mode, and maximized pane state", async () => {
       useTerminalStore.setState({
         ready: true,
-        leftSidebarOpen: true,
+        leftSidebarMode: "open",
         leftSidebarWidth: 310,
         rightSidebarOpen: true,
         rightSidebarWidth: 350,
@@ -1360,7 +1360,7 @@ describe("terminalStore", () => {
       expect(savedJson.version).toBe(3);
       expect(savedJson.ui).toEqual(
         expect.objectContaining({
-          leftSidebarOpen: true,
+          leftSidebarMode: "open",
           leftSidebarWidth: 310,
           rightSidebarOpen: true,
           rightSidebarWidth: 350,
@@ -1456,7 +1456,7 @@ describe("terminalStore", () => {
       });
 
       const state = useTerminalStore.getState();
-      expect(state.leftSidebarOpen).toBe(false);
+      expect(state.leftSidebarMode).toBe("hidden");
       expect(state.leftSidebarWidth).toBe(320);
       expect(state.rightSidebarOpen).toBe(true);
       expect(state.rightSidebarWidth).toBe(360);
@@ -1481,7 +1481,7 @@ describe("terminalStore", () => {
       await useTerminalStore.getState().loadLayout();
       expect(applyWindowStateMock).not.toHaveBeenCalled();
       const state = useTerminalStore.getState();
-      expect(state.leftSidebarOpen).toBe(true);
+      expect(state.leftSidebarMode).toBe("open");
       expect(state.leftSidebarWidth).toBe(240);
       expect(state.rightSidebarOpen).toBe(false);
       expect(state.activeAppMode).toBe("terminal");
@@ -2429,24 +2429,40 @@ describe("terminalStore", () => {
   describe("UI state slice", () => {
     it("has expected initial store state", () => {
       const initialState = useTerminalStore.getInitialState();
-      expect(initialState.leftSidebarOpen).toBe(true);
+      expect(initialState.leftSidebarMode).toBe("open");
       expect(initialState.rightSidebarOpen).toBe(false);
     });
 
     it("initializes with default sidebar states and tab", () => {
       const state = useTerminalStore.getState();
-      expect(state.leftSidebarOpen).toBe(true);
+      expect(state.leftSidebarMode).toBe("open");
       expect(state.leftSidebarWidth).toBe(240);
       expect(state.rightSidebarOpen).toBe(false);
       expect(state.rightSidebarWidth).toBe(280);
       expect(state.rightSidebarTab).toBe("explorer");
     });
 
-    it("toggles left sidebar visibility", () => {
-      useTerminalStore.getState().toggleLeftSidebar();
-      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
-      useTerminalStore.getState().toggleLeftSidebar();
-      expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    it("toggles left sidebar through open -> rail -> hidden -> open", () => {
+      const { toggleLeftSidebar } = useTerminalStore.getState();
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
+      toggleLeftSidebar();
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("rail");
+      toggleLeftSidebar();
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
+      toggleLeftSidebar();
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
+    });
+
+    it("round-trips rail mode through saveLayout/loadLayout", async () => {
+      useTerminalStore.setState({ ready: true, leftSidebarMode: "rail" });
+      await useTerminalStore.getState().saveLayout();
+      const savedJson = JSON.parse(saveLayoutMock.mock.calls[0][0]);
+      expect(savedJson.ui.leftSidebarMode).toBe("rail");
+
+      loadLayoutMock.mockResolvedValueOnce(JSON.stringify(savedJson));
+      useTerminalStore.setState({ leftSidebarMode: "open" });
+      await useTerminalStore.getState().loadLayout();
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("rail");
     });
 
     it("sets left sidebar width", () => {

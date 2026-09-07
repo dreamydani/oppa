@@ -11,7 +11,8 @@ import {
 } from "./icons/MinimalIcons";
 
 export function TitleBar(): ReactElement {
-  const leftOpen = useTerminalStore((s) => s.leftSidebarOpen);
+  const leftMode = useTerminalStore((s) => s.leftSidebarMode);
+  const leftOpen = leftMode !== "hidden";
   const rightOpen = useTerminalStore((s) => s.rightSidebarOpen);
   const toggleLeft = useTerminalStore((s) => s.toggleLeftSidebar);
   const toggleRight = useTerminalStore((s) => s.toggleRightSidebar);
