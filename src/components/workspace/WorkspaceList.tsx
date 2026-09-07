@@ -75,8 +75,7 @@ function RowMenu({
     submenuH: 0,
     viewportW: window.innerWidth,
     viewportH: window.innerHeight,
-  });
-  const item = (label: string, action: () => void, danger = false) => (
+  });  const item = (label: string, action: () => void, danger = false) => (
     <button
       key={label}
       type="button"
@@ -96,6 +95,10 @@ function RowMenu({
       role="menu"
       data-motion="menu"
       style={{
+        // Inline fixed beats every stylesheet rule: .ws-row
+        // .worktree-card-menu (0,2,0) would otherwise keep this absolute
+        // and row-anchored, detached from the cursor.
+        position: "fixed",
         left: pos.x,
         top: pos.y,
         transformOrigin: menuTransformOrigin(anchor.x, anchor.y, pos),

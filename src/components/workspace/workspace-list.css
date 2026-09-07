@@ -442,8 +442,10 @@
 }
 
 /* Row context menu: fixed at the cursor so it escapes the scrolling body
-   instead of overlapping rows below (base panel: worktree-card-menu). */
-.ws-row-menu {
+   instead of overlapping rows below (base panel: worktree-card-menu).
+   Triple-class to outrank .ws-row .worktree-card-menu; RowMenu also sets
+   position inline so no import order can regress this. */
+.ws-row .worktree-card-menu.ws-row-menu {
   position: fixed;
   right: auto;
   top: auto;

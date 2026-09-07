@@ -1002,7 +1002,9 @@ describe("WorkspaceList", () => {
     });
 
     const menu = screen.getByRole("menu");
-    // Fixed positioning comes from the .ws-row-menu stylesheet rule.
+    // Fixed positioning is inline so no stylesheet rule (.ws-row
+    // .worktree-card-menu) can drag it back to row-anchored absolute.
+    expect(menu.style.position).toBe("fixed");
     expect(menu.classList.contains("ws-row-menu")).toBe(true);
     expect(menu.style.left).toBe("100px");
     expect(menu.style.top).toBe("200px");
