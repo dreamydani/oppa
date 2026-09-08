@@ -918,7 +918,7 @@ export function createPaneLayoutSlice(
         sessions,
         serializers,
         cachedScrollbacks,
-        leftSidebarOpen,
+        leftSidebarMode,
         leftSidebarWidth,
         rightSidebarOpen,
         rightSidebarWidth,
@@ -937,7 +937,7 @@ export function createPaneLayoutSlice(
         version: 3,
         ...(windowState ? { window: windowState } : {}),
         ui: {
-          leftSidebarOpen,
+          leftSidebarMode,
           leftSidebarWidth,
           rightSidebarOpen,
           rightSidebarWidth,
@@ -1025,6 +1025,8 @@ export function createPaneLayoutSlice(
           version?: number;
           window?: WindowState;
           ui?: {
+            leftSidebarMode?: import("./appChromeSlice").LeftSidebarMode;
+            // Legacy boolean (pre-rail): migrated below, never written.
             leftSidebarOpen?: boolean;
             leftSidebarWidth?: number;
             rightSidebarOpen?: boolean;
@@ -1046,7 +1048,11 @@ export function createPaneLayoutSlice(
 
         if (parsed.ui) {
           set((state) => ({
-            leftSidebarOpen: parsed.ui!.leftSidebarOpen ?? state.leftSidebarOpen,
+            // WHY migrate here: layout.json from before the rail wrote a
+            // boolean; false means hidden, true/unknown keeps current mode.
+            leftSidebarMode:
+              parsed.ui!.leftSidebarMode ??
+              (parsed.ui!.leftSidebarOpen === false ? "hidden" : state.leftSidebarMode),
             leftSidebarWidth: parsed.ui!.leftSidebarWidth ?? state.leftSidebarWidth,
             rightSidebarOpen: parsed.ui!.rightSidebarOpen ?? state.rightSidebarOpen,
             rightSidebarWidth: parsed.ui!.rightSidebarWidth ?? state.rightSidebarWidth,

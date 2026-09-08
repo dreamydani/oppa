@@ -111,7 +111,7 @@ describe("App", () => {
       layout: { type: "leaf", id: "s1" },
       focusedPath: [],
       ready: true,
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       leftSidebarWidth: 240,
       rightSidebarOpen: true,
       rightSidebarWidth: 280,
@@ -184,7 +184,7 @@ describe("App", () => {
 
   it("keeps sidebars mounted but drawer-hidden when store says closed", () => {
     useTerminalStore.setState({
-      leftSidebarOpen: false,
+      leftSidebarMode: "hidden",
       rightSidebarOpen: false,
     });
 
@@ -203,20 +203,20 @@ describe("App", () => {
     expect(right!.style.visibility).toBe("hidden");
   });
 
-  it("toggles left sidebar with Ctrl+B shortcut", () => {
+  it("cycles left sidebar with Ctrl+B shortcut", () => {
     render(<App />);
 
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
     );
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("rail");
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
     );
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
   });
 
   it("toggles right sidebar with Ctrl+Shift+B shortcut", () => {
@@ -651,7 +651,7 @@ describe("App", () => {
       ],
       activeTabId: "tab-2",
       ready: true,
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       activeAppMode: "terminal",
       sessions: {
         s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
@@ -679,7 +679,7 @@ describe("App", () => {
       ],
       activeTabId: "tab-wizard",
       activeAppMode: "browser",
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       ready: true,
     });
     const { container } = render(<App />);
@@ -694,7 +694,7 @@ describe("App", () => {
   it("renders BrowserViewport in main-viewport when activeAppMode is 'browser' and hides sidebars", () => {
     useTerminalStore.setState({
       activeAppMode: "browser",
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       rightSidebarOpen: true,
     });
     const { container } = render(<App />);
@@ -711,7 +711,7 @@ describe("App", () => {
   it("switches between terminal PaneSplit and BrowserViewport when mode changes and toggles sidebars", async () => {
     useTerminalStore.setState({
       activeAppMode: "terminal",
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       rightSidebarOpen: true,
     });
     const { container } = render(<App />);
@@ -744,7 +744,7 @@ describe("App", () => {
   it("renders EditorViewport in main-viewport when activeAppMode is 'editor'", async () => {
     useTerminalStore.setState({
       activeAppMode: "editor",
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       rightSidebarOpen: true,
     });
     const { container } = render(<App />);
@@ -1077,7 +1077,7 @@ describe("App", () => {
 
   it("collapses left sidebar on initial load when sidebarOnLaunch is 'collapsed'", async () => {
     useTerminalStore.setState({
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       settings: {
         ...useTerminalStore.getState().settings,
         appearance: {
@@ -1090,13 +1090,13 @@ describe("App", () => {
     render(<App />);
 
     await vi.waitFor(() => {
-      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
     });
   });
 
   it("opens left sidebar on initial load when sidebarOnLaunch is 'open'", async () => {
     useTerminalStore.setState({
-      leftSidebarOpen: false,
+      leftSidebarMode: "hidden",
       settings: {
         ...useTerminalStore.getState().settings,
         appearance: {
@@ -1109,13 +1109,13 @@ describe("App", () => {
     render(<App />);
 
     await vi.waitFor(() => {
-      expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
     });
   });
 
   it("preserves left sidebar state on initial load when sidebarOnLaunch is 'remember_last'", async () => {
     useTerminalStore.setState({
-      leftSidebarOpen: false,
+      leftSidebarMode: "hidden",
       settings: {
         ...useTerminalStore.getState().settings,
         appearance: {
@@ -1128,7 +1128,7 @@ describe("App", () => {
     render(<App />);
 
     await vi.waitFor(() => {
-      expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+      expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
     });
   });
 });

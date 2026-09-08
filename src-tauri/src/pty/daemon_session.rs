@@ -22,6 +22,10 @@ const SCREEN_SCROLLBACK_LINES: usize = 1000;
 const TUI_IDLE_AFTER_PROMPT_MS: u64 = 800;
 // …otherwise plain output silence for this long is the fallback (cmd.exe etc.)
 const FALLBACK_IDLE_MS: u64 = 1500;
+// Repaint bursts after a resize (SIGWINCH prompt redraws) are masked from the
+// working-state fallback arm for this long; the OSC133 foreground arm above
+// stays exact, so real commands still light instantly.
+pub(crate) const RESIZE_WORKING_MASK_MS: u64 = 1000;
 // Test hook: OPPA_IDLE_MS overrides both thresholds so waits are fast/deterministic
 pub fn idle_thresholds() -> (u64, u64) {
     match std::env::var("OPPA_IDLE_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
@@ -79,6 +83,9 @@ pub struct DaemonSession {
     pub output_drain: OutputDrain,
     // Output activity tracking for WaitFor::TuiIdle
     pub last_output_at: Arc<Mutex<Instant>>,
+    // Last pty_resize instant: SIGWINCH repaints after a resize look like
+    // work to the quiet-fallback arm, so working_state masks them briefly.
+    pub last_resize_at: Arc<Mutex<Option<Instant>>>,
     // Some(t) while the last OSC133 D marker is still the freshest output
     pub last_prompt_end_at: Arc<Mutex<Option<Instant>>>,
     // Latest hook-classified agent state; pane-keyed truth feeding UI pills.
@@ -269,6 +276,7 @@ impl DaemonSession {
             seq: Arc::new(AtomicU64::new(0)),
             output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
+            last_resize_at: Arc::new(Mutex::new(None)),
             last_prompt_end_at: Arc::new(Mutex::new(None)),
             last_agent_status: Arc::new(Mutex::new(None)),
         });
@@ -496,7 +504,7 @@ impl DaemonSession {
 
     /// Resize the PTY and underlying virtual terminal mirror.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let master = self.master.lock();
+        *self.last_resize_at.lock() = Some(Instant::now());        let master = self.master.lock();
         if let Some(master) = master.as_ref() {
             master
                 .resize(PtySize {
@@ -787,6 +795,13 @@ impl DaemonSession {
     pub fn working_state(&self) -> bool {
         if self.foreground_command.lock().is_some() {
             return true;
+        }
+        // WHY mask here, not in wait_until_idle: only the dots/flush path
+        // reads working_state; TuiIdle waits keep the raw silence clock.
+        if let Some(resized) = *self.last_resize_at.lock() {
+            if resized.elapsed() < Duration::from_millis(RESIZE_WORKING_MASK_MS) {
+                return false;
+            }
         }
         let (prompt_ms, fallback_ms) = idle_thresholds();
         !Self::is_tui_idle(

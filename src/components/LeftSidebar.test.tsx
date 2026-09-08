@@ -75,7 +75,7 @@ describe("LeftSidebar", () => {
     });
     ptySpawnMock.mockResolvedValue({ id: "s-new", is_new: true, pid: 100 });
     useTerminalStore.setState({
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       leftSidebarWidth: 240,
       tabs: [
         {
@@ -319,13 +319,85 @@ describe("LeftSidebar", () => {
   });
 
   it("keeps a closed sidebar mounted, hidden via the drawer instead of unmounting", () => {
-    useTerminalStore.setState({ leftSidebarOpen: false });
+    useTerminalStore.setState({ leftSidebarMode: "hidden" });
     const { container } = render(<LeftSidebar />);
     const aside = container.querySelector("aside.left-sidebar");
     expect(aside).not.toBeNull();
     // Drawer snap path (pre-boot suppression in tests): detached + hidden.
     expect((aside as HTMLElement).style.visibility).toBe("hidden");
     expect((aside as HTMLElement).style.position).toBe("absolute");
+  });
+
+  it("cycles open -> rail -> hidden -> open when toggled", () => {
+    const { toggleLeftSidebar } = useTerminalStore.getState();
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
+
+    toggleLeftSidebar();
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("rail");
+
+    toggleLeftSidebar();
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
+
+    toggleLeftSidebar();
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
+  });
+
+  it("renders an icon rail with one avatar per workspace instead of the full list", () => {
+    useTerminalStore.setState({ leftSidebarMode: "rail" });
+    const { container } = render(<LeftSidebar />);
+
+    const aside = container.querySelector("aside.left-sidebar")!;
+    expect(aside.classList.contains("is-rail")).toBe(true);
+    // Icon-only: no search strip, no workspace cards.
+    expect(container.querySelector(".sidebar-search-strip")).toBeNull();
+    expect(container.querySelectorAll(".ws-card").length).toBe(0);
+
+    const items = screen.getAllByRole("button", { name: /open oppa-/i });
+    expect(items).toHaveLength(2);
+    // Active workspace is marked; sidebar stays in flow (visible).
+    expect(items[0].getAttribute("aria-current")).toBe("true");
+    expect((aside as HTMLElement).style.visibility).not.toBe("hidden");
+  });
+
+  it("selects a workspace when its rail avatar is clicked", () => {
+    useTerminalStore.setState({ leftSidebarMode: "rail" });
+    render(<LeftSidebar />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open oppa-beta/i }));
+    expect(useTerminalStore.getState().activeTabId).toBe("tab-beta");
+  });
+
+  it("marks rail avatars needing attention while a session works", () => {    useTerminalStore.setState({
+      leftSidebarMode: "rail",
+      workingBySessionId: { s2: true },
+    });
+    const { container } = render(<LeftSidebar />);
+
+    const beta = screen.getByRole("button", { name: /open oppa-beta/i });
+    expect(beta.querySelector(".sidebar-rail-dot")).not.toBeNull();
+    const alpha = screen.getByRole("button", { name: /open oppa-alpha/i });
+    expect(alpha.querySelector(".sidebar-rail-dot")).toBeNull();
+    void container;
+  });
+
+  it("filters the list through section chips without touching search", () => {
+    render(<LeftSidebar />);
+    expect(
+      screen.getByRole("group", { name: /filter workspaces/i }),
+    ).toBeDefined();
+
+    // Neither fixture workspace is worktree-bound: the chip empties the list
+    // into the worktrees-specific empty state.
+    fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
+    expect(screen.queryByText("oppa-alpha")).toBeNull();
+    expect(screen.getByText("No worktrees")).toBeDefined();
+    // Search box is untouched by chips.
+    expect(
+      (screen.getByPlaceholderText(/search workspaces/i) as HTMLInputElement).value,
+    ).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("oppa-alpha")).toBeDefined();
   });
 });
 
