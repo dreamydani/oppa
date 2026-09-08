@@ -217,6 +217,13 @@
   outline-offset: -2px;
 }
 
+/* Row stagger ends on translate3d(0,0,0) with fill both, so every row keeps
+   a stacking context and later siblings paint over an earlier row's menu
+   (the menu's z-index is trapped inside its own row). Lift the host row. */
+.ws-row:has(> .worktree-card-menu) {
+  z-index: 50;
+}
+
 /* Focused session: rounded tint, no accent bar — the gutter dot is the accent. */
 .ws-row.is-active {
   background: var(--tint-active, rgba(255, 255, 255, 0.10));
