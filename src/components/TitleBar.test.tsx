@@ -19,7 +19,7 @@ describe("TitleBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useTerminalStore.setState({
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       rightSidebarOpen: false,
       activeAppMode: "terminal",
       isSettingsOpen: false,
@@ -147,16 +147,19 @@ describe("TitleBar", () => {
     expect(centerArea?.hasAttribute("data-tauri-drag-region")).toBe(true);
   });
 
-  it("toggles left sidebar when left sidebar button is clicked", () => {
+  it("cycles left sidebar open -> rail -> hidden when the button is clicked", () => {
     render(<TitleBar />);
     const leftToggleBtn = screen.getByTitle("Toggle Left Sidebar");
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
 
     fireEvent.click(leftToggleBtn);
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(false);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("rail");
 
     fireEvent.click(leftToggleBtn);
-    expect(useTerminalStore.getState().leftSidebarOpen).toBe(true);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("hidden");
+
+    fireEvent.click(leftToggleBtn);
+    expect(useTerminalStore.getState().leftSidebarMode).toBe("open");
   });
 
   it("toggles right sidebar when right sidebar button is clicked", () => {
@@ -173,15 +176,23 @@ describe("TitleBar", () => {
 
   it("applies active class to toggle buttons when open", () => {
     useTerminalStore.setState({
-      leftSidebarOpen: true,
+      leftSidebarMode: "open",
       rightSidebarOpen: false,
     });
-    render(<TitleBar />);
+    const { rerender } = render(<TitleBar />);
     const leftBtn = screen.getByTitle("Toggle Left Sidebar");
     const rightBtn = screen.getByTitle("Toggle Right Sidebar");
 
     expect(leftBtn.classList.contains("active")).toBe(true);
     expect(rightBtn.classList.contains("active")).toBe(false);
+
+    // Rail still counts as visible: the toggle stays lit until hidden.
+    useTerminalStore.setState({ leftSidebarMode: "rail" });
+    rerender(<TitleBar />);
+    expect(screen.getByTitle("Toggle Left Sidebar").classList.contains("active")).toBe(true);
+    useTerminalStore.setState({ leftSidebarMode: "hidden" });
+    rerender(<TitleBar />);
+    expect(screen.getByTitle("Toggle Left Sidebar").classList.contains("active")).toBe(false);
   });
 
   it("calls getCurrentWindow().minimize() when minimize button is clicked", () => {

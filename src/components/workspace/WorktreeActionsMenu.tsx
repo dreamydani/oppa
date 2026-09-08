@@ -18,9 +18,16 @@ function finishFailureReason(reason: string): string {
   return (BLOCKED_COPY as Record<string, string>)[reason] ?? reason;
 }
 
-function prNumberFromUrl(url: string): string | null {
+export function prNumberFromUrl(url: string): string | null {
   const m = url.match(/\/pull\/(\d+)/);
   return m ? m[1] : null;
+}
+
+// WHY one home: the row PR badge and the actions menu open links the same way.
+export function openWorktreeUrl(url: string): void {
+  openUrl(url).catch(() => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
 }
 
 export interface WorktreeActionsMenuProps {
@@ -111,9 +118,7 @@ export function WorktreeActionsMenu({
   };
 
   const handleOpenPr = (url: string) => {
-    openUrl(url).catch(() => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    });
+    openWorktreeUrl(url);
   };
 
   return (

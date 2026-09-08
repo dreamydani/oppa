@@ -222,9 +222,65 @@ mod tests {
         let _ = session.kill();
     }
 
-    #[test]
-    fn watcher_thread_exits_once_child_is_gone() {
+    // Sidebar toggles refit every pane (pty_resize → SIGWINCH → prompt
+    // repaint on all of them). That repaint burst must not read as work or
+    // every idle dot flashes on each collapse/expand.
+    #[tokio::test]
+    async fn resize_masks_repaint_output_from_working_state() {
         let _env = idle_env_lock();
+        let _guard = IdleMsGuard::set("200");
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "ws-resize-mask".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn mask shell");
+
+        // Shell startup output must go quiet past OPPA_IDLE_MS first.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while session.working_state() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(!session.working_state(), "shell must settle idle before resize");
+
+        // Repaint landing inside the mask window stays idle.
+        session.resize(80, 24).expect("resize stamps the mask");
+        session
+            .write(b"printf 'repaint-noise\\n'\n")
+            .expect("write repaint");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !session.working_state(),
+            "repaint inside the mask must stay idle"
+        );
+
+        // Past the mask, fresh output reads as work again (the mask must not stick).
+        tokio::time::sleep(Duration::from_millis(
+            crate::pty::daemon_session::RESIZE_WORKING_MASK_MS + 400,
+        ))
+        .await;
+        session
+            .write(b"printf 'fresh-noise\\n'\n")
+            .expect("write fresh");
+        let busy = Instant::now() + Duration::from_secs(3);
+        while !session.working_state() && Instant::now() < busy {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            session.working_state(),
+            "output past the mask must read as working"
+        );
+        let _ = session.kill();
+    }
+
+    #[test]
+    fn watcher_thread_exits_once_child_is_gone() {        let _env = idle_env_lock();
         let _guard = IdleMsGuard::set("50");
         let sh = test_sh_path();
         let session = DaemonSession::spawn_with_args(
