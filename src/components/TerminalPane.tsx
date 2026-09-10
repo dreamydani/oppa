@@ -194,8 +194,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       scrollback: resolveSessionScrollbackRows(isAgentPane),
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
-      // Silent bell: shell \x07 never beeps (split focus races made this audible).
-      bellStyle: "none",
+      // WHY: xterm v6 bell is event-only with no audible default, so \x07 stays silent unwired.
       // Slim VS Code-style scrollbar: xterm's DOM slider reserves this width
       // (default 14) and overlays the canvas edge; FitAddon ignores it.
       // 4px pairs with the symmetric 4px left pad in TerminalPane.css so the

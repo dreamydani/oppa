@@ -1528,11 +1528,11 @@ describe("TerminalPane", () => {
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 115, 30);
   });
 
-  it("silences the terminal bell so misdirected input never beeps", async () => {
+  it("leaves the terminal bell silent (xterm v6 has no audible bell)", async () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
-    expect(term().options.bellStyle).toBe("none");
+    expect(term().options.bellStyle).toBeUndefined();
   });
 
   it("moves DOM focus into the new pane when it gains store focus (split)", async () => {
