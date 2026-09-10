@@ -459,8 +459,9 @@ export function createPaneLayoutSlice(
     },
 
     // Agent-launch split: same cwd inheritance + focus contract as splitPane.
-    // The launch command travels WITH the spawn: the daemon injects it once
-    // the shell reports ready, so slow PowerShell startups can't eat bytes.
+    // The launch command travels WITH the spawn: the daemon holds it plus
+    // any early keystrokes until the first prompt proves the shell can take
+    // input, then flushes in order — slow shells can't eat bytes.
     splitPaneWithCommand: async (dir, path, command, title) => {
       const state = get();
       const activeTab = getActiveTab(state);

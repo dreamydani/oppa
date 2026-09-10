@@ -39,8 +39,8 @@ const READY_MARKER_BYTES: &[u8] = b"\x1b]633;oppa-ready\x07";
 // Shells without our bootstrap (e.g. cmd.exe) never emit the marker — inject anyway
 const FALLBACK_INJECT_SECS: u64 = 2;
 const FALLBACK_INJECT_DURATION: Duration = Duration::from_secs(FALLBACK_INJECT_SECS);
-// ponytail: fixed settle, wait for OSC133 B prompt-idle if this still flakes.
-pub(crate) const READY_SETTLE_MS: u64 = 400;
+// Marker shells with a clobbered prompt (profile overrode it) never emit B
+const PROMPT_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct DaemonSession {
     pub id: String,
@@ -72,6 +72,13 @@ pub struct DaemonSession {
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
     pub initial_command_written: Arc<AtomicBool>,
+    // First 133;B observed: prompt rendered, shell input queue live.
+    pub prompt_ready: Arc<AtomicBool>,
+    // Keystrokes arriving before the gate opens; flushed in order behind
+    // the launch command so fast typing during shell init is never eaten.
+    pub early_input: Arc<Mutex<Vec<u8>>>,
+    // Gate opened and buffer drained; write() passes through from here on.
+    pub input_flushed: Arc<AtomicBool>,
     pub cols: AtomicU16,
     pub rows: AtomicU16,
     pub pid: u32,
@@ -269,6 +276,9 @@ impl DaemonSession {
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
             initial_command_written: Arc::new(AtomicBool::new(false)),
+            prompt_ready: Arc::new(AtomicBool::new(false)),
+            early_input: Arc::new(Mutex::new(Vec::new())),
+            input_flushed: Arc::new(AtomicBool::new(false)),
             cols: AtomicU16::new(cols),
             rows: AtomicU16::new(rows),
             pid,
@@ -307,6 +317,7 @@ impl DaemonSession {
         let agent_from_hook = Arc::clone(&session.agent_ref_from_hook);
         let ready_seen = Arc::clone(&session.ready_seen);
         let initial_command_written = Arc::clone(&session.initial_command_written);
+        let prompt_ready = Arc::clone(&session.prompt_ready);
         let writer = Arc::clone(&session.writer);
         let pending = Arc::clone(&session.pending_bytes);
         let paused = Arc::clone(&session.paused);
@@ -348,12 +359,16 @@ impl DaemonSession {
 
         // Reader thread: reads PTY output, feeds screen mirror, scans OSC,
         // and hands raw chunks to the output batcher for coalesced emission.
-        let initial_command_reader = initial_command.clone();
-        let writer_inject = Arc::clone(&writer);
-        let written_inject = Arc::clone(&initial_command_written);
         let session_title = Arc::clone(&session);
+        let prompt_ready_reader = Arc::clone(&prompt_ready);
+        // Gatekeeper handles (cloned before the reader moves its own set).
+        let gate_ready = Arc::clone(&prompt_ready);
+        let gate_booted = Arc::clone(&ready_seen);
+        let gate_writer = Arc::clone(&writer);
+        let gate_flushed = Arc::clone(&session.input_flushed);
+        let gate_buffer = Arc::clone(&session.early_input);
+        let gate_written = Arc::clone(&initial_command_written);
         std::thread::spawn(move || {
-            let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
             let mut marker_tail: Vec<u8> = Vec::new();
@@ -424,6 +439,9 @@ impl DaemonSession {
                                     // the agent exits must still be able to resume it
                                     *last_prompt_end.lock() = Some(Instant::now());
                                 }
+                                OscEvent::PromptReady => {
+                                    prompt_ready_reader.store(true, Ordering::SeqCst);
+                                }
                             }
                         }
 
@@ -433,26 +451,8 @@ impl DaemonSession {
                         // Hand raw bytes to the batcher: coalesces into
                         // larger Data events (≤32KB / ~8ms) before emission.
                         output_drain_reader.send_chunk(chunk.to_vec());
-
-                        // Inject initial command exactly once when the ready marker arrives.
-                        // Fallback timeout lives in a timer thread: the reader blocks in
-                        // read() on quiet shells and would never observe the deadline.
-                        // Marker fires at bootstrap end, before PSReadLine/ConPTY
-                        // accepts input — claim the once-slot now (fallback can't
-                        // double-send) but defer bytes until the shell settles.
-                        if ready_seen.load(Ordering::SeqCst)
-                            && !initial_command_written.swap(true, Ordering::SeqCst)
-                        {
-                            if let Some(cmd) = initial_command.clone() {
-                                let writer = Arc::clone(&writer);
-                                std::thread::spawn(move || {
-                                    std::thread::sleep(Duration::from_millis(READY_SETTLE_MS));
-                                    let _ = writer
-                                        .lock()
-                                        .write_all(format!("{cmd}\r").as_bytes());
-                                });
-                            }
-                        }
+                        // Input gating lives in the gatekeeper thread below:
+                        // the reader only records signals, never injects.
                     }
                     Err(_) => break,
                 }
@@ -486,19 +486,45 @@ impl DaemonSession {
             }
         });
 
-        // Fallback injector: shells without our bootstrap never emit the ready marker,
-        // so inject after the deadline unless the reader already did (or command absent)
-        if let Some(cmd) = initial_command {
+        // Input gatekeeper: the shell eats bytes written before its input
+        // queue is live (ConPTY init, PSReadLine load), so hold everything —
+        // launch command plus early keystrokes — until the first 133;B proves
+        // the prompt is rendered and ReadLine is imminent, then flush in
+        // order behind the launch line. Marker-less shells (cmd.exe, unix)
+        // never emit B: flush 2s after spawn. A clobbered prompt (profile
+        // overrode our hook) still flushes via the 15s backstop.
+        // The reader blocks in read() on quiet shells, so this deadline
+        // lives here, not in the reader loop.
+        {
             std::thread::spawn(move || {
-                let deadline = Instant::now() + FALLBACK_INJECT_DURATION;
-                while Instant::now() < deadline && !written_inject.load(Ordering::SeqCst) {
+                let start = Instant::now();
+                loop {
+                    if gate_ready.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let elapsed = start.elapsed();
+                    if elapsed >= PROMPT_READY_TIMEOUT
+                        || (elapsed >= FALLBACK_INJECT_DURATION && !gate_booted.load(Ordering::SeqCst))
+                    {
+                        break;
+                    }
                     std::thread::sleep(POLL_INTERVAL);
                 }
-                if !written_inject.swap(true, Ordering::SeqCst) {
-                    let _ = writer_inject
-                        .lock()
-                        .write_all(format!("{cmd}\r").as_bytes());
+                // Drain under the buffer lock and flush while holding it:
+                // writers queue on the mutex, so post-gate bytes land after.
+                let mut buffered = gate_buffer.lock();
+                if gate_flushed.swap(true, Ordering::SeqCst) {
+                    return;
                 }
+                let mut payload = Vec::new();
+                if let Some(cmd) = initial_command.as_deref() {
+                    payload.extend_from_slice(format!("{cmd}\r").as_bytes());
+                }
+                payload.append(&mut buffered);
+                if !payload.is_empty() {
+                    let _ = gate_writer.lock().write_all(&payload);
+                }
+                gate_written.store(true, Ordering::SeqCst);
             });
         }
 
@@ -508,9 +534,17 @@ impl DaemonSession {
         title_watcher::spawn(session);
     }
 
-    /// Write input bytes to the PTY's input stream.
+    /// Write input bytes to the PTY's input stream. Bytes arriving before
+    /// the shell's input queue is live are buffered and flushed in order
+    /// behind the launch command once the input gate opens.
     pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
-        self.writer.lock().write_all(data)
+        let mut buffered = self.early_input.lock();
+        if self.input_flushed.load(Ordering::SeqCst) {
+            drop(buffered);
+            return self.writer.lock().write_all(data);
+        }
+        buffered.extend_from_slice(data);
+        Ok(())
     }
 
     /// Resize the PTY and underlying virtual terminal mirror.
@@ -1377,25 +1411,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_daemon_session_initial_command_ready_marker_injection() {
+    async fn test_daemon_session_initial_command_prompt_ready_injection() {
         let sh = test_sh_path();
-        let started = std::time::Instant::now();
+        // Wrapper prints 133;B at startup like a bootstrap shell's first
+        // prompt, then hands off to an interactive shell.
         let session = DaemonSession::spawn_with_args(
-            "marker-inject".into(),
+            "prompt-inject".into(),
             &sh,
-            &[],
+            &["-c".into(), "printf '\\033]133;B\\007'; exec sh".into()],
             None,
             80,
             24,
-            Some("echo marker_injected_ok"),
+            Some("echo prompt_injected_ok"),
             &[],
         )
         .expect("spawn with initial command");
-
-        // Emit the ready marker ourselves, well inside the fallback window
-        session
-            .write(b"printf '\\033]633;oppa-ready\\007'\n")
-            .expect("write ready marker");
 
         let mut rx = session.subscribe();
         let mut collected = String::new();
@@ -1405,7 +1435,7 @@ mod tests {
                 Ok(Some(event)) => match event.as_ref() {
                     DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
-                    if collected.contains("marker_injected_ok") {
+                    if collected.contains("prompt_injected_ok") {
                         break;
                     }
                 }
@@ -1417,15 +1447,84 @@ mod tests {
         }
 
         assert!(
-            collected.contains("marker_injected_ok"),
-            "expected marker-triggered injection, got: {collected}"
+            collected.contains("prompt_injected_ok"),
+            "expected prompt-gated injection, got: {collected}"
+        );
+        // Only the 133;B scan sets this — the timed fallback never does.
+        assert!(
+            session.prompt_ready.load(Ordering::SeqCst),
+            "gate should open on 133;B, not the fallback"
+        );
+        assert!(session.initial_command_written.load(Ordering::SeqCst));
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_early_input_buffered_behind_launch_command() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "early-input".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            Some("echo gate_cmd_ok"),
+            &[],
+        )
+        .expect("spawn with initial command");
+
+        // Typed during shell init, before any prompt: held, never eaten.
+        session
+            .write(b"echo user_typed_ok\n")
+            .expect("buffer early input");
+
+        let mut rx = session.subscribe();
+        // Drain the hold window: the gate is shut, so the launch line
+        // must still be silent (fallback is 2s out).
+        let quiet_until = std::time::Instant::now() + Duration::from_millis(300);
+        let mut early = String::new();
+        while std::time::Instant::now() < quiet_until {
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => early.push_str(data),
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                },
+                _ => continue,
+            }
+        }
+        assert!(
+            !early.contains("gate_cmd_ok"),
+            "gate must hold startup input until the shell is ready, got: {early}"
+        );
+
+        // Gate opens via fallback; launch line first, typed bytes behind it.
+        let mut collected = early;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
+                    collected.push_str(&data);
+                    if collected.contains("gate_cmd_ok") && collected.contains("user_typed_ok") {
+                        break;
+                    }
+                }
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
+                _ => continue,
+            }
+        }
+        assert!(
+            collected.contains("gate_cmd_ok") && collected.contains("user_typed_ok"),
+            "expected launch line plus buffered keystrokes, got: {collected}"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "injection should be marker-driven, not fallback-timed; took {:?}",
-            started.elapsed()
+            collected.find("gate_cmd_ok") < collected.find("user_typed_ok"),
+            "launch line must precede buffered input, got: {collected}"
         );
-        assert!(session.ready_seen.load(Ordering::SeqCst));
         let _ = session.kill();
     }
 

@@ -74,8 +74,8 @@ export type PtySpawnOptions = {
   rows?: number;
   resumeAgents?: boolean;
   worktreeId?: string;
-  // Launch command injected by the daemon once the shell reports ready
-  // (oppa-ready marker, timed fallback) — never typed blind from the GUI.
+  // Launch command flushed by the daemon once the first prompt proves the
+  // shell takes input (early keystrokes queue behind it) — never typed blind.
   initialCommand?: string;
 };
 
