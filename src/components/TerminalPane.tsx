@@ -23,6 +23,16 @@ import {
   touchGlSlot,
 } from "../lib/terminal/webglRegistry";
 import { useTerminalStore, markScrollbackDirty } from "../store/terminalStore";
+import {
+  clearTerminalSelection,
+  copyTerminalSelection,
+  isCopyOrInterruptChord,
+  isExplicitCopyChord,
+  isMacPlatform,
+  isPasteChord,
+  isSelectAllChord,
+  pasteTerminalClipboard,
+} from "../lib/terminal/terminalClipboard";
 import { useExtensionStore } from "../store/extensionStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
@@ -129,6 +139,41 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const closeSearch = useCallback(() => {
     setIsSearchOpen(false);
     termRef.current?.focus();
+  }, []);
+
+  // WHY: xterm's helper textarea summons the native Emoji/Undo menu; suppress it, paste instead.
+  const handleTerminalContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const term = termRef.current;
+      if (!term) return;
+      if (term.hasSelection()) {
+        void copyTerminalSelection(term).then((ok) => {
+          if (ok) clearTerminalSelection(term);
+        });
+      } else {
+        void pasteTerminalClipboard(id, term);
+      }
+    },
+    [id],
+  );
+
+  const handleTerminalAuxClick = useCallback(
+    (e: React.MouseEvent) => {
+      // WHY: Linux middle-click paste is muscle memory; reuse the clipboard path (no primary-selection API on web).
+      if (e.button !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const term = termRef.current;
+      if (!term) return;
+      void pasteTerminalClipboard(id, term);
+    },
+    [id],
+  );
+
+  const handleTerminalMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1) e.preventDefault();
   }, []);
 
   useEffect(() => {
@@ -442,7 +487,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       unsubs.push(() => clearTimeout(settleTimer));
     }
 
-    // Attach keyboard shortcut for Ctrl+F / Cmd+F and Escape
+    // Orca-parity clipboard chords: plain Ctrl+V pastes, Ctrl+C copies only with a selection.
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
@@ -452,6 +497,35 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       if (event.key === "Escape" && isSearchOpenRef.current) {
         event.preventDefault();
         closeSearch();
+        return false;
+      }
+      const isMac = isMacPlatform();
+      if (isSelectAllChord(event, isMac)) {
+        event.preventDefault();
+        term.selectAll();
+        term.focus();
+        return false;
+      }
+      if (isPasteChord(event, isMac)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void pasteTerminalClipboard(idRef.current, term);
+        return false;
+      }
+      if (isExplicitCopyChord(event, isMac)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (term.hasSelection()) {
+          void copyTerminalSelection(term).then((ok) => {
+            if (ok) clearTerminalSelection(term);
+          });
+        }
+        return false;
+      }
+      if (isCopyOrInterruptChord(event, isMac) && term.hasSelection()) {
+        event.preventDefault();
+        event.stopPropagation();
+        void copyTerminalSelection(term);
         return false;
       }
       return true;
@@ -901,6 +975,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       <div
         ref={containerRef}
         className={`terminal-pane${appearance.dimInactivePanes && !isFocused ? " dimmed" : ""}`}
+        onContextMenu={handleTerminalContextMenu}
+        onAuxClick={handleTerminalAuxClick}
+        onMouseDown={handleTerminalMouseDown}
       />
     </div>
   );

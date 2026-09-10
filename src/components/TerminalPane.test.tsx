@@ -38,6 +38,9 @@ const xtermState = vi.hoisted(() => ({
     attachCustomKeyEventHandler: ReturnType<typeof vi.fn>;
     attachCustomWheelEventHandler: ReturnType<typeof vi.fn>;
     getSelection: ReturnType<typeof vi.fn>;
+    hasSelection: ReturnType<typeof vi.fn>;
+    selectAll: ReturnType<typeof vi.fn>;
+    clearSelection: ReturnType<typeof vi.fn>;
     focus: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     customKeyHandler?: (event: KeyboardEvent) => boolean;
@@ -84,6 +87,9 @@ vi.mock("@xterm/xterm", () => {
       this.customWheelHandler = fn;
     });
     getSelection = vi.fn().mockReturnValue("");
+    hasSelection = vi.fn().mockReturnValue(false);
+    selectAll = vi.fn();
+    clearSelection = vi.fn();
     focus = vi.fn();
     dispose = vi.fn();
     customKeyHandler?: (event: KeyboardEvent) => boolean;
@@ -917,6 +923,128 @@ describe("TerminalPane", () => {
     expect(preventDefault).toHaveBeenCalled();
     expect(container.querySelector(".terminal-search-overlay")).toBeNull();
     expect(term().focus).toHaveBeenCalled();
+  });
+
+  it("pastes clipboard text on plain Ctrl+V instead of sending keys to the PTY", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { readText: vi.fn().mockResolvedValue("echo hi") },
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handled = term().customKeyHandler?.({
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      key: "v",
+      preventDefault,
+      stopPropagation,
+    } as unknown as KeyboardEvent);
+
+    expect(handled).toBe(false);
+    expect(preventDefault).toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(ptyWriteMock).toHaveBeenCalledWith("abc", "echo hi"),
+    );
+  });
+
+  it("copies on Ctrl+C with a selection but lets SIGINT through without one", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { writeText },
+    });
+
+    term().hasSelection.mockReturnValue(true);
+    term().getSelection.mockReturnValue("sel");
+    const copyHandled = term().customKeyHandler?.({
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      key: "c",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(copyHandled).toBe(false);
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("sel"));
+
+    term().hasSelection.mockReturnValue(false);
+    const intHandled = term().customKeyHandler?.({
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      key: "c",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(intHandled).toBe(true);
+  });
+
+  it("selects all output on Ctrl+Shift+A", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const handled = term().customKeyHandler?.({
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: true,
+      altKey: false,
+      key: "A",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as KeyboardEvent);
+
+    expect(handled).toBe(false);
+    expect(term().selectAll).toHaveBeenCalled();
+  });
+
+  it("suppresses the native menu and pastes on right-click without a selection", async () => {
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { readText: vi.fn().mockResolvedValue("pwd") },
+    });
+    term().hasSelection.mockReturnValue(false);
+
+    const pane = container.querySelector(".terminal-pane")!;
+    const result = fireEvent.contextMenu(pane);
+    expect(result).toBe(false);
+    await vi.waitFor(() =>
+      expect(ptyWriteMock).toHaveBeenCalledWith("abc", "pwd"),
+    );
+  });
+
+  it("copies and clears the selection on right-click with a selection", async () => {
+    const { container } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { writeText },
+    });
+    term().hasSelection.mockReturnValue(true);
+    term().getSelection.mockReturnValue("sel");
+
+    fireEvent.contextMenu(container.querySelector(".terminal-pane")!);
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("sel"));
+    await vi.waitFor(() => expect(term().clearSelection).toHaveBeenCalled());
   });
 
   it("handles WebGL context loss by falling back to CanvasAddon", async () => {
