@@ -2203,6 +2203,147 @@ describe("terminalStore", () => {
       });
     });
 
+    describe("session record pruning", () => {
+      const agentEntry = {
+        state: "working",
+        state_started_at_ms: 1,
+        updated_at_ms: 2,
+        origin: "hook",
+      } as const;
+
+      function seedLeakyMaps(id: string) {
+        useTerminalStore.setState({
+          sessions: { [id]: { id, title: id, status: "running", cols: 80, rows: 24 } },
+          serializers: { [id]: () => "buf" },
+          cachedScrollbacks: { [id]: "cached" },
+          restoredScrollbacks: { [id]: "restored" },
+          workingBySessionId: { [id]: true },
+          statusBySessionId: { [id]: { ...agentEntry } },
+          unreadBySessionId: { [id]: true },
+        });
+        markScrollbackDirty(id);
+      }
+
+      function expectMapsPruned(id: string) {
+        const state = useTerminalStore.getState();
+        expect(state.serializers[id]).toBeUndefined();
+        expect(state.cachedScrollbacks[id]).toBeUndefined();
+        expect(state.restoredScrollbacks[id]).toBeUndefined();
+        expect(state.workingBySessionId[id]).toBeUndefined();
+        expect(state.statusBySessionId[id]).toBeUndefined();
+        expect(state.unreadBySessionId[id]).toBeUndefined();
+      }
+
+      it("killSession prunes every per-session map but keeps the exited record", async () => {
+        seedLeakyMaps("s1");
+        await useTerminalStore.getState().killSession("s1");
+        expect(useTerminalStore.getState().sessions["s1"]?.status).toBe("exited");
+        expectMapsPruned("s1");
+      });
+
+      it("forgetSession drops the record and clears a stale maximize", () => {
+        seedLeakyMaps("s1");
+        useTerminalStore.setState({ maximizedSessionId: "s1" });
+        useTerminalStore.getState().forgetSession("s1");
+        expect(useTerminalStore.getState().sessions["s1"]).toBeUndefined();
+        expectMapsPruned("s1");
+        expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+      });
+
+      it("closeTab forgets every map for its sessions", async () => {
+        seedLeakyMaps("s2");
+        useTerminalStore.setState({
+          tabs: [
+            { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+            { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+          ],
+          activeTabId: "t1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+          sessions: {
+            ...useTerminalStore.getState().sessions,
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          },
+          maximizedSessionId: "s2",
+        });
+        await useTerminalStore.getState().closeTab("t2");
+        expect(useTerminalStore.getState().sessions["s2"]).toBeUndefined();
+        expectMapsPruned("s2");
+        expect(useTerminalStore.getState().sessions["s1"]).toBeDefined();
+        expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+      });
+
+      it("closePane forgets every map for the removed pane", async () => {
+        seedLeakyMaps("b");
+        const split = {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        } as const;
+        useTerminalStore.setState({
+          tabs: [{ id: "t1", layout: split, focusedPath: [1] }],
+          activeTabId: "t1",
+          layout: split,
+          focusedPath: [1],
+          sessions: {
+            ...useTerminalStore.getState().sessions,
+            a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+          },
+        });
+        await useTerminalStore.getState().closePane();
+        expect(useTerminalStore.getState().sessions["b"]).toBeUndefined();
+        expectMapsPruned("b");
+        expect(useTerminalStore.getState().sessions["a"]).toBeDefined();
+      });
+
+      it("wakeTab remap kills the orphaned daemon session and forgets its maps", async () => {
+        useTerminalStore.setState({
+          tabs: [{ id: "t1", layout: { type: "leaf", id: "old-9" }, focusedPath: [] }],
+          activeTabId: "t1",
+          sessions: {
+            "old-9": { id: "old-9", title: "old", status: "sleeping", cols: 80, rows: 24 },
+          },
+          serializers: { "old-9": () => "buf" },
+          cachedScrollbacks: { "old-9": "cached" },
+          restoredScrollbacks: { "old-9": "restored" },
+          workingBySessionId: { "old-9": false },
+          statusBySessionId: {},
+          unreadBySessionId: {},
+        });
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("new-9"));
+        loadScrollbackMock.mockResolvedValue(null);
+        await useTerminalStore.getState().wakeTab("t1");
+        expect(ptyKillMock).toHaveBeenCalledWith("old-9");
+        expect(useTerminalStore.getState().sessions["old-9"]).toBeUndefined();
+        expectMapsPruned("old-9");
+      });
+
+      it("marks sessions launched with an initial command as agent panes", async () => {
+        ptySpawnMock.mockResolvedValue(spawnRes("ag1"));
+        await useTerminalStore.getState().spawnSession(undefined, undefined, undefined, undefined, undefined, "opencode --prompt hi");
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({ initialCommand: "opencode --prompt hi" }),
+        );
+        expect(useTerminalStore.getState().sessions["ag1"]?.isAgent).toBe(true);
+      });
+
+      it("leaves plain shells unmarked but preserves the flag on reattach", async () => {
+        ptySpawnMock.mockResolvedValue(spawnRes("sh1"));
+        await useTerminalStore.getState().spawnSession();
+        expect(useTerminalStore.getState().sessions["sh1"]?.isAgent).toBeUndefined();
+        useTerminalStore.setState({
+          sessions: {
+            ag0: { id: "ag0", title: "ag0", status: "running", cols: 80, rows: 24, isAgent: true },
+          },
+        });
+        ptySpawnMock.mockResolvedValue({ ...spawnRes("ag0"), is_new: false });
+        await useTerminalStore.getState().spawnSession(undefined, undefined, "ag0");
+        expect(useTerminalStore.getState().sessions["ag0"]?.isAgent).toBe(true);
+      });
+    });
+
     describe("split isolation across tabs", () => {
       it("splitPane modifies only the active tab layout", async () => {
         ptySpawnMock.mockResolvedValue(spawnRes("s-split"));

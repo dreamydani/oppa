@@ -87,6 +87,7 @@ pub struct DaemonSession {
     pub paused: Arc<PauseGate>,
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<std::sync::Arc<DaemonEvent>>>>>,
     pub seq: Arc<AtomicU64>,
+    pub on_exit: Mutex<Option<SessionReaper>>,
     // Coalesces reader chunks into larger Data events; finish() must run
     // before Exit is emitted so the tail output always precedes it.
     pub output_drain: OutputDrain,
@@ -112,6 +113,11 @@ fn emit_event(
     let mut subs = subscribers.lock();
     subs.retain(|tx| tx.send(std::sync::Arc::clone(&shared)).is_ok());
 }
+
+// Exit hook installed by the session owner (daemon router): final
+// checkpoint + map removal. Read lazily by the watchdog so construction
+// needs no extra parameter at every spawn call site.
+pub type SessionReaper = Arc<dyn Fn(&DaemonSession) + Send + Sync>;
 
 // Split-safe ready-marker scan: `tail` carries the last marker_len-1
 // bytes across reads so a marker straddling two chunks still matches.
@@ -286,6 +292,7 @@ impl DaemonSession {
             paused: Arc::new(PauseGate::new()),
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
+            on_exit: Mutex::new(None),
             output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
             last_resize_at: Arc::new(Mutex::new(None)),
@@ -334,6 +341,10 @@ impl DaemonSession {
         let subscribers_watch = Arc::clone(&session.subscribers);
         let drain_watch = session.output_drain.clone();
         let output_drain_reader = session.output_drain.clone();
+        // Lazy read: set_reaper lands microseconds after spawn returns while
+        // the first exit poll fires milliseconds later, so reading here (at
+        // exit time, not thread start) never races the owner.
+        let session_watch = Arc::clone(&session);
 
         // Output batcher: coalesces raw chunks into larger Data events and
         // owns the UTF-8 decoder so split code points resolve per batch.
@@ -473,6 +484,13 @@ impl DaemonSession {
                     // Tail output must precede Exit: bounded drain of the
                     // batcher before signalling the child is gone.
                     drain_watch.finish();
+                    // Reap before Exit: final checkpoint to disk for cold
+                    // restore, then drop the RAM entry so dead sessions
+                    // never accumulate. Reattach-after-exit cold-boots from
+                    // the kept file instead of a stale live entry.
+                    if let Some(reaper) = session_watch.on_exit.lock().clone() {
+                        reaper(&session_watch);
+                    }
                     emit_event(
                         &subscribers_watch,
                         DaemonEvent::Exit {
@@ -589,6 +607,12 @@ impl DaemonSession {
         self.pending_bytes.store(0, Ordering::SeqCst);
         self.paused.unpause();
         Ok(())
+    }
+
+    /// Install the owner's exit hook (final checkpoint + map removal). Called
+    /// once right after spawn; the watchdog reads it lazily at exit time.
+    pub fn set_reaper(&self, reaper: SessionReaper) {
+        *self.on_exit.lock() = Some(reaper);
     }
 
     /// Kill the child process and its process tree.
@@ -1679,6 +1703,52 @@ mod tests {
             },
             Err(_) => panic!("Kill must synchronously emit Exit before the map entry vanishes"),
         }
+    }
+
+    #[tokio::test]
+    async fn natural_exit_reaps_map_entry_and_keeps_final_snapshot() {
+        use crate::pty::snapshot::SnapshotStorage;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = DaemonServer::with_snapshot_storage(dir.path().to_path_buf());
+        let sh = test_sh_path();
+        let session_id = "reap-test";
+        let session = DaemonSession::spawn_with_args(
+            session_id.into(),
+            &sh,
+            &["-c".into(), "echo final-tail; exit 0".into()],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn exiting shell");
+        session.set_reaper(server.session_reaper());
+        server
+            .sessions
+            .lock()
+            .insert(session_id.to_string(), Arc::clone(&session));
+        // Watchdog must reap the map entry once the child exits on its own.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if !server.sessions.lock().contains_key(session_id) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "watchdog must reap the map entry after natural exit"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        // Final tail precedes Exit on disk for cold restore.
+        let snap = SnapshotStorage::new(dir.path().to_path_buf())
+            .load_snapshot(session_id)
+            .expect("load")
+            .expect("final snapshot kept");
+        assert!(
+            snap.scrollback.contains("final-tail"),
+            "final tail must precede Exit"
+        );
     }
 
     #[tokio::test]

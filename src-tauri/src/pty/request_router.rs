@@ -153,6 +153,7 @@ impl DaemonServer {
                         &env_bindings,
                     ) {
                         Ok(session) => {
+                            session.set_reaper(self.session_reaper());
                             let pid = session.pid();
                             let session_cols = session.cols();
                             let session_rows = session.rows();

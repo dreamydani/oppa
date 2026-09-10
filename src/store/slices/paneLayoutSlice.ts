@@ -172,9 +172,6 @@ export function createPaneLayoutSlice(
       const targetTab = currentTabs.find((t) => t.id === targetId);
       if (!targetTab) return;
 
-      let sessions = get().sessions;
-      let cachedScrollbacks = get().cachedScrollbacks;
-
       if (!targetTab.isWizard) {
         const sessionIds = leafIds(targetTab.layout);
         for (const sId of sessionIds) {
@@ -184,16 +181,10 @@ export function createPaneLayoutSlice(
               await get().killSession(sId);
             }
             void deleteScrollback(sId).catch(() => {});
-            clearDirtyScrollback(sId);
-          }
-        }
-
-        sessions = { ...get().sessions };
-        cachedScrollbacks = { ...get().cachedScrollbacks };
-        for (const sId of sessionIds) {
-          if (sId) {
-            delete sessions[sId];
-            delete cachedScrollbacks[sId];
+            // WHY forget (not inline deletes): serializers pin the xterm
+            // instance and restored/working/status entries outlive the pane
+            // otherwise — one entry per closed session, forever.
+            get().forgetSession(sId);
           }
         }
       }
@@ -203,8 +194,6 @@ export function createPaneLayoutSlice(
 
       if (remainingTabs.length === 0) {
         set({
-          sessions,
-          cachedScrollbacks,
           tabs: [],
           activeTabId: "",
           layout: { type: "leaf", id: "" },
@@ -217,8 +206,6 @@ export function createPaneLayoutSlice(
           const nextIdx = Math.min(Math.max(0, targetIdx), remainingTabs.length - 1);
           const nextActiveTab = remainingTabs[nextIdx];
           set({
-            sessions,
-            cachedScrollbacks,
             tabs: remainingTabs,
             activeTabId: nextActiveTab.id,
             layout: nextActiveTab.layout,
@@ -231,8 +218,6 @@ export function createPaneLayoutSlice(
         } else {
           const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
           set({
-            sessions,
-            cachedScrollbacks,
             tabs: remainingTabs,
             layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
             focusedPath: activeTab ? activeTab.focusedPath : [],
@@ -305,11 +290,11 @@ export function createPaneLayoutSlice(
             remap[oldId] = newId;
 
             if (oldId !== newId) {
-              set((s) => {
-                const sessions = { ...s.sessions };
-                delete sessions[oldId];
-                return { sessions };
-              });
+              // A changed id means the old daemon session has no referencing
+              // leaf: kill it and forget every record, or it leaks a PTY plus
+              // serializer/scrollback/status entries per occurrence.
+              await get().killSession(oldId);
+              get().forgetSession(oldId);
             }
 
             if (savedSession?.title && savedSession.title !== newId) {
@@ -526,12 +511,8 @@ export function createPaneLayoutSlice(
       }
       if (removedId) {
         void deleteScrollback(removedId).catch(() => {});
-        clearDirtyScrollback(removedId);
+        get().forgetSession(removedId);
       }
-      const sessions = { ...get().sessions };
-      delete sessions[removedId];
-      const cachedScrollbacks = { ...get().cachedScrollbacks };
-      delete cachedScrollbacks[removedId];
       const nextLayout: Layout = next;
       const nextFocusedPath: Path = firstLeafPath(next);
       if (activeTab) {
@@ -540,16 +521,12 @@ export function createPaneLayoutSlice(
           t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
         );
         set({
-          sessions,
-          cachedScrollbacks,
           tabs,
           layout: nextLayout,
           focusedPath: nextFocusedPath,
         });
       } else {
         set({
-          sessions,
-          cachedScrollbacks,
           layout: nextLayout,
           focusedPath: nextFocusedPath,
         });
@@ -1212,11 +1189,8 @@ export function createPaneLayoutSlice(
               );
               remap[oldId] = newId;
               if (oldId !== newId) {
-                set((state) => {
-                  const sessions = { ...state.sessions };
-                  delete sessions[oldId];
-                  return { sessions };
-                });
+                await get().killSession(oldId);
+                get().forgetSession(oldId);
               }
 
               if (savedSession?.title && savedSession.title !== newId) {
@@ -1361,11 +1335,8 @@ export function createPaneLayoutSlice(
               );
               remap[oldId] = newId;
               if (oldId !== newId) {
-                set((state) => {
-                  const sessions = { ...state.sessions };
-                  delete sessions[oldId];
-                  return { sessions };
-                });
+                await get().killSession(oldId);
+                get().forgetSession(oldId);
               }
 
               if (savedSession?.title && savedSession.title !== newId) {

@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   truncateScrollbackWithMarker,
   maybeWriteTruncationMarker,
+  serializeScrollbackBounded,
+  normalizeScrollbackRows,
+  resolveSessionScrollbackRows,
+  serializeRowsForScrollback,
+  outputBacklogCapChars,
+  AGENT_SCROLLBACK_ROWS,
   XTERM_SCROLLBACK_LINES,
 } from "./scrollbackBudget";
 
@@ -52,5 +58,37 @@ describe("maybeWriteTruncationMarker", () => {
     const marked = maybeWriteTruncationMarker(sink, XTERM_SCROLLBACK_LINES, true);
     expect(marked).toBe(true);
     expect(sink.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("scrollback row policy", () => {
+  it("agent panes keep half the history of plain shells", () => {
+    expect(AGENT_SCROLLBACK_ROWS).toBe(5000);
+    expect(resolveSessionScrollbackRows(true)).toBe(5000);
+    expect(resolveSessionScrollbackRows(false)).toBe(XTERM_SCROLLBACK_LINES);
+  });
+
+  it("normalizes unknown values to the default and clamps to min/max", () => {
+    expect(normalizeScrollbackRows(undefined)).toBe(XTERM_SCROLLBACK_LINES);
+    expect(normalizeScrollbackRows(Number.NaN)).toBe(XTERM_SCROLLBACK_LINES);
+    expect(normalizeScrollbackRows(10)).toBe(1000);
+    expect(normalizeScrollbackRows(1_000_000)).toBe(50000);
+    expect(normalizeScrollbackRows(7500.9)).toBe(7500);
+  });
+
+  it("serializes half the rows for agent panes", () => {
+    expect(serializeRowsForScrollback(XTERM_SCROLLBACK_LINES)).toBe(5000);
+    expect(serializeRowsForScrollback(AGENT_SCROLLBACK_ROWS)).toBe(2500);
+  });
+
+  it("passes the row bound through to the serializer", () => {
+    const serialize = vi.fn().mockReturnValue("buf");
+    serializeScrollbackBounded(serialize, 2500);
+    expect(serialize).toHaveBeenCalledWith({ scrollback: 2500 });
+  });
+
+  it("floors the backlog cap at 2MB and scales with rows above it", () => {
+    expect(outputBacklogCapChars(5000)).toBe(2 * 1024 * 1024);
+    expect(outputBacklogCapChars(50000)).toBe(50000 * 120);
   });
 });

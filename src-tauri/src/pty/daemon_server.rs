@@ -261,6 +261,17 @@ async fn handle_wait_for(
     }
 }
 
+/// Backpressure valve for the per-connection read buffer: one oversized request
+/// line (multi-MB paste) must not pin max-line-ever capacity for the rest of
+/// the connection. Callers drop the buffer (`line = String::new()`) on Err.
+pub(crate) fn check_request_line_len(len: usize) -> Result<(), String> {
+    const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024 * 1024;
+    if len > MAX_REQUEST_LINE_BYTES {
+        return Err(format!("request line too large ({len} bytes)"));
+    }
+    Ok(())
+}
+
 /// Handle bidirectional JSON communication with a single connected client stream.
 pub async fn handle_client_stream<S>(
     stream: S,
@@ -313,6 +324,16 @@ where
                 match read_res {
                     Ok(0) => break, // EOF
                     Ok(_) => {
+                        if let Err(e) = check_request_line_len(line.len()) {
+                            // Drop the oversized buffer instead of retaining
+                            // its capacity: clear() would pin it for life.
+                            line = String::new();
+                            let err_resp = DaemonResponse::Error(e);
+                            if let Ok(json) = serde_json::to_string(&err_resp) {
+                                let _ = out_tx.send(format!("{json}\n")).await;
+                            }
+                            continue;
+                        }
                         let trimmed = line.trim();
                         if trimmed.is_empty() {
                             continue;
@@ -507,6 +528,13 @@ mod tests {
     use crate::pty::ipc_protocol::DaemonEvent;
     use std::time::Duration;
     use std::time::Instant;
+
+    #[test]
+    fn request_line_len_cap_bounds_connection_buffer() {
+        assert!(check_request_line_len(0).is_ok());
+        assert!(check_request_line_len(8 * 1024 * 1024).is_ok());
+        assert!(check_request_line_len(8 * 1024 * 1024 + 1).is_err());
+    }
 
     // Raw-stream twin of RuntimeConnection::request: skip streamed event /
     // keepalive frames so strict next-line response assertions stay valid

@@ -227,11 +227,14 @@ describe("SessionLeaf", () => {
     unmount();
 
     // Real unmount detaches the node, so the late resolution must not swap
-    // the layout (the leaf is gone). The orphan session itself stays in the
-    // store — killing it is the session owner's job, not the view's.
+    // the layout (the leaf is gone) — and the orphaned daemon session is
+    // killed with its records forgotten instead of leaking a PTY per race.
     resolveSpawn({ id: "late", is_new: true, pid: 100 });
     await waitFor(() =>
-      expect(useTerminalStore.getState().sessions["late"]).toBeDefined(),
+      expect(transport.ptyKill).toHaveBeenCalledWith("late"),
+    );
+    await waitFor(() =>
+      expect(useTerminalStore.getState().sessions["late"]).toBeUndefined(),
     );
     expect(useTerminalStore.getState().layout).toEqual({ type: "leaf", id: "" });
   });

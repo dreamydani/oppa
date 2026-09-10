@@ -756,6 +756,58 @@ describe("TerminalPane", () => {
     expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
   });
 
+  it("mounts plain shells with 10k scrollback", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    expect(term().options.scrollback).toBe(10000);
+  });
+
+  it("mounts agent panes with half the retained history", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24, isAgent: true },
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    expect(term().options.scrollback).toBe(5000);
+  });
+
+  it("halves retained history while alt-screen is active and restores after", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    const t = term();
+    expect(t.options.scrollback).toBe(10000);
+
+    const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
+      id: string;
+      data: string;
+      seq: number;
+    }) => void;
+    t.buffer.active.type = "alternate";
+    dataHandler({ id: "abc", data: "x", seq: 1 });
+    expect(t.options.scrollback).toBe(5000);
+
+    t.buffer.active.type = "normal";
+    dataHandler({ id: "abc", data: "x", seq: 2 });
+    expect(t.options.scrollback).toBe(10000);
+  });
+
+  it("serializes half the rows for agent panes", async () => {
+    useTerminalStore.setState({
+      sessions: {
+        abc: { id: "abc", title: "abc", status: "running", cols: 80, rows: 24, isAgent: true },
+      },
+    });
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    const serializer = useTerminalStore.getState().serializers["abc"];
+    serializer?.();
+    expect(addonState.serializeInstances[0]!.serialize).toHaveBeenCalledWith({
+      scrollback: 2500,
+    });
+  });
+
   it("caches serialized buffer into store on unmount for background tabs", async () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();

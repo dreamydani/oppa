@@ -40,7 +40,7 @@ pub struct SessionSnapshot {
 
 /// Identity of an agent CLI session (e.g. Claude Code transcript id) captured
 /// while it ran, so a cold-booted machine can relaunch it with its native resume.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct AgentSessionRef {
     pub agent: String,
     pub id: String,

@@ -1,5 +1,5 @@
 use crate::pty::agent_resume;
-use crate::pty::daemon_session::DaemonSession;
+use crate::pty::daemon_session::{DaemonSession, SessionReaper};
 use crate::pty::ipc_protocol::{
     ResumeKind, ResumePlan,
 };
@@ -9,6 +9,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::pty::daemon_server::{CHECKPOINT_INTERVAL, DaemonServer};
 
@@ -184,6 +185,39 @@ impl DaemonServer {
         }
     }
 
+    /// Cheap idle check over every small checkpoint field EXCEPT the viewport
+    /// render. Equal fingerprints prove build_checkpoint would hash
+    /// identically, so the task can skip the ~30-400KB transient entirely.
+    /// Errs toward rebuilding (extra fields like agent_session only cause
+    /// false positives, never a missed save); scrollback changes always bump
+    /// seq via the batcher, so no output change slips through.
+    pub(crate) fn checkpoint_fingerprint(session: &DaemonSession) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        session.seq.load(Ordering::SeqCst).hash(&mut hasher);
+        session.cols().hash(&mut hasher);
+        session.rows().hash(&mut hasher);
+        session.cwd().hash(&mut hasher);
+        session.foreground_command().hash(&mut hasher);
+        session.agent_session_ref.lock().clone().hash(&mut hasher);
+        session.title().hash(&mut hasher);
+        (*session.title_pinned.lock()).hash(&mut hasher);
+        (*session.topic_set.lock()).hash(&mut hasher);
+        session.idle_title().hash(&mut hasher);
+        session.agent_status().hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Decision gate for the checkpoint task: true when a fresh snapshot may
+    /// differ from the last pass (updates `last` on change).
+    pub(crate) fn should_checkpoint(last: &mut Option<u64>, session: &DaemonSession) -> bool {
+        let fingerprint = Self::checkpoint_fingerprint(session);
+        if *last == Some(fingerprint) {
+            return false;
+        }
+        *last = Some(fingerprint);
+        true
+    }
+
     // Skip unchanged writes: a quiet pane rewrites identical content forever otherwise
     pub(crate) fn checkpoint_hash(snapshot: &SessionSnapshot) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -201,14 +235,38 @@ impl DaemonServer {
         hasher.finish()
     }
 
+    /// Exit hook installed on every spawned session: the watchdog calls it
+    /// once the child is gone. Final checkpoint first (tail precedes Exit on
+    /// disk for cold restore), then drop the map entry — dead RAM must not
+    /// outlive the child. Reattach-after-exit cold-boots from the kept file.
+    pub(crate) fn session_reaper(&self) -> SessionReaper {
+        let sessions = Arc::clone(&self.sessions);
+        let snapshot_dir = self.snapshot_dir.clone();
+        Arc::new(move |session: &DaemonSession| {
+            if let Some(dir) = snapshot_dir.as_ref() {
+                let snapshot = Self::build_checkpoint(session);
+                let _ = SnapshotStorage::new(dir.clone()).save_snapshot(&snapshot);
+            }
+            let _ = sessions.lock().remove(session.id.as_str());
+        })
+    }
+
     pub(crate) fn start_checkpoint_task(session: Arc<DaemonSession>, app_data_dir: PathBuf) {
         tokio::spawn(async move {
             let storage = SnapshotStorage::new(app_data_dir);
             let mut last_hash: Option<u64> = None;
+            let mut last_fingerprint: Option<u64> = None;
             loop {
                 tokio::time::sleep(CHECKPOINT_INTERVAL).await;
                 if !session.is_alive() {
                     break;
+                }
+                // Idle skip: the viewport render below allocates ~30-400KB of
+                // transient strings every tick per session even when nothing
+                // changed. The fingerprint covers every small checkpoint field,
+                // so equality proves build_checkpoint would hash identically.
+                if !Self::should_checkpoint(&mut last_fingerprint, &session) {
+                    continue;
                 }
                 let snapshot = Self::build_checkpoint(&session);
                 let hash = Self::checkpoint_hash(&snapshot);
@@ -220,6 +278,78 @@ impl DaemonServer {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn test_sh_path() -> String {
+        if let Some(found) = std::env::var_os("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join("sh.exe"))
+                .find(|candidate| candidate.exists())
+        }) {
+            return found.to_string_lossy().into_owned();
+        }
+        "sh".to_string()
+    }
+
+    #[tokio::test]
+    async fn checkpoint_fingerprint_skips_idle_sessions() {
+        let session = DaemonSession::spawn_with_args(
+            "fp-idle".into(),
+            &test_sh_path(),
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        let mut last = None;
+        assert!(
+            DaemonServer::should_checkpoint(&mut last, &session),
+            "first pass must checkpoint"
+        );
+        assert!(
+            !DaemonServer::should_checkpoint(&mut last, &session),
+            "idle session must skip the viewport render"
+        );
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn checkpoint_fingerprint_moves_on_output() {
+        let session = DaemonSession::spawn_with_args(
+            "fp-output".into(),
+            &test_sh_path(),
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        let mut last = None;
+        assert!(DaemonServer::should_checkpoint(&mut last, &session));
+        assert!(!DaemonServer::should_checkpoint(&mut last, &session));
+        session
+            .write(b"echo fp-marker-12345\n")
+            .expect("write echo");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if DaemonServer::should_checkpoint(&mut last, &session) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "output must move the fingerprint");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let _ = session.kill();
     }
 }
 

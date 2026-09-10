@@ -168,6 +168,7 @@ impl DaemonServer {
             &env_bindings,
         ) {
             Ok(session) => {
+                session.set_reaper(self.session_reaper());
                 if profile.prompt_delivery != PromptDelivery::Arg {
                     if let Some(prompt) = prompt {
                         Self::spawn_post_ready_prompt(&session, prompt.to_string());
