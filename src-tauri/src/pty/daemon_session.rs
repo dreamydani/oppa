@@ -88,6 +88,9 @@ pub struct DaemonSession {
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<std::sync::Arc<DaemonEvent>>>>>,
     pub seq: Arc<AtomicU64>,
     pub on_exit: Mutex<Option<SessionReaper>>,
+    // Visibility gate for parked tabs: the model (mirror/checkpoint) stays
+    // live while Data delivery stops. Read by the batcher emit path.
+    hidden: Arc<AtomicBool>,
     // Coalesces reader chunks into larger Data events; finish() must run
     // before Exit is emitted so the tail output always precedes it.
     pub output_drain: OutputDrain,
@@ -293,6 +296,7 @@ impl DaemonSession {
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
             on_exit: Mutex::new(None),
+            hidden: Arc::new(AtomicBool::new(false)),
             output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
             last_resize_at: Arc::new(Mutex::new(None)),
@@ -352,8 +356,25 @@ impl DaemonSession {
             let id_batch = id.clone();
             let subscribers_batch = Arc::clone(&session.subscribers);
             let seq_batch = Arc::clone(&session.seq);
+            let pending_batch = Arc::clone(&session.pending_bytes);
+            let paused_batch = Arc::clone(&session.paused);
+            let hidden_batch = Arc::clone(&session.hidden);
             std::thread::spawn(move || {
                 run_batcher(batch_rx, batch_drained_tx, DEFAULT_FLUSH_INTERVAL_MS, move |data, bytes| {
+                    // Parked panes: the model stays live but delivery stops.
+                    // Instant-ack the dropped bytes so the reader never parks
+                    // behind a hidden pane; reveal replays the snapshot.
+                    if hidden_batch.load(Ordering::SeqCst) {
+                        pending_batch
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| {
+                                Some(p.saturating_sub(bytes))
+                            })
+                            .unwrap_or(0);
+                        if pending_batch.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
+                            paused_batch.unpause();
+                        }
+                        return;
+                    }
                     let seq_num = seq_batch.fetch_add(1, Ordering::SeqCst);
                     emit_event(
                         &subscribers_batch,
@@ -613,6 +634,12 @@ impl DaemonSession {
     /// once right after spawn; the watchdog reads it lazily at exit time.
     pub fn set_reaper(&self, reaper: SessionReaper) {
         *self.on_exit.lock() = Some(reaper);
+    }
+
+    /// Mark the session hidden (parked tab): Data delivery stops while the
+    /// mirror and checkpoint stay live; reveal replays the snapshot.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.hidden.store(hidden, Ordering::SeqCst);
     }
 
     /// Kill the child process and its process tree.
@@ -1749,6 +1776,112 @@ mod tests {
             snap.scrollback.contains("final-tail"),
             "final tail must precede Exit"
         );
+    }
+
+    #[tokio::test]
+    async fn hidden_session_drops_data_delivery_but_keeps_model() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "hidden-test".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        let mut rx = session.subscribe();
+        // Drain the seed SessionWorking event.
+        let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        session.set_hidden(true);
+        session
+            .write(b"echo hidden-marker-1\n")
+            .expect("write while hidden");
+        // Model stays live: the mirror must ingest despite the delivery drop.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if session.get_screen_text().contains("hidden-marker-1") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "mirror must ingest output while hidden"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        // ...but no Data event may reach subscribers while hidden.
+        let quiet_until = Instant::now() + Duration::from_millis(800);
+        while Instant::now() < quiet_until {
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(event)) => assert!(
+                    !matches!(&*event, DaemonEvent::Data { .. }),
+                    "hidden sessions must not emit Data"
+                ),
+                _ => break,
+            }
+        }
+        // Delivery resumes on unhide; dropped bytes are covered by snapshot.
+        session.set_hidden(false);
+        session
+            .write(b"echo back-marker-2\n")
+            .expect("write after unhide");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut delivered = false;
+            if let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+            {
+                if let DaemonEvent::Data { data, .. } = &*event {
+                    if data.contains("back-marker-2") {
+                        delivered = true;
+                    }
+                }
+            }
+            if delivered {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "delivery must resume after unhide"
+            );
+        }
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn router_set_hidden_toggles_delivery_gate() {
+        use crate::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
+        let server = DaemonServer::new();
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "hide-router".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        server
+            .sessions
+            .lock()
+            .insert("hide-router".to_string(), Arc::clone(&session));
+        let resp = server.handle_request(DaemonRequest::SetHidden {
+            session_id: "hide-router".into(),
+            hidden: true,
+        });
+        assert_eq!(resp, DaemonResponse::Ok);
+        assert!(session.hidden.load(Ordering::SeqCst));
+        let resp = server.handle_request(DaemonRequest::SetHidden {
+            session_id: "nope".into(),
+            hidden: true,
+        });
+        assert!(matches!(resp, DaemonResponse::Error(_)));
+        let _ = session.kill();
     }
 
     #[tokio::test]

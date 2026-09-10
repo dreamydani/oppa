@@ -23,6 +23,15 @@ import {
 } from "../../lib/layout/transport";
 import { getSavedWindowState, applyWindowState } from "../../lib/window/transport";
 import type { WindowState } from "../../lib/window/transport";
+import { ptySetHidden } from "../../lib/pty/transport";
+import {
+  planTabParking,
+  noteTabActivated,
+  noteTabHidden,
+  pruneTabTracking,
+  tabTrackingSnapshot,
+  type ParkableTab,
+} from "../../lib/terminal/tabParking";
 import { isSyntheticTitle } from "../../lib/terminal/friendlyNames";
 import type { EditorTab, EditorViewMode } from "./codeEditorSlice";
 import type { AppMode, DevicePreset } from "./browserPaneSlice";
@@ -83,10 +92,16 @@ export interface PaneLayoutSlice {
   ready: boolean;
   maximizedSessionId: string | null;
   tabFocusHistory: string[];
+  // Cold-parked tabs (xterm unmounted, PTY headless) and the tab currently
+  // revealing (attach-first remount so panes paint onto a fresh snapshot).
+  parkedTabIds: string[];
+  revealingTabId: string | null;
   createTab: (cwd?: string, worktreeId?: string, existingId?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
   selectTab: (tabId: string) => void;
   wakeTab: (tabId: string) => Promise<void>;
+  refreshParking: () => void;
+  revealParkedTab: (tabId: string) => Promise<void>;
   renameTab: (tabId: string, title: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
@@ -136,6 +151,8 @@ export function createPaneLayoutSlice(
     ready: false,
     maximizedSessionId: null,
     tabFocusHistory: [],
+    parkedTabIds: [],
+    revealingTabId: null,
 
     createTab: async (cwd, worktreeId, existingId) => {
       const resolvedCwd = cwd ?? get().resolveDefaultCwd();
@@ -234,6 +251,14 @@ export function createPaneLayoutSlice(
       const tab = currentTabs.find((t) => t.id === tabId);
       if (!tab) return;
 
+      // Parked tabs reveal through the attach-first flow so panes mount onto
+      // a fresh snapshot instead of flashing stale state.
+      if (state.parkedTabIds.includes(tabId)) {
+        void get().revealParkedTab(tabId);
+        return;
+      }
+      noteTabActivated(tabId);
+
       const wasSleeping = Boolean(tab.isSleeping);
       const updatedTabs = wasSleeping
         ? currentTabs.map((t) => (t.id === tabId ? { ...t, isSleeping: false } : t))
@@ -249,6 +274,113 @@ export function createPaneLayoutSlice(
 
       if (wasSleeping) {
         void get().wakeTab(tabId);
+      }
+      triggerDebouncedSaveLayout(get);
+    },
+
+    refreshParking: () => {
+      const state = get();
+      const tabs = getSyncedTabs(state).filter((t) => !t.isWizard && !t.isSleeping);
+      const activeId = state.activeTabId;
+      const now = Date.now();
+      for (const t of tabs) {
+        if (t.id === activeId || t.id === state.revealingTabId) noteTabActivated(t.id);
+        else noteTabHidden(t.id, now);
+      }
+      pruneTabTracking(new Set(tabs.map((t) => t.id)));
+      const candidates: ParkableTab[] = tabs.map((t) => {
+        const tracking = tabTrackingSnapshot(t.id);
+        const worktreeIds = [
+          ...new Set(
+            leafIds(t.layout)
+              .filter(Boolean)
+              .map((id) => state.sessions[id]?.worktreeId)
+              .filter((w): w is string => Boolean(w)),
+          ),
+        ];
+        return {
+          id: t.id,
+          isVisible: t.id === activeId || t.id === state.revealingTabId,
+          ...tracking,
+          worktreeIds,
+        };
+      });
+      const next = planTabParking(candidates, now);
+      const prev = new Set(state.parkedTabIds);
+      // A revealing tab stays parked until its attach-first remount
+      // completes; otherwise panes would mount onto stale state mid-reveal.
+      if (state.revealingTabId && prev.has(state.revealingTabId)) {
+        next.push(state.revealingTabId);
+      }
+      // Hide newly parked BEFORE unmount so the daemon drops delivery while
+      // the unmount flush still serializes the live screen.
+      for (const id of next) {
+        if (!prev.has(id)) {
+          const tab = tabs.find((t) => t.id === id);
+          const layout = tab?.layout ?? { type: "leaf", id: "" };
+          for (const leafId of leafIds(layout).filter(Boolean)) {
+            void ptySetHidden(leafId, true).catch(() => {});
+          }
+        }
+      }
+      if (next.length === prev.size && next.every((id) => prev.has(id))) return;
+      set({ parkedTabIds: next });
+    },
+
+    revealParkedTab: async (tabId) => {
+      const tab = get().tabs.find((t) => t.id === tabId);
+      if (!tab || tab.isWizard || get().revealingTabId === tabId) return;
+      set({ revealingTabId: tabId });
+      try {
+        const ids = leafIds(tab.layout).filter(Boolean);
+        await Promise.all(
+          ids.map(async (id) => {
+            const session = get().sessions[id];
+            // Sleeping/restoring/error panes belong to other flows (wakeTab,
+            // retry); exited panes cold-boot through the same attach below.
+            if (
+              !session ||
+              session.status === "sleeping" ||
+              session.status === "restoring" ||
+              session.status === "error"
+            ) {
+              return;
+            }
+            // Delivery resumes first so post-attach output is never gated;
+            // the attach itself resets the ack balance and replays the
+            // snapshot the panes mount onto.
+            try {
+              await ptySetHidden(id, false);
+            } catch {
+              // Daemon gone: the attach below decides.
+            }
+            await get().spawnSession(undefined, undefined, id);
+          }),
+        );
+      } finally {
+        const state = get();
+        const currentTabs = getSyncedTabs(state);
+        const live = currentTabs.find((t) => t.id === tabId);
+        noteTabActivated(tabId);
+        set({
+          revealingTabId: null,
+          // Drop locally: the next refresh recomputes from the active tab
+          // anyway, but the panes mount on this commit and must not read a
+          // stale parked flag for the now-active tab.
+          parkedTabIds: state.parkedTabIds.filter((id) => id !== tabId),
+          ...(live
+            ? {
+                tabs: currentTabs,
+                activeTabId: live.id,
+                layout: live.layout,
+                focusedPath: live.focusedPath,
+                tabFocusHistory: [
+                  live.id,
+                  ...state.tabFocusHistory.filter((id) => id !== live.id),
+                ],
+              }
+            : {}),
+        });
       }
       triggerDebouncedSaveLayout(get);
     },

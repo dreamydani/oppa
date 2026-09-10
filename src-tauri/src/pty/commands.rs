@@ -308,6 +308,11 @@ pub fn pty_reset_title(manager: State<'_, PtyManager>, id: String) -> Result<(),
 }
 
 #[tauri::command(async)]
+pub fn pty_set_hidden(manager: State<'_, PtyManager>, id: String, hidden: bool) -> Result<(), String> {
+    manager.set_hidden(&id, hidden)
+}
+
+#[tauri::command(async)]
 pub fn pty_ack(
     manager: State<'_, PtyManager>,
     id: String,

@@ -131,6 +131,7 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_set_title,
             pty::commands::pty_reset_title,
+            pty::commands::pty_set_hidden,
             pty::commands::pty_ack,
             pty::commands::pty_list,
             pty::commands::can_upgrade_daemon,

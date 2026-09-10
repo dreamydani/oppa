@@ -32,6 +32,9 @@ export function PaneSplit() {
   const setRatio = useTerminalStore((s) => s.setRatio);
   const saveLayout = useTerminalStore((s) => s.saveLayout);
   const maximizedSessionId = useTerminalStore((s) => s.maximizedSessionId);
+  const parkedTabIds = useTerminalStore((s) => s.parkedTabIds);
+  const revealingTabId = useTerminalStore((s) => s.revealingTabId);
+  const refreshParking = useTerminalStore((s) => s.refreshParking);
 
   const { isDragging, sourceId, targetId, zone } = usePaneDragStore();
 
@@ -96,6 +99,15 @@ export function PaneSplit() {
       activeZoomCancelsRef.current = [];
     };
   }, []);
+
+  // Cold-park maintenance: recompute on tab changes and re-check the 30s
+  // clock on a slow tick. Parking unmounts hidden xterms (PTY stays
+  // headless); reveal remounts onto a fresh snapshot.
+  useEffect(() => {
+    refreshParking();
+    const timer = setInterval(refreshParking, 5000);
+    return () => clearInterval(timer);
+  }, [refreshParking, activeTabId, tabs]);
 
   const renderTree = (targetLayout: Layout, targetFocusedPath: Path, isTabActive: boolean) => {
     const isAnyMaximized = Boolean(
@@ -178,6 +190,50 @@ export function PaneSplit() {
           const isTabActive = tab.id === (activeTabId || terminalTabs[0].id);
           const tabLayout = isTabActive ? layout : tab.layout;
           const tabFocusedPath = isTabActive ? focusedPath : tab.focusedPath;
+          // Parked tabs keep no xterm mounted: the wrapper stays (layout
+          // stability) but the tree unmounts until reveal remounts it.
+          if (!isTabActive && parkedTabIds.includes(tab.id) && revealingTabId !== tab.id) {
+            return (
+              <div
+                key={tab.id}
+                className="tab-split-wrapper"
+                style={{
+                  display: "none",
+                  width: "100%",
+                  height: "100%",
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                }}
+              />
+            );
+          }
+          // Revealing tabs paint a skeleton until the attach-first remount
+          // lands panes onto a fresh snapshot (no stale flash).
+          if (!isTabActive && revealingTabId === tab.id) {
+            return (
+              <div
+                key={tab.id}
+                className="tab-split-wrapper"
+                style={{
+                  display: "none",
+                  width: "100%",
+                  height: "100%",
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                }}
+              >
+                <div className="session-leaf-loading terminal-loading-skeleton">
+                  <div className="terminal-loading-shimmer" />
+                  <div className="terminal-loading-content">
+                    <span className="terminal-loading-spinner" />
+                    <span className="terminal-loading-text">Restoring session...</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
           return (
             <div
               key={tab.id}

@@ -355,6 +355,16 @@ impl DaemonServer {
                     None => DaemonResponse::Error("session not found".into()),
                 }
             }
+            DaemonRequest::SetHidden { session_id, hidden } => {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => {
+                        session.set_hidden(hidden);
+                        DaemonResponse::Ok
+                    }
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
             DaemonRequest::RequestSessionFocus { session_id } => {
                 let exists = self.sessions.lock().contains_key(&session_id);
                 if !exists {

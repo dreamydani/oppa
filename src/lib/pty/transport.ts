@@ -130,6 +130,10 @@ export function ptyResetTitle(id: string): Promise<void> {
   return invoke("pty_reset_title", { id });
 }
 
+export function ptySetHidden(id: string, hidden: boolean): Promise<void> {
+  return invoke("pty_set_hidden", { id, hidden });
+}
+
 export function ptyAck(id: string, bytes: number): Promise<void> {
   // WHY dual-emit: old backends take `(id, bytes)` and ignore the unknown
   // `chars` key, while a new backend prefers `bytes` with `chars` fallback —

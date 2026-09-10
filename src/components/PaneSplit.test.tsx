@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, act } from "@testing-library/react";
+import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { useTerminalStore } from "../store/terminalStore";
 import { PaneSplit } from "./PaneSplit";
 import * as transport from "../lib/pty/transport";
+import {
+  resetTabParkingForTests,
+  noteTabActivated,
+  noteTabHidden,
+} from "../lib/terminal/tabParking";
 
 // The recursive structure is the unit under test; TerminalPane's xterm
 // wiring is covered by its own suite. Mocking it here keeps the layout
@@ -16,6 +21,7 @@ vi.mock("./TerminalPane", () => ({
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
   ptyKill: vi.fn().mockResolvedValue(undefined),
+  ptySetHidden: vi.fn().mockResolvedValue(undefined),
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn(),
@@ -528,5 +534,69 @@ describe("PaneSplit", () => {
 
     usePaneDragStore.getState().endDrag();
     expect(usePaneDragStore.getState().isDragging).toBe(false);
+  });
+
+  it("unmounts parked tabs so hidden xterms free their renderers", async () => {
+    resetTabParkingForTests();
+    const ids = Array.from({ length: 8 }, (_, i) => `t${i}`);
+    // Seven overdue hidden tabs: the hot cap keeps six warm, so the stalest
+    // stays parked across the maintenance tick below.
+    const now = Date.now();
+    ids.forEach((id) => noteTabActivated(id));
+    ids
+      .filter((id) => id !== "t7")
+      .forEach((id) => noteTabHidden(id, now - 60_000));
+    useTerminalStore.setState({
+      tabs: ids.map((id) => ({ id, layout: { type: "leaf", id: `s-${id}` }, focusedPath: [] })),
+      activeTabId: "t7",
+      layout: { type: "leaf", id: "s-t7" },
+      sessions: Object.fromEntries(
+        ids.map((id) => [
+          `s-${id}`,
+          { id: `s-${id}`, title: `s-${id}`, status: "running", cols: 80, rows: 24 },
+        ]),
+      ),
+      parkedTabIds: ["t0"],
+    });
+
+    const { container } = render(<PaneSplit />);
+    // The parked tab keeps its wrapper (layout stability) but mounts no pane.
+    expect(container.querySelectorAll(".tab-split-wrapper")).toHaveLength(8);
+    expect(container.querySelectorAll(".terminal-pane")).toHaveLength(7);
+    expect(container.querySelector('[data-session-id="s-t0"]')).toBeNull();
+    expect(container.querySelector('[data-session-id="s-t7"]')).not.toBeNull();
+    // The maintenance tick recomputes parking without unparking the stale tab.
+    await waitFor(() =>
+      expect(useTerminalStore.getState().parkedTabIds).toContain("t0"),
+    );
+  });
+
+  it("shows a restoring skeleton while a parked tab reveals", async () => {
+    resetTabParkingForTests();
+    setSessions(["s1", "s2"]);
+    useTerminalStore.setState({
+      tabs: [
+        { id: "tab-1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+        { id: "tab-2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+      ],
+      activeTabId: "tab-1",
+      layout: { type: "leaf", id: "s1" },
+      parkedTabIds: ["tab-2"],
+    });
+    ptySpawnMock.mockResolvedValue({
+      id: "s2",
+      is_new: false,
+      snapshot: "fresh-snap",
+      pid: 1,
+      cols: 80,
+      rows: 24,
+    });
+    // selectTab starts the reveal synchronously (skeleton first); the attach
+    // completes async and then mounts panes onto the fresh snapshot.
+    useTerminalStore.getState().selectTab("tab-2");
+    const { container } = render(<PaneSplit />);
+    expect(container.textContent).toContain("Restoring session...");
+    expect(container.querySelector('[data-session-id="s2"]')).toBeNull();
+    await waitFor(() => expect(useTerminalStore.getState().activeTabId).toBe("tab-2"));
   });
 });
