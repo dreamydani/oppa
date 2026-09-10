@@ -146,6 +146,8 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       scrollback: 10000,
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
+      // Silent bell: shell \x07 never beeps (split focus races made this audible).
+      bellStyle: "none",
       // Slim VS Code-style scrollbar: xterm's DOM slider reserves this width
       // (default 14) and overlays the canvas edge; FitAddon ignores it.
       // 4px pairs with the symmetric 4px left pad in TerminalPane.css so the
@@ -781,6 +783,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     setFocusedPane(isFocused ? id : wasFocused ? null : getFocusedPane());
     writeQueueRef.current?.setPriority(getPanePriority(id));
     if (!isFocused) return;
+    // Split stores focus but leaves DOM focus behind, so the first keystroke
+    // hits the old pane; focus the new terminal here where all splits route.
+    termRef.current?.focus();
     touchGlSlot(id);
     ensureWebglRef.current?.();
     runWhenLayoutIdle(() => commitFitRef.current?.());

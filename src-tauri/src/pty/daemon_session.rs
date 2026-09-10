@@ -37,8 +37,10 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 // Bootstrap emits this once after prompt hooks install; injection waits for it
 const READY_MARKER_BYTES: &[u8] = b"\x1b]633;oppa-ready\x07";
 // Shells without our bootstrap (e.g. cmd.exe) never emit the marker — inject anyway
-const FALLBACK_INJECT_SECS: u64 = 15;
+const FALLBACK_INJECT_SECS: u64 = 2;
 const FALLBACK_INJECT_DURATION: Duration = Duration::from_secs(FALLBACK_INJECT_SECS);
+// ponytail: fixed settle, wait for OSC133 B prompt-idle if this still flakes.
+pub(crate) const READY_SETTLE_MS: u64 = 400;
 
 pub struct DaemonSession {
     pub id: String,
@@ -435,11 +437,20 @@ impl DaemonSession {
                         // Inject initial command exactly once when the ready marker arrives.
                         // Fallback timeout lives in a timer thread: the reader blocks in
                         // read() on quiet shells and would never observe the deadline.
+                        // Marker fires at bootstrap end, before PSReadLine/ConPTY
+                        // accepts input — claim the once-slot now (fallback can't
+                        // double-send) but defer bytes until the shell settles.
                         if ready_seen.load(Ordering::SeqCst)
                             && !initial_command_written.swap(true, Ordering::SeqCst)
                         {
-                            if let Some(cmd) = initial_command.as_deref() {
-                                let _ = writer.lock().write_all(format!("{cmd}\r").as_bytes());
+                            if let Some(cmd) = initial_command.clone() {
+                                let writer = Arc::clone(&writer);
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(Duration::from_millis(READY_SETTLE_MS));
+                                    let _ = writer
+                                        .lock()
+                                        .write_all(format!("{cmd}\r").as_bytes());
+                                });
                             }
                         }
                     }

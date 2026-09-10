@@ -259,6 +259,12 @@ impl DaemonServer {
             {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
+            // initial_command_written flips at marker time, bytes land after
+            // the settle delay — hold the prompt behind the same window.
+            tokio::time::sleep(Duration::from_millis(
+                super::daemon_session::READY_SETTLE_MS,
+            ))
+            .await;
             let _ = session.write(format!("{prompt}\r").as_bytes());
         });
     }

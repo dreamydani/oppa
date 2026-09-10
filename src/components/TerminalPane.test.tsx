@@ -1342,6 +1342,25 @@ describe("TerminalPane", () => {
     expect(ptyResizeMock).toHaveBeenCalledWith("abc", 115, 30);
   });
 
+  it("silences the terminal bell so misdirected input never beeps", async () => {
+    render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+
+    expect(term().options.bellStyle).toBe("none");
+  });
+
+  it("moves DOM focus into the new pane when it gains store focus (split)", async () => {
+    render(<TerminalPane id="abc" path={[1]} />);
+    await waitForSpawned();
+    expect(term().focus).not.toHaveBeenCalled();
+
+    act(() => {
+      useTerminalStore.setState({ focusedPath: [1] });
+    });
+
+    expect(term().focus).toHaveBeenCalledTimes(1);
+  });
+
   it("routes appearance-driven refits through the same pty-resize pipeline", async () => {
     vi.useFakeTimers();
     render(<TerminalPane id="abc" />);
