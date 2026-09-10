@@ -252,6 +252,12 @@ impl PtyManager {
         client.reset_title(id)
     }
 
+    /// Gate Data delivery for parked tabs; the model stays live.
+    pub fn set_hidden(&self, id: &str, hidden: bool) -> Result<(), String> {
+        let client = self.get_client()?;
+        client.set_hidden(id, hidden)
+    }
+
     /// Kill the session child process.
     pub fn kill(&self, id: &str) -> std::io::Result<()> {
         let client = self

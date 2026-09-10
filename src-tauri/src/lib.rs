@@ -105,6 +105,8 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // WHY: backend clipboard avoids the browser permission prompt (Orca parity: no Allow/Block popup).
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Process plugin (relaunch after install) is channel-independent.
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
@@ -131,6 +133,7 @@ pub fn run() {
             pty::commands::pty_kill,
             pty::commands::pty_set_title,
             pty::commands::pty_reset_title,
+            pty::commands::pty_set_hidden,
             pty::commands::pty_ack,
             pty::commands::pty_list,
             pty::commands::can_upgrade_daemon,

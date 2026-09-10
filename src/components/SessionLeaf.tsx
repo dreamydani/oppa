@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTerminalStore } from "../store/terminalStore";
 import type { Path } from "../store/terminalStore";
+import { leafIds } from "../store/slices/layoutQueries";
 import { TerminalPane } from "./TerminalPane";
 
 // A leaf in the layout tree guarantees a live session: if the leaf id has no
@@ -44,7 +45,24 @@ export function SessionLeaf({ id, path }: { id: string; path?: Path }) {
       // Only bind when this leaf is still on screen. A real unmount removes
       // the node (React also nulls the ref); StrictMode's dev-only effect
       // replay does not, so the swap survives the double-invoked mount.
-      if (!nodeRef.current?.isConnected) return;
+      if (!nodeRef.current?.isConnected) {
+        // Leaf vanished mid-spawn: a twin leaf may still claim this session
+        // (split wraps the placeholder, so two leaves share one in-flight
+        // spawn). Defer a tick so twin swaps land first, then kill only when
+        // no leaf references the session — otherwise leak a PTY per race.
+        const { killSession, forgetSession } = useTerminalStore.getState();
+        void (async () => {
+          await Promise.resolve();
+          const st = useTerminalStore.getState();
+          const referenced =
+            leafIds(st.layout).includes(realId) ||
+            st.tabs.some((t) => leafIds(t.layout).includes(realId));
+          if (referenced) return;
+          await killSession(realId).catch(() => {});
+          forgetSession(realId);
+        })();
+        return;
+      }
       // Substitute the resolved id for the placeholder wherever it still
       // occurs in the tree: a split/close during the in-flight spawn can
       // wrap the placeholder as a child (or clone it), so the swap cannot

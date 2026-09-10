@@ -153,6 +153,7 @@ impl DaemonServer {
                         &env_bindings,
                     ) {
                         Ok(session) => {
+                            session.set_reaper(self.session_reaper());
                             let pid = session.pid();
                             let session_cols = session.cols();
                             let session_rows = session.rows();
@@ -349,6 +350,16 @@ impl DaemonServer {
                             title,
                             pinned: false,
                         });
+                        DaemonResponse::Ok
+                    }
+                    None => DaemonResponse::Error("session not found".into()),
+                }
+            }
+            DaemonRequest::SetHidden { session_id, hidden } => {
+                let session = self.sessions.lock().get(&session_id).cloned();
+                match session {
+                    Some(session) => {
+                        session.set_hidden(hidden);
                         DaemonResponse::Ok
                     }
                     None => DaemonResponse::Error("session not found".into()),

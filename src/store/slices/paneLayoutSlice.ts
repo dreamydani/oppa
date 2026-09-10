@@ -23,6 +23,15 @@ import {
 } from "../../lib/layout/transport";
 import { getSavedWindowState, applyWindowState } from "../../lib/window/transport";
 import type { WindowState } from "../../lib/window/transport";
+import { ptySetHidden } from "../../lib/pty/transport";
+import {
+  planTabParking,
+  noteTabActivated,
+  noteTabHidden,
+  pruneTabTracking,
+  tabTrackingSnapshot,
+  type ParkableTab,
+} from "../../lib/terminal/tabParking";
 import { isSyntheticTitle } from "../../lib/terminal/friendlyNames";
 import type { EditorTab, EditorViewMode } from "./codeEditorSlice";
 import type { AppMode, DevicePreset } from "./browserPaneSlice";
@@ -83,10 +92,16 @@ export interface PaneLayoutSlice {
   ready: boolean;
   maximizedSessionId: string | null;
   tabFocusHistory: string[];
+  // Cold-parked tabs (xterm unmounted, PTY headless) and the tab currently
+  // revealing (attach-first remount so panes paint onto a fresh snapshot).
+  parkedTabIds: string[];
+  revealingTabId: string | null;
   createTab: (cwd?: string, worktreeId?: string, existingId?: string) => Promise<string>;
   closeTab: (tabId?: string) => Promise<void>;
   selectTab: (tabId: string) => void;
   wakeTab: (tabId: string) => Promise<void>;
+  refreshParking: () => void;
+  revealParkedTab: (tabId: string) => Promise<void>;
   renameTab: (tabId: string, title: string) => void;
   setLayout: (layout: Layout) => void;
   setRatio: (path: Path, ratio: number) => void;
@@ -136,6 +151,8 @@ export function createPaneLayoutSlice(
     ready: false,
     maximizedSessionId: null,
     tabFocusHistory: [],
+    parkedTabIds: [],
+    revealingTabId: null,
 
     createTab: async (cwd, worktreeId, existingId) => {
       const resolvedCwd = cwd ?? get().resolveDefaultCwd();
@@ -172,9 +189,6 @@ export function createPaneLayoutSlice(
       const targetTab = currentTabs.find((t) => t.id === targetId);
       if (!targetTab) return;
 
-      let sessions = get().sessions;
-      let cachedScrollbacks = get().cachedScrollbacks;
-
       if (!targetTab.isWizard) {
         const sessionIds = leafIds(targetTab.layout);
         for (const sId of sessionIds) {
@@ -184,16 +198,10 @@ export function createPaneLayoutSlice(
               await get().killSession(sId);
             }
             void deleteScrollback(sId).catch(() => {});
-            clearDirtyScrollback(sId);
-          }
-        }
-
-        sessions = { ...get().sessions };
-        cachedScrollbacks = { ...get().cachedScrollbacks };
-        for (const sId of sessionIds) {
-          if (sId) {
-            delete sessions[sId];
-            delete cachedScrollbacks[sId];
+            // WHY forget (not inline deletes): serializers pin the xterm
+            // instance and restored/working/status entries outlive the pane
+            // otherwise — one entry per closed session, forever.
+            get().forgetSession(sId);
           }
         }
       }
@@ -203,8 +211,6 @@ export function createPaneLayoutSlice(
 
       if (remainingTabs.length === 0) {
         set({
-          sessions,
-          cachedScrollbacks,
           tabs: [],
           activeTabId: "",
           layout: { type: "leaf", id: "" },
@@ -217,8 +223,6 @@ export function createPaneLayoutSlice(
           const nextIdx = Math.min(Math.max(0, targetIdx), remainingTabs.length - 1);
           const nextActiveTab = remainingTabs[nextIdx];
           set({
-            sessions,
-            cachedScrollbacks,
             tabs: remainingTabs,
             activeTabId: nextActiveTab.id,
             layout: nextActiveTab.layout,
@@ -231,8 +235,6 @@ export function createPaneLayoutSlice(
         } else {
           const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
           set({
-            sessions,
-            cachedScrollbacks,
             tabs: remainingTabs,
             layout: activeTab ? activeTab.layout : { type: "leaf", id: "" },
             focusedPath: activeTab ? activeTab.focusedPath : [],
@@ -249,6 +251,14 @@ export function createPaneLayoutSlice(
       const tab = currentTabs.find((t) => t.id === tabId);
       if (!tab) return;
 
+      // Parked tabs reveal through the attach-first flow so panes mount onto
+      // a fresh snapshot instead of flashing stale state.
+      if (state.parkedTabIds.includes(tabId)) {
+        void get().revealParkedTab(tabId);
+        return;
+      }
+      noteTabActivated(tabId);
+
       const wasSleeping = Boolean(tab.isSleeping);
       const updatedTabs = wasSleeping
         ? currentTabs.map((t) => (t.id === tabId ? { ...t, isSleeping: false } : t))
@@ -264,6 +274,113 @@ export function createPaneLayoutSlice(
 
       if (wasSleeping) {
         void get().wakeTab(tabId);
+      }
+      triggerDebouncedSaveLayout(get);
+    },
+
+    refreshParking: () => {
+      const state = get();
+      const tabs = getSyncedTabs(state).filter((t) => !t.isWizard && !t.isSleeping);
+      const activeId = state.activeTabId;
+      const now = Date.now();
+      for (const t of tabs) {
+        if (t.id === activeId || t.id === state.revealingTabId) noteTabActivated(t.id);
+        else noteTabHidden(t.id, now);
+      }
+      pruneTabTracking(new Set(tabs.map((t) => t.id)));
+      const candidates: ParkableTab[] = tabs.map((t) => {
+        const tracking = tabTrackingSnapshot(t.id);
+        const worktreeIds = [
+          ...new Set(
+            leafIds(t.layout)
+              .filter(Boolean)
+              .map((id) => state.sessions[id]?.worktreeId)
+              .filter((w): w is string => Boolean(w)),
+          ),
+        ];
+        return {
+          id: t.id,
+          isVisible: t.id === activeId || t.id === state.revealingTabId,
+          ...tracking,
+          worktreeIds,
+        };
+      });
+      const next = planTabParking(candidates, now);
+      const prev = new Set(state.parkedTabIds);
+      // A revealing tab stays parked until its attach-first remount
+      // completes; otherwise panes would mount onto stale state mid-reveal.
+      if (state.revealingTabId && prev.has(state.revealingTabId)) {
+        next.push(state.revealingTabId);
+      }
+      // Hide newly parked BEFORE unmount so the daemon drops delivery while
+      // the unmount flush still serializes the live screen.
+      for (const id of next) {
+        if (!prev.has(id)) {
+          const tab = tabs.find((t) => t.id === id);
+          const layout = tab?.layout ?? { type: "leaf", id: "" };
+          for (const leafId of leafIds(layout).filter(Boolean)) {
+            void ptySetHidden(leafId, true).catch(() => {});
+          }
+        }
+      }
+      if (next.length === prev.size && next.every((id) => prev.has(id))) return;
+      set({ parkedTabIds: next });
+    },
+
+    revealParkedTab: async (tabId) => {
+      const tab = get().tabs.find((t) => t.id === tabId);
+      if (!tab || tab.isWizard || get().revealingTabId === tabId) return;
+      set({ revealingTabId: tabId });
+      try {
+        const ids = leafIds(tab.layout).filter(Boolean);
+        await Promise.all(
+          ids.map(async (id) => {
+            const session = get().sessions[id];
+            // Sleeping/restoring/error panes belong to other flows (wakeTab,
+            // retry); exited panes cold-boot through the same attach below.
+            if (
+              !session ||
+              session.status === "sleeping" ||
+              session.status === "restoring" ||
+              session.status === "error"
+            ) {
+              return;
+            }
+            // Delivery resumes first so post-attach output is never gated;
+            // the attach itself resets the ack balance and replays the
+            // snapshot the panes mount onto.
+            try {
+              await ptySetHidden(id, false);
+            } catch {
+              // Daemon gone: the attach below decides.
+            }
+            await get().spawnSession(undefined, undefined, id);
+          }),
+        );
+      } finally {
+        const state = get();
+        const currentTabs = getSyncedTabs(state);
+        const live = currentTabs.find((t) => t.id === tabId);
+        noteTabActivated(tabId);
+        set({
+          revealingTabId: null,
+          // Drop locally: the next refresh recomputes from the active tab
+          // anyway, but the panes mount on this commit and must not read a
+          // stale parked flag for the now-active tab.
+          parkedTabIds: state.parkedTabIds.filter((id) => id !== tabId),
+          ...(live
+            ? {
+                tabs: currentTabs,
+                activeTabId: live.id,
+                layout: live.layout,
+                focusedPath: live.focusedPath,
+                tabFocusHistory: [
+                  live.id,
+                  ...state.tabFocusHistory.filter((id) => id !== live.id),
+                ],
+              }
+            : {}),
+        });
       }
       triggerDebouncedSaveLayout(get);
     },
@@ -305,11 +422,11 @@ export function createPaneLayoutSlice(
             remap[oldId] = newId;
 
             if (oldId !== newId) {
-              set((s) => {
-                const sessions = { ...s.sessions };
-                delete sessions[oldId];
-                return { sessions };
-              });
+              // A changed id means the old daemon session has no referencing
+              // leaf: kill it and forget every record, or it leaks a PTY plus
+              // serializer/scrollback/status entries per occurrence.
+              await get().killSession(oldId);
+              get().forgetSession(oldId);
             }
 
             if (savedSession?.title && savedSession.title !== newId) {
@@ -459,8 +576,9 @@ export function createPaneLayoutSlice(
     },
 
     // Agent-launch split: same cwd inheritance + focus contract as splitPane.
-    // The launch command travels WITH the spawn: the daemon injects it once
-    // the shell reports ready, so slow PowerShell startups can't eat bytes.
+    // The launch command travels WITH the spawn: the daemon holds it plus
+    // any early keystrokes until the first prompt proves the shell can take
+    // input, then flushes in order — slow shells can't eat bytes.
     splitPaneWithCommand: async (dir, path, command, title) => {
       const state = get();
       const activeTab = getActiveTab(state);
@@ -525,12 +643,8 @@ export function createPaneLayoutSlice(
       }
       if (removedId) {
         void deleteScrollback(removedId).catch(() => {});
-        clearDirtyScrollback(removedId);
+        get().forgetSession(removedId);
       }
-      const sessions = { ...get().sessions };
-      delete sessions[removedId];
-      const cachedScrollbacks = { ...get().cachedScrollbacks };
-      delete cachedScrollbacks[removedId];
       const nextLayout: Layout = next;
       const nextFocusedPath: Path = firstLeafPath(next);
       if (activeTab) {
@@ -539,16 +653,12 @@ export function createPaneLayoutSlice(
           t.id === activeId ? { ...t, layout: nextLayout, focusedPath: nextFocusedPath } : t,
         );
         set({
-          sessions,
-          cachedScrollbacks,
           tabs,
           layout: nextLayout,
           focusedPath: nextFocusedPath,
         });
       } else {
         set({
-          sessions,
-          cachedScrollbacks,
           layout: nextLayout,
           focusedPath: nextFocusedPath,
         });
@@ -1211,11 +1321,8 @@ export function createPaneLayoutSlice(
               );
               remap[oldId] = newId;
               if (oldId !== newId) {
-                set((state) => {
-                  const sessions = { ...state.sessions };
-                  delete sessions[oldId];
-                  return { sessions };
-                });
+                await get().killSession(oldId);
+                get().forgetSession(oldId);
               }
 
               if (savedSession?.title && savedSession.title !== newId) {
@@ -1360,11 +1467,8 @@ export function createPaneLayoutSlice(
               );
               remap[oldId] = newId;
               if (oldId !== newId) {
-                set((state) => {
-                  const sessions = { ...state.sessions };
-                  delete sessions[oldId];
-                  return { sessions };
-                });
+                await get().killSession(oldId);
+                get().forgetSession(oldId);
               }
 
               if (savedSession?.title && savedSession.title !== newId) {

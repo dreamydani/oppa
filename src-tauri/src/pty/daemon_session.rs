@@ -37,8 +37,10 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 // Bootstrap emits this once after prompt hooks install; injection waits for it
 const READY_MARKER_BYTES: &[u8] = b"\x1b]633;oppa-ready\x07";
 // Shells without our bootstrap (e.g. cmd.exe) never emit the marker — inject anyway
-const FALLBACK_INJECT_SECS: u64 = 15;
+const FALLBACK_INJECT_SECS: u64 = 2;
 const FALLBACK_INJECT_DURATION: Duration = Duration::from_secs(FALLBACK_INJECT_SECS);
+// Marker shells with a clobbered prompt (profile overrode it) never emit B
+const PROMPT_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct DaemonSession {
     pub id: String,
@@ -70,6 +72,13 @@ pub struct DaemonSession {
     pub ready_seen: Arc<AtomicBool>,
     pub initial_command: Option<String>,
     pub initial_command_written: Arc<AtomicBool>,
+    // First 133;B observed: prompt rendered, shell input queue live.
+    pub prompt_ready: Arc<AtomicBool>,
+    // Keystrokes arriving before the gate opens; flushed in order behind
+    // the launch command so fast typing during shell init is never eaten.
+    pub early_input: Arc<Mutex<Vec<u8>>>,
+    // Gate opened and buffer drained; write() passes through from here on.
+    pub input_flushed: Arc<AtomicBool>,
     pub cols: AtomicU16,
     pub rows: AtomicU16,
     pub pid: u32,
@@ -78,6 +87,10 @@ pub struct DaemonSession {
     pub paused: Arc<PauseGate>,
     pub subscribers: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<std::sync::Arc<DaemonEvent>>>>>,
     pub seq: Arc<AtomicU64>,
+    pub on_exit: Mutex<Option<SessionReaper>>,
+    // Visibility gate for parked tabs: the model (mirror/checkpoint) stays
+    // live while Data delivery stops. Read by the batcher emit path.
+    hidden: Arc<AtomicBool>,
     // Coalesces reader chunks into larger Data events; finish() must run
     // before Exit is emitted so the tail output always precedes it.
     pub output_drain: OutputDrain,
@@ -103,6 +116,11 @@ fn emit_event(
     let mut subs = subscribers.lock();
     subs.retain(|tx| tx.send(std::sync::Arc::clone(&shared)).is_ok());
 }
+
+// Exit hook installed by the session owner (daemon router): final
+// checkpoint + map removal. Read lazily by the watchdog so construction
+// needs no extra parameter at every spawn call site.
+pub type SessionReaper = Arc<dyn Fn(&DaemonSession) + Send + Sync>;
 
 // Split-safe ready-marker scan: `tail` carries the last marker_len-1
 // bytes across reads so a marker straddling two chunks still matches.
@@ -267,6 +285,9 @@ impl DaemonSession {
             ready_seen: Arc::new(AtomicBool::new(false)),
             initial_command: initial_command.map(str::to_string),
             initial_command_written: Arc::new(AtomicBool::new(false)),
+            prompt_ready: Arc::new(AtomicBool::new(false)),
+            early_input: Arc::new(Mutex::new(Vec::new())),
+            input_flushed: Arc::new(AtomicBool::new(false)),
             cols: AtomicU16::new(cols),
             rows: AtomicU16::new(rows),
             pid,
@@ -274,6 +295,8 @@ impl DaemonSession {
             paused: Arc::new(PauseGate::new()),
             subscribers,
             seq: Arc::new(AtomicU64::new(0)),
+            on_exit: Mutex::new(None),
+            hidden: Arc::new(AtomicBool::new(false)),
             output_drain,
             last_output_at: Arc::new(Mutex::new(Instant::now())),
             last_resize_at: Arc::new(Mutex::new(None)),
@@ -305,6 +328,7 @@ impl DaemonSession {
         let agent_from_hook = Arc::clone(&session.agent_ref_from_hook);
         let ready_seen = Arc::clone(&session.ready_seen);
         let initial_command_written = Arc::clone(&session.initial_command_written);
+        let prompt_ready = Arc::clone(&session.prompt_ready);
         let writer = Arc::clone(&session.writer);
         let pending = Arc::clone(&session.pending_bytes);
         let paused = Arc::clone(&session.paused);
@@ -321,6 +345,10 @@ impl DaemonSession {
         let subscribers_watch = Arc::clone(&session.subscribers);
         let drain_watch = session.output_drain.clone();
         let output_drain_reader = session.output_drain.clone();
+        // Lazy read: set_reaper lands microseconds after spawn returns while
+        // the first exit poll fires milliseconds later, so reading here (at
+        // exit time, not thread start) never races the owner.
+        let session_watch = Arc::clone(&session);
 
         // Output batcher: coalesces raw chunks into larger Data events and
         // owns the UTF-8 decoder so split code points resolve per batch.
@@ -328,8 +356,25 @@ impl DaemonSession {
             let id_batch = id.clone();
             let subscribers_batch = Arc::clone(&session.subscribers);
             let seq_batch = Arc::clone(&session.seq);
+            let pending_batch = Arc::clone(&session.pending_bytes);
+            let paused_batch = Arc::clone(&session.paused);
+            let hidden_batch = Arc::clone(&session.hidden);
             std::thread::spawn(move || {
                 run_batcher(batch_rx, batch_drained_tx, DEFAULT_FLUSH_INTERVAL_MS, move |data, bytes| {
+                    // Parked panes: the model stays live but delivery stops.
+                    // Instant-ack the dropped bytes so the reader never parks
+                    // behind a hidden pane; reveal replays the snapshot.
+                    if hidden_batch.load(Ordering::SeqCst) {
+                        pending_batch
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| {
+                                Some(p.saturating_sub(bytes))
+                            })
+                            .unwrap_or(0);
+                        if pending_batch.load(Ordering::SeqCst) < LOW_WATERMARK_BYTES {
+                            paused_batch.unpause();
+                        }
+                        return;
+                    }
                     let seq_num = seq_batch.fetch_add(1, Ordering::SeqCst);
                     emit_event(
                         &subscribers_batch,
@@ -346,12 +391,16 @@ impl DaemonSession {
 
         // Reader thread: reads PTY output, feeds screen mirror, scans OSC,
         // and hands raw chunks to the output batcher for coalesced emission.
-        let initial_command_reader = initial_command.clone();
-        let writer_inject = Arc::clone(&writer);
-        let written_inject = Arc::clone(&initial_command_written);
         let session_title = Arc::clone(&session);
+        let prompt_ready_reader = Arc::clone(&prompt_ready);
+        // Gatekeeper handles (cloned before the reader moves its own set).
+        let gate_ready = Arc::clone(&prompt_ready);
+        let gate_booted = Arc::clone(&ready_seen);
+        let gate_writer = Arc::clone(&writer);
+        let gate_flushed = Arc::clone(&session.input_flushed);
+        let gate_buffer = Arc::clone(&session.early_input);
+        let gate_written = Arc::clone(&initial_command_written);
         std::thread::spawn(move || {
-            let initial_command = initial_command_reader;
             let mut buf = [0u8; READ_CHUNK_SIZE];
             let mut osc_scanner = OscScanner::new();
             let mut marker_tail: Vec<u8> = Vec::new();
@@ -422,6 +471,9 @@ impl DaemonSession {
                                     // the agent exits must still be able to resume it
                                     *last_prompt_end.lock() = Some(Instant::now());
                                 }
+                                OscEvent::PromptReady => {
+                                    prompt_ready_reader.store(true, Ordering::SeqCst);
+                                }
                             }
                         }
 
@@ -431,17 +483,8 @@ impl DaemonSession {
                         // Hand raw bytes to the batcher: coalesces into
                         // larger Data events (≤32KB / ~8ms) before emission.
                         output_drain_reader.send_chunk(chunk.to_vec());
-
-                        // Inject initial command exactly once when the ready marker arrives.
-                        // Fallback timeout lives in a timer thread: the reader blocks in
-                        // read() on quiet shells and would never observe the deadline.
-                        if ready_seen.load(Ordering::SeqCst)
-                            && !initial_command_written.swap(true, Ordering::SeqCst)
-                        {
-                            if let Some(cmd) = initial_command.as_deref() {
-                                let _ = writer.lock().write_all(format!("{cmd}\r").as_bytes());
-                            }
-                        }
+                        // Input gating lives in the gatekeeper thread below:
+                        // the reader only records signals, never injects.
                     }
                     Err(_) => break,
                 }
@@ -462,6 +505,13 @@ impl DaemonSession {
                     // Tail output must precede Exit: bounded drain of the
                     // batcher before signalling the child is gone.
                     drain_watch.finish();
+                    // Reap before Exit: final checkpoint to disk for cold
+                    // restore, then drop the RAM entry so dead sessions
+                    // never accumulate. Reattach-after-exit cold-boots from
+                    // the kept file instead of a stale live entry.
+                    if let Some(reaper) = session_watch.on_exit.lock().clone() {
+                        reaper(&session_watch);
+                    }
                     emit_event(
                         &subscribers_watch,
                         DaemonEvent::Exit {
@@ -475,19 +525,45 @@ impl DaemonSession {
             }
         });
 
-        // Fallback injector: shells without our bootstrap never emit the ready marker,
-        // so inject after the deadline unless the reader already did (or command absent)
-        if let Some(cmd) = initial_command {
+        // Input gatekeeper: the shell eats bytes written before its input
+        // queue is live (ConPTY init, PSReadLine load), so hold everything —
+        // launch command plus early keystrokes — until the first 133;B proves
+        // the prompt is rendered and ReadLine is imminent, then flush in
+        // order behind the launch line. Marker-less shells (cmd.exe, unix)
+        // never emit B: flush 2s after spawn. A clobbered prompt (profile
+        // overrode our hook) still flushes via the 15s backstop.
+        // The reader blocks in read() on quiet shells, so this deadline
+        // lives here, not in the reader loop.
+        {
             std::thread::spawn(move || {
-                let deadline = Instant::now() + FALLBACK_INJECT_DURATION;
-                while Instant::now() < deadline && !written_inject.load(Ordering::SeqCst) {
+                let start = Instant::now();
+                loop {
+                    if gate_ready.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let elapsed = start.elapsed();
+                    if elapsed >= PROMPT_READY_TIMEOUT
+                        || (elapsed >= FALLBACK_INJECT_DURATION && !gate_booted.load(Ordering::SeqCst))
+                    {
+                        break;
+                    }
                     std::thread::sleep(POLL_INTERVAL);
                 }
-                if !written_inject.swap(true, Ordering::SeqCst) {
-                    let _ = writer_inject
-                        .lock()
-                        .write_all(format!("{cmd}\r").as_bytes());
+                // Drain under the buffer lock and flush while holding it:
+                // writers queue on the mutex, so post-gate bytes land after.
+                let mut buffered = gate_buffer.lock();
+                if gate_flushed.swap(true, Ordering::SeqCst) {
+                    return;
                 }
+                let mut payload = Vec::new();
+                if let Some(cmd) = initial_command.as_deref() {
+                    payload.extend_from_slice(format!("{cmd}\r").as_bytes());
+                }
+                payload.append(&mut buffered);
+                if !payload.is_empty() {
+                    let _ = gate_writer.lock().write_all(&payload);
+                }
+                gate_written.store(true, Ordering::SeqCst);
             });
         }
 
@@ -497,9 +573,17 @@ impl DaemonSession {
         title_watcher::spawn(session);
     }
 
-    /// Write input bytes to the PTY's input stream.
+    /// Write input bytes to the PTY's input stream. Bytes arriving before
+    /// the shell's input queue is live are buffered and flushed in order
+    /// behind the launch command once the input gate opens.
     pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
-        self.writer.lock().write_all(data)
+        let mut buffered = self.early_input.lock();
+        if self.input_flushed.load(Ordering::SeqCst) {
+            drop(buffered);
+            return self.writer.lock().write_all(data);
+        }
+        buffered.extend_from_slice(data);
+        Ok(())
     }
 
     /// Resize the PTY and underlying virtual terminal mirror.
@@ -544,6 +628,18 @@ impl DaemonSession {
         self.pending_bytes.store(0, Ordering::SeqCst);
         self.paused.unpause();
         Ok(())
+    }
+
+    /// Install the owner's exit hook (final checkpoint + map removal). Called
+    /// once right after spawn; the watchdog reads it lazily at exit time.
+    pub fn set_reaper(&self, reaper: SessionReaper) {
+        *self.on_exit.lock() = Some(reaper);
+    }
+
+    /// Mark the session hidden (parked tab): Data delivery stops while the
+    /// mirror and checkpoint stay live; reveal replays the snapshot.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.hidden.store(hidden, Ordering::SeqCst);
     }
 
     /// Kill the child process and its process tree.
@@ -1366,25 +1462,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_daemon_session_initial_command_ready_marker_injection() {
+    async fn test_daemon_session_initial_command_prompt_ready_injection() {
         let sh = test_sh_path();
-        let started = std::time::Instant::now();
+        // Wrapper prints 133;B at startup like a bootstrap shell's first
+        // prompt, then hands off to an interactive shell.
         let session = DaemonSession::spawn_with_args(
-            "marker-inject".into(),
+            "prompt-inject".into(),
             &sh,
-            &[],
+            &["-c".into(), "printf '\\033]133;B\\007'; exec sh".into()],
             None,
             80,
             24,
-            Some("echo marker_injected_ok"),
+            Some("echo prompt_injected_ok"),
             &[],
         )
         .expect("spawn with initial command");
-
-        // Emit the ready marker ourselves, well inside the fallback window
-        session
-            .write(b"printf '\\033]633;oppa-ready\\007'\n")
-            .expect("write ready marker");
 
         let mut rx = session.subscribe();
         let mut collected = String::new();
@@ -1394,7 +1486,7 @@ mod tests {
                 Ok(Some(event)) => match event.as_ref() {
                     DaemonEvent::Data { data, .. } => {
                     collected.push_str(&data);
-                    if collected.contains("marker_injected_ok") {
+                    if collected.contains("prompt_injected_ok") {
                         break;
                     }
                 }
@@ -1406,15 +1498,84 @@ mod tests {
         }
 
         assert!(
-            collected.contains("marker_injected_ok"),
-            "expected marker-triggered injection, got: {collected}"
+            collected.contains("prompt_injected_ok"),
+            "expected prompt-gated injection, got: {collected}"
+        );
+        // Only the 133;B scan sets this — the timed fallback never does.
+        assert!(
+            session.prompt_ready.load(Ordering::SeqCst),
+            "gate should open on 133;B, not the fallback"
+        );
+        assert!(session.initial_command_written.load(Ordering::SeqCst));
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_daemon_session_early_input_buffered_behind_launch_command() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "early-input".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            Some("echo gate_cmd_ok"),
+            &[],
+        )
+        .expect("spawn with initial command");
+
+        // Typed during shell init, before any prompt: held, never eaten.
+        session
+            .write(b"echo user_typed_ok\n")
+            .expect("buffer early input");
+
+        let mut rx = session.subscribe();
+        // Drain the hold window: the gate is shut, so the launch line
+        // must still be silent (fallback is 2s out).
+        let quiet_until = std::time::Instant::now() + Duration::from_millis(300);
+        let mut early = String::new();
+        while std::time::Instant::now() < quiet_until {
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => early.push_str(data),
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                },
+                _ => continue,
+            }
+        }
+        assert!(
+            !early.contains("gate_cmd_ok"),
+            "gate must hold startup input until the shell is ready, got: {early}"
+        );
+
+        // Gate opens via fallback; launch line first, typed bytes behind it.
+        let mut collected = early;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(event)) => match event.as_ref() {
+                    DaemonEvent::Data { data, .. } => {
+                    collected.push_str(&data);
+                    if collected.contains("gate_cmd_ok") && collected.contains("user_typed_ok") {
+                        break;
+                    }
+                }
+                    DaemonEvent::Exit { .. } => break,
+                    _ => {}
+                }
+                _ => continue,
+            }
+        }
+        assert!(
+            collected.contains("gate_cmd_ok") && collected.contains("user_typed_ok"),
+            "expected launch line plus buffered keystrokes, got: {collected}"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "injection should be marker-driven, not fallback-timed; took {:?}",
-            started.elapsed()
+            collected.find("gate_cmd_ok") < collected.find("user_typed_ok"),
+            "launch line must precede buffered input, got: {collected}"
         );
-        assert!(session.ready_seen.load(Ordering::SeqCst));
         let _ = session.kill();
     }
 
@@ -1569,6 +1730,158 @@ mod tests {
             },
             Err(_) => panic!("Kill must synchronously emit Exit before the map entry vanishes"),
         }
+    }
+
+    #[tokio::test]
+    async fn natural_exit_reaps_map_entry_and_keeps_final_snapshot() {
+        use crate::pty::snapshot::SnapshotStorage;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = DaemonServer::with_snapshot_storage(dir.path().to_path_buf());
+        let sh = test_sh_path();
+        let session_id = "reap-test";
+        let session = DaemonSession::spawn_with_args(
+            session_id.into(),
+            &sh,
+            &["-c".into(), "echo final-tail; exit 0".into()],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn exiting shell");
+        session.set_reaper(server.session_reaper());
+        server
+            .sessions
+            .lock()
+            .insert(session_id.to_string(), Arc::clone(&session));
+        // Watchdog must reap the map entry once the child exits on its own.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if !server.sessions.lock().contains_key(session_id) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "watchdog must reap the map entry after natural exit"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        // Final tail precedes Exit on disk for cold restore.
+        let snap = SnapshotStorage::new(dir.path().to_path_buf())
+            .load_snapshot(session_id)
+            .expect("load")
+            .expect("final snapshot kept");
+        assert!(
+            snap.scrollback.contains("final-tail"),
+            "final tail must precede Exit"
+        );
+    }
+
+    #[tokio::test]
+    async fn hidden_session_drops_data_delivery_but_keeps_model() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "hidden-test".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        let mut rx = session.subscribe();
+        // Drain the seed SessionWorking event.
+        let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        session.set_hidden(true);
+        session
+            .write(b"echo hidden-marker-1\n")
+            .expect("write while hidden");
+        // Model stays live: the mirror must ingest despite the delivery drop.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if session.get_screen_text().contains("hidden-marker-1") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "mirror must ingest output while hidden"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        // ...but no Data event may reach subscribers while hidden.
+        let quiet_until = Instant::now() + Duration::from_millis(800);
+        while Instant::now() < quiet_until {
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(event)) => assert!(
+                    !matches!(&*event, DaemonEvent::Data { .. }),
+                    "hidden sessions must not emit Data"
+                ),
+                _ => break,
+            }
+        }
+        // Delivery resumes on unhide; dropped bytes are covered by snapshot.
+        session.set_hidden(false);
+        session
+            .write(b"echo back-marker-2\n")
+            .expect("write after unhide");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut delivered = false;
+            if let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+            {
+                if let DaemonEvent::Data { data, .. } = &*event {
+                    if data.contains("back-marker-2") {
+                        delivered = true;
+                    }
+                }
+            }
+            if delivered {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "delivery must resume after unhide"
+            );
+        }
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn router_set_hidden_toggles_delivery_gate() {
+        use crate::pty::ipc_protocol::{DaemonRequest, DaemonResponse};
+        let server = DaemonServer::new();
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "hide-router".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell");
+        server
+            .sessions
+            .lock()
+            .insert("hide-router".to_string(), Arc::clone(&session));
+        let resp = server.handle_request(DaemonRequest::SetHidden {
+            session_id: "hide-router".into(),
+            hidden: true,
+        });
+        assert_eq!(resp, DaemonResponse::Ok);
+        assert!(session.hidden.load(Ordering::SeqCst));
+        let resp = server.handle_request(DaemonRequest::SetHidden {
+            session_id: "nope".into(),
+            hidden: true,
+        });
+        assert!(matches!(resp, DaemonResponse::Error(_)));
+        let _ = session.kill();
     }
 
     #[tokio::test]

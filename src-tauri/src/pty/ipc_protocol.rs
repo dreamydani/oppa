@@ -177,6 +177,12 @@ pub enum DaemonRequest {
     RequestSessionFocus {
         session_id: String,
     },
+    // Visibility gate for parked tabs: the model (mirror/checkpoint) stays
+    // live while Data delivery stops; reveal replays the snapshot.
+    SetHidden {
+        session_id: String,
+        hidden: bool,
+    },
     ListSessions,
     Disconnect,
     Shutdown,

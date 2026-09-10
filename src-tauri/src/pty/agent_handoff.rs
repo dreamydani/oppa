@@ -168,6 +168,7 @@ impl DaemonServer {
             &env_bindings,
         ) {
             Ok(session) => {
+                session.set_reaper(self.session_reaper());
                 if profile.prompt_delivery != PromptDelivery::Arg {
                     if let Some(prompt) = prompt {
                         Self::spawn_post_ready_prompt(&session, prompt.to_string());
@@ -259,6 +260,8 @@ impl DaemonServer {
             {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
+            // initial_command_written flips only after the gate flushed the
+            // launch line, so this prompt always lands behind it.
             let _ = session.write(format!("{prompt}\r").as_bytes());
         });
     }

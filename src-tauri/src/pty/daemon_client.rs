@@ -587,6 +587,19 @@ impl DaemonClient {
         }
     }
 
+    /// Gate Data delivery for parked tabs; the model stays live.
+    pub fn set_hidden(&self, session_id: &str, hidden: bool) -> Result<(), String> {
+        let req = DaemonRequest::SetHidden {
+            session_id: session_id.to_string(),
+            hidden,
+        };
+        match self.send_request(req)? {
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response for SetHidden: {other:?}")),
+        }
+    }
+
     /// Kill the session child process.
     pub fn kill(&self, session_id: &str) -> Result<(), String> {
         let req = DaemonRequest::Kill {

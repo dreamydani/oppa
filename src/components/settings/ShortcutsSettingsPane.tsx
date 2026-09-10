@@ -125,6 +125,36 @@ export const SHORTCUT_CATEGORIES: ShortcutCategory[] = [
     ],
   },
   {
+    id: "terminal-clipboard",
+    title: "Terminal",
+    shortcuts: [
+      {
+        id: "terminal-copy",
+        name: "Terminal Copy",
+        description: "Copy selection; plain Ctrl+C still interrupts when nothing is selected",
+        combos: [["Cmd/Ctrl", "C"], ["Cmd/Ctrl", "Shift", "C"]],
+      },
+      {
+        id: "terminal-paste",
+        name: "Terminal Paste",
+        description: "Paste clipboard; right-click pastes when nothing is selected",
+        combos: [["Cmd/Ctrl", "V"], ["Cmd/Ctrl", "Shift", "V"], ["Shift", "Insert"]],
+      },
+      {
+        id: "terminal-select-all",
+        name: "Terminal Select All",
+        description: "Select all terminal output",
+        combos: [["Cmd/Ctrl", "Shift", "A"]],
+      },
+      {
+        id: "terminal-find",
+        name: "Terminal Find",
+        description: "Search in active terminal buffer",
+        combos: [["Cmd/Ctrl", "F"]],
+      },
+    ],
+  },
+  {
     id: "settings-help",
     title: "Settings & Help",
     shortcuts: [
@@ -152,12 +182,6 @@ export const SHORTCUT_CATEGORIES: ShortcutCategory[] = [
         name: "Close Modal / Back",
         description: "Close modal, settings, or search overlay",
         combos: [["Esc"]],
-      },
-      {
-        id: "terminal-find",
-        name: "Terminal Find",
-        description: "Search in active terminal buffer",
-        combos: [["Cmd/Ctrl", "F"]],
       },
     ],
   },

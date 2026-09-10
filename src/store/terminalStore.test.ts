@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useTerminalStore, markScrollbackDirty, selectProjectTree } from "./terminalStore";
+import {
+  resetTabParkingForTests,
+  noteTabActivated,
+  noteTabHidden,
+} from "../lib/terminal/tabParking";
 import * as ptyTransport from "../lib/pty/transport";
 import * as worktreeTransport from "../lib/worktree/transport";
 import * as gitTransport from "../lib/git/transport";
@@ -13,6 +18,7 @@ import { DEFAULT_APP_SETTINGS, DEFAULT_APPEARANCE_SETTINGS } from "../lib/settin
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
   ptyKill: vi.fn(),
+  ptySetHidden: vi.fn().mockResolvedValue(undefined),
   ptyResize: vi.fn().mockResolvedValue(undefined),
   ptyAck: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
@@ -114,6 +120,7 @@ vi.mock("../lib/window/transport", () => ({
 
 const ptySpawnMock = vi.mocked(ptyTransport.ptySpawn);
 const ptyKillMock = vi.mocked(ptyTransport.ptyKill);
+const ptySetHiddenMock = vi.mocked(ptyTransport.ptySetHidden);
 const ptyWriteMock = vi.mocked(ptyTransport.ptyWrite);
 const saveLayoutMock = vi.mocked(layoutTransport.saveLayout);
 const loadLayoutMock = vi.mocked(layoutTransport.loadLayout);
@@ -200,6 +207,8 @@ describe("terminalStore", () => {
       rightSidebarWidth: 280,
       rightSidebarTab: "explorer",
       maximizedSessionId: null,
+      parkedTabIds: [],
+      revealingTabId: null,
       activeAppMode: "terminal",
       browserUrl: "",
       browserHistory: [],
@@ -2200,6 +2209,224 @@ describe("terminalStore", () => {
         expect(ptyKillMock).not.toHaveBeenCalledWith("sess-2");
         expect(deleteScrollbackMock).toHaveBeenCalledWith("sess-2");
         expect(useTerminalStore.getState().sessions["sess-2"]).toBeUndefined();
+      });
+    });
+
+    describe("session record pruning", () => {
+      const agentEntry = {
+        state: "working",
+        state_started_at_ms: 1,
+        updated_at_ms: 2,
+        origin: "hook",
+      } as const;
+
+      function seedLeakyMaps(id: string) {
+        useTerminalStore.setState({
+          sessions: { [id]: { id, title: id, status: "running", cols: 80, rows: 24 } },
+          serializers: { [id]: () => "buf" },
+          cachedScrollbacks: { [id]: "cached" },
+          restoredScrollbacks: { [id]: "restored" },
+          workingBySessionId: { [id]: true },
+          statusBySessionId: { [id]: { ...agentEntry } },
+          unreadBySessionId: { [id]: true },
+        });
+        markScrollbackDirty(id);
+      }
+
+      function expectMapsPruned(id: string) {
+        const state = useTerminalStore.getState();
+        expect(state.serializers[id]).toBeUndefined();
+        expect(state.cachedScrollbacks[id]).toBeUndefined();
+        expect(state.restoredScrollbacks[id]).toBeUndefined();
+        expect(state.workingBySessionId[id]).toBeUndefined();
+        expect(state.statusBySessionId[id]).toBeUndefined();
+        expect(state.unreadBySessionId[id]).toBeUndefined();
+      }
+
+      it("killSession prunes every per-session map but keeps the exited record", async () => {
+        seedLeakyMaps("s1");
+        await useTerminalStore.getState().killSession("s1");
+        expect(useTerminalStore.getState().sessions["s1"]?.status).toBe("exited");
+        expectMapsPruned("s1");
+      });
+
+      it("forgetSession drops the record and clears a stale maximize", () => {
+        seedLeakyMaps("s1");
+        useTerminalStore.setState({ maximizedSessionId: "s1" });
+        useTerminalStore.getState().forgetSession("s1");
+        expect(useTerminalStore.getState().sessions["s1"]).toBeUndefined();
+        expectMapsPruned("s1");
+        expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+      });
+
+      it("closeTab forgets every map for its sessions", async () => {
+        seedLeakyMaps("s2");
+        useTerminalStore.setState({
+          tabs: [
+            { id: "t1", layout: { type: "leaf", id: "s1" }, focusedPath: [] },
+            { id: "t2", layout: { type: "leaf", id: "s2" }, focusedPath: [] },
+          ],
+          activeTabId: "t1",
+          layout: { type: "leaf", id: "s1" },
+          focusedPath: [],
+          sessions: {
+            ...useTerminalStore.getState().sessions,
+            s1: { id: "s1", title: "s1", status: "running", cols: 80, rows: 24 },
+          },
+          maximizedSessionId: "s2",
+        });
+        await useTerminalStore.getState().closeTab("t2");
+        expect(useTerminalStore.getState().sessions["s2"]).toBeUndefined();
+        expectMapsPruned("s2");
+        expect(useTerminalStore.getState().sessions["s1"]).toBeDefined();
+        expect(useTerminalStore.getState().maximizedSessionId).toBeNull();
+      });
+
+      it("closePane forgets every map for the removed pane", async () => {
+        seedLeakyMaps("b");
+        const split = {
+          type: "split",
+          dir: "h",
+          ratio: 0.5,
+          a: { type: "leaf", id: "a" },
+          b: { type: "leaf", id: "b" },
+        } as const;
+        useTerminalStore.setState({
+          tabs: [{ id: "t1", layout: split, focusedPath: [1] }],
+          activeTabId: "t1",
+          layout: split,
+          focusedPath: [1],
+          sessions: {
+            ...useTerminalStore.getState().sessions,
+            a: { id: "a", title: "a", status: "running", cols: 80, rows: 24 },
+          },
+        });
+        await useTerminalStore.getState().closePane();
+        expect(useTerminalStore.getState().sessions["b"]).toBeUndefined();
+        expectMapsPruned("b");
+        expect(useTerminalStore.getState().sessions["a"]).toBeDefined();
+      });
+
+      it("wakeTab remap kills the orphaned daemon session and forgets its maps", async () => {
+        useTerminalStore.setState({
+          tabs: [{ id: "t1", layout: { type: "leaf", id: "old-9" }, focusedPath: [] }],
+          activeTabId: "t1",
+          sessions: {
+            "old-9": { id: "old-9", title: "old", status: "sleeping", cols: 80, rows: 24 },
+          },
+          serializers: { "old-9": () => "buf" },
+          cachedScrollbacks: { "old-9": "cached" },
+          restoredScrollbacks: { "old-9": "restored" },
+          workingBySessionId: { "old-9": false },
+          statusBySessionId: {},
+          unreadBySessionId: {},
+        });
+        ptySpawnMock.mockResolvedValueOnce(spawnRes("new-9"));
+        loadScrollbackMock.mockResolvedValue(null);
+        await useTerminalStore.getState().wakeTab("t1");
+        expect(ptyKillMock).toHaveBeenCalledWith("old-9");
+        expect(useTerminalStore.getState().sessions["old-9"]).toBeUndefined();
+        expectMapsPruned("old-9");
+      });
+
+      it("marks sessions launched with an initial command as agent panes", async () => {
+        ptySpawnMock.mockResolvedValue(spawnRes("ag1"));
+        await useTerminalStore.getState().spawnSession(undefined, undefined, undefined, undefined, undefined, "opencode --prompt hi");
+        expect(ptySpawnMock).toHaveBeenCalledWith(
+          expect.objectContaining({ initialCommand: "opencode --prompt hi" }),
+        );
+        expect(useTerminalStore.getState().sessions["ag1"]?.isAgent).toBe(true);
+      });
+
+      it("leaves plain shells unmarked but preserves the flag on reattach", async () => {
+        ptySpawnMock.mockResolvedValue(spawnRes("sh1"));
+        await useTerminalStore.getState().spawnSession();
+        expect(useTerminalStore.getState().sessions["sh1"]?.isAgent).toBeUndefined();
+        useTerminalStore.setState({
+          sessions: {
+            ag0: { id: "ag0", title: "ag0", status: "running", cols: 80, rows: 24, isAgent: true },
+          },
+        });
+        ptySpawnMock.mockResolvedValue({ ...spawnRes("ag0"), is_new: false });
+        await useTerminalStore.getState().spawnSession(undefined, undefined, "ag0");
+        expect(useTerminalStore.getState().sessions["ag0"]?.isAgent).toBe(true);
+      });
+    });
+
+    describe("tab parking", () => {
+      function seedTabs(ids: string[], active: string) {
+        useTerminalStore.setState({
+          tabs: ids.map((id) => ({ id, layout: { type: "leaf", id: `s-${id}` }, focusedPath: [] })),
+          activeTabId: active,
+          layout: { type: "leaf", id: `s-${active}` },
+          focusedPath: [],
+          sessions: Object.fromEntries(
+            ids.map((id) => [
+              `s-${id}`,
+              { id: `s-${id}`, title: `s-${id}`, status: "running", cols: 80, rows: 24 },
+            ]),
+          ),
+        });
+      }
+
+      it("parks tabs hidden past the delay beyond hot caps and hides their sessions", () => {
+        resetTabParkingForTests();
+        const ids = Array.from({ length: 8 }, (_, i) => `t${i}`);
+        seedTabs(ids, "t7");
+        const now = Date.now();
+        ids.forEach((id) => noteTabActivated(id));
+        ids
+          .filter((id) => id !== "t7")
+          .forEach((id) => noteTabHidden(id, now - 60_000));
+        useTerminalStore.getState().refreshParking();
+        // 7 overdue, cap keeps the 6 newest warm: only the stalest parks.
+        expect(useTerminalStore.getState().parkedTabIds).toEqual(["t0"]);
+        expect(ptySetHiddenMock).toHaveBeenCalledWith("s-t0", true);
+        expect(ptySetHiddenMock).not.toHaveBeenCalledWith("s-t7", expect.anything());
+      });
+
+      it("never parks the active tab or sleeping tabs", () => {
+        resetTabParkingForTests();
+        seedTabs(["t1", "t2"], "t1");
+        useTerminalStore.setState({
+          tabs: [
+            { id: "t1", layout: { type: "leaf", id: "s-t1" }, focusedPath: [] },
+            { id: "t2", layout: { type: "leaf", id: "s-t2" }, focusedPath: [], isSleeping: true },
+          ],
+          sessions: {
+            "s-t1": { id: "s-t1", title: "s-t1", status: "running", cols: 80, rows: 24 },
+            "s-t2": { id: "s-t2", title: "s-t2", status: "sleeping", cols: 80, rows: 24 },
+          },
+        });
+        const now = Date.now();
+        noteTabActivated("t1");
+        noteTabActivated("t2");
+        noteTabHidden("t2", now - 360_000);
+        useTerminalStore.getState().refreshParking();
+        expect(useTerminalStore.getState().parkedTabIds).toEqual([]);
+        expect(ptySetHiddenMock).not.toHaveBeenCalled();
+      });
+
+      it("selectTab on a parked tab reveals through the attach-first flow", async () => {
+        resetTabParkingForTests();
+        seedTabs(["t1", "t2"], "t1");
+        useTerminalStore.setState({ parkedTabIds: ["t2"] });
+        ptySpawnMock.mockResolvedValue({
+          id: "s-t2",
+          is_new: false,
+          snapshot: "fresh-snap",
+          pid: 1,
+          cols: 80,
+          rows: 24,
+        });
+        useTerminalStore.getState().selectTab("t2");
+        await vi.waitFor(() =>
+          expect(useTerminalStore.getState().activeTabId).toBe("t2"),
+        );
+        expect(ptySetHiddenMock).toHaveBeenCalledWith("s-t2", false);
+        expect(useTerminalStore.getState().restoredScrollbacks["s-t2"]).toBe("fresh-snap");
+        expect(useTerminalStore.getState().revealingTabId).toBeNull();
+        expect(useTerminalStore.getState().parkedTabIds).not.toContain("t2");
       });
     });
 

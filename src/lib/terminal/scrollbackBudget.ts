@@ -33,11 +33,25 @@ export interface ScrollbackSerializer {
 
 export function serializeScrollbackBounded(
   serialize: ScrollbackSerializer,
+  rows = 5000,
 ): string {
   // ~1MB / ~200 chars per row ≈ 5000 rows; serialize only that many rows
   // from the bottom of the scrollback.
-  const bounded = serialize({ scrollback: 5000 });
+  const bounded = serialize({ scrollback: rows });
   return applyCachedScrollbackBudget(bounded);
+}
+
+// Scrollback row policy: agent TUIs redraw from their own state, so they
+// keep half the history of plain shells at zero visual difference focused.
+export const AGENT_SCROLLBACK_ROWS = 5000;
+
+export function resolveSessionScrollbackRows(isAgent: boolean): number {
+  return isAgent ? AGENT_SCROLLBACK_ROWS : XTERM_SCROLLBACK_LINES;
+}
+
+// Serialize rows track the live cap: agent panes serialize half.
+export function serializeRowsForScrollback(rows: number): number {
+  return rows >= XTERM_SCROLLBACK_LINES ? 5000 : 2500;
 }
 
 // xterm's scrollback cap (Terminal option `scrollback`) evicts oldest lines

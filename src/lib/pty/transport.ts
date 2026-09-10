@@ -74,8 +74,8 @@ export type PtySpawnOptions = {
   rows?: number;
   resumeAgents?: boolean;
   worktreeId?: string;
-  // Launch command injected by the daemon once the shell reports ready
-  // (oppa-ready marker, timed fallback) — never typed blind from the GUI.
+  // Launch command flushed by the daemon once the first prompt proves the
+  // shell takes input (early keystrokes queue behind it) — never typed blind.
   initialCommand?: string;
 };
 
@@ -128,6 +128,10 @@ export function ptySetTitle(id: string, title: string): Promise<void> {
 
 export function ptyResetTitle(id: string): Promise<void> {
   return invoke("pty_reset_title", { id });
+}
+
+export function ptySetHidden(id: string, hidden: boolean): Promise<void> {
+  return invoke("pty_set_hidden", { id, hidden });
 }
 
 export function ptyAck(id: string, bytes: number): Promise<void> {

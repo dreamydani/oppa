@@ -23,6 +23,16 @@ import {
   touchGlSlot,
 } from "../lib/terminal/webglRegistry";
 import { useTerminalStore, markScrollbackDirty } from "../store/terminalStore";
+import {
+  clearTerminalSelection,
+  copyTerminalSelection,
+  isCopyOrInterruptChord,
+  isExplicitCopyChord,
+  isMacPlatform,
+  isPasteChord,
+  isSelectAllChord,
+  pasteTerminalClipboard,
+} from "../lib/terminal/terminalClipboard";
 import { useExtensionStore } from "../store/extensionStore";
 import type { Path } from "../store/terminalStore";
 import { focus } from "../lib/pane-manager/layout";
@@ -45,7 +55,7 @@ import {
   getFocusedPane,
 } from "../lib/terminal/panePriority";
 import { createThrottledWriteQueue } from "../lib/terminal/writeQueue";
-import { serializeScrollbackBounded, maybeWriteTruncationMarker, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
+import { serializeScrollbackBounded, serializeRowsForScrollback, resolveSessionScrollbackRows, maybeWriteTruncationMarker, AGENT_SCROLLBACK_ROWS, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
 import { detectGpuTier, GpuTier } from "../lib/terminal/gpuTier";
 import { prefersReducedMotion } from "../lib/motion/reducedMotion";
 import {
@@ -131,21 +141,60 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     termRef.current?.focus();
   }, []);
 
+  // WHY: xterm's helper textarea summons the native Emoji/Undo menu; suppress it, paste instead.
+  const handleTerminalContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const term = termRef.current;
+      if (!term) return;
+      if (term.hasSelection()) {
+        void copyTerminalSelection(term).then((ok) => {
+          if (ok) clearTerminalSelection(term);
+        });
+      } else {
+        void pasteTerminalClipboard(id, term);
+      }
+    },
+    [id],
+  );
+
+  const handleTerminalAuxClick = useCallback(
+    (e: React.MouseEvent) => {
+      // WHY: Linux middle-click paste is muscle memory; reuse the clipboard path (no primary-selection API on web).
+      if (e.button !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const term = termRef.current;
+      if (!term) return;
+      void pasteTerminalClipboard(id, term);
+    },
+    [id],
+  );
+
+  const handleTerminalMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1) e.preventDefault();
+  }, []);
+
   useEffect(() => {
     if (!status || status !== "running") return;
 
     idRef.current = id;
     const currentAppearance = appearanceRef.current;
     const currentTheme = getTerminalTheme(currentAppearance.themeName);
+    // Agent-launched panes run fullscreen TUIs that redraw from their own
+    // state: half the retained history at zero visual difference focused.
+    const isAgentPane = Boolean(useTerminalStore.getState().sessions[id]?.isAgent);
     const term = new Terminal({
       cursorBlink: currentAppearance.cursorBlink,
       cursorStyle: currentAppearance.cursorStyle,
       fontSize: currentAppearance.fontSize,
       fontFamily: currentAppearance.fontFamily,
       lineHeight: currentAppearance.lineHeight,
-      scrollback: 10000,
+      scrollback: resolveSessionScrollbackRows(isAgentPane),
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
+      // WHY: xterm v6 bell is event-only with no audible default, so \x07 stays silent unwired.
       // Slim VS Code-style scrollbar: xterm's DOM slider reserves this width
       // (default 14) and overlays the canvas edge; FitAddon ignores it.
       // 4px pairs with the symmetric 4px left pad in TerminalPane.css so the
@@ -172,7 +221,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     term.loadAddon(serialize);
     searchAddonRef.current = search;
 
-    registerSerializer(id, () => serializeScrollbackBounded(() => serialize.serialize()));
+    // Serialize rows track the live cap at call time: agent/alt-screen panes
+    // persist half. Options must reach the addon itself — an arg-less wrapper
+    // would silently serialize the unbounded buffer. The serialize addon
+    // covers the normal buffer only, so alt-screen pixels never pollute
+    // history either way.
+    registerSerializer(id, () => serializeScrollbackBounded((opts) => serialize.serialize(opts), serializeRowsForScrollback(term.options.scrollback ?? XTERM_SCROLLBACK_LINES)));
 
     term.open(containerRef.current!);
 
@@ -432,7 +486,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       unsubs.push(() => clearTimeout(settleTimer));
     }
 
-    // Attach keyboard shortcut for Ctrl+F / Cmd+F and Escape
+    // Orca-parity clipboard chords: plain Ctrl+V pastes, Ctrl+C copies only with a selection.
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
@@ -442,6 +496,35 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       if (event.key === "Escape" && isSearchOpenRef.current) {
         event.preventDefault();
         closeSearch();
+        return false;
+      }
+      const isMac = isMacPlatform();
+      if (isSelectAllChord(event, isMac)) {
+        event.preventDefault();
+        term.selectAll();
+        term.focus();
+        return false;
+      }
+      if (isPasteChord(event, isMac)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void pasteTerminalClipboard(idRef.current, term);
+        return false;
+      }
+      if (isExplicitCopyChord(event, isMac)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (term.hasSelection()) {
+          void copyTerminalSelection(term).then((ok) => {
+            if (ok) clearTerminalSelection(term);
+          });
+        }
+        return false;
+      }
+      if (isCopyOrInterruptChord(event, isMac) && term.hasSelection()) {
+        event.preventDefault();
+        event.stopPropagation();
+        void copyTerminalSelection(term);
         return false;
       }
       return true;
@@ -499,9 +582,10 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     });
 
     const flushScrollback = () => {
-      const buffer = serializeScrollbackBounded(() =>
-        serializeAddonRef.current?.serialize() ?? "",
-      );
+      const rows = serializeRowsForScrollback(termRef.current?.options.scrollback ?? XTERM_SCROLLBACK_LINES);
+      const buffer = serializeScrollbackBounded((opts) =>
+        serializeAddonRef.current?.serialize(opts) ?? "",
+      rows);
       if (buffer) {
         useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
         void saveScrollback(idRef.current, buffer).catch(() => {});
@@ -549,6 +633,16 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         // metric churn until output goes quiet.
         if (p.data.length > 1024) noteOutputBurst();
         markScrollbackDirty(id);
+        // Alt-screen lean mode: fullscreen TUIs (agents, editors) redraw from
+        // their own state, so halve retained history while one is active and
+        // restore the full cap on return. Agent-launched panes stay lean
+        // always; the option only bounds retention, never pixels or input.
+        const fullRows = resolveSessionScrollbackRows(isAgentPane);
+        if (!isAgentPane) {
+          const altActive = term.buffer.active.type === "alternate";
+          const wantRows = altActive ? AGENT_SCROLLBACK_ROWS : fullRows;
+          if (term.options.scrollback !== wantRows) term.options.scrollback = wantRows;
+        }
         // Once the buffer reaches the scrollback plateau (rows + cap), xterm
         // has started evicting the oldest lines — write a one-time marker so
         // that silent history drop is visible to the user.
@@ -558,7 +652,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
               bufferLength: term.buffer.active.length,
               write: (data) => writeQueue.push(data),
             },
-            XTERM_SCROLLBACK_LINES + term.rows,
+            (term.options.scrollback ?? XTERM_SCROLLBACK_LINES) + term.rows,
             truncationMarked,
           );
         }
@@ -781,6 +875,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     setFocusedPane(isFocused ? id : wasFocused ? null : getFocusedPane());
     writeQueueRef.current?.setPriority(getPanePriority(id));
     if (!isFocused) return;
+    // Split stores focus but leaves DOM focus behind, so the first keystroke
+    // hits the old pane; focus the new terminal here where all splits route.
+    termRef.current?.focus();
     touchGlSlot(id);
     ensureWebglRef.current?.();
     runWhenLayoutIdle(() => commitFitRef.current?.());
@@ -877,6 +974,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       <div
         ref={containerRef}
         className={`terminal-pane${appearance.dimInactivePanes && !isFocused ? " dimmed" : ""}`}
+        onContextMenu={handleTerminalContextMenu}
+        onAuxClick={handleTerminalAuxClick}
+        onMouseDown={handleTerminalMouseDown}
       />
     </div>
   );

@@ -75,6 +75,9 @@ export interface SessionInfo {
   isRestored?: boolean;
   // How the cold-restored session's work was brought back, when it was
   resumeKind?: "agent-resume" | "command-relaunch";
+  // Agent-launched pane (initial command or resume plan): keeps half the
+  // scrollback of plain shells, since TUIs redraw from their own state.
+  isAgent?: boolean;
 }
 
 export type TerminalSession = SessionInfo;
@@ -98,6 +101,9 @@ export interface SessionSlice {
     initialCommand?: string,
   ) => Promise<string>;
   killSession: (id: string) => Promise<void>;
+  // Drop every store record for a session with no referencing leaf (spawn
+  // orphans, id remaps). The daemon session must already be dead/killed.
+  forgetSession: (id: string) => void;
   resizeSession: (id: string, cols: number, rows: number) => void;
   ackSession: (id: string, bytes: number) => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
@@ -208,6 +214,10 @@ export function createSessionsSlice(
         set((state) => {
           const existingSession = state.sessions[id];
           const daemonTitle = typeof res !== "string" ? (res.title ?? null) : null;
+          // Agent-launched panes (plus-menu commands, handoffs, resumes) run
+          // fullscreen TUIs: mark them once so the renderer keeps half the
+          // scrollback. Reattaches inherit the flag from the stored record.
+          const isAgentPane = Boolean(initialCommand) || resumeKind !== undefined;
           const usable = (t: string | null | undefined): t is string =>
             !!t && !isSyntheticTitle(t, id);
           // WHY birth chain: kept user titles win, daemon seeds cover live
@@ -236,6 +246,7 @@ export function createSessionsSlice(
                 ...(worktreeId || existingSession?.worktreeId
                   ? { worktreeId: worktreeId ?? existingSession?.worktreeId }
                   : {}),
+                ...(existingSession?.isAgent || isAgentPane ? { isAgent: true } : {}),
               },
             },
             workingBySessionId: { ...state.workingBySessionId, [id]: working },
@@ -277,16 +288,73 @@ export function createSessionsSlice(
       set((state) => {
         const session = state.sessions[id];
         if (!session) return state;
-        // A killed session's cached scrollback must not stay resident — the
-        // closeTab/closePane paths prune it, but a bare kill left it behind.
+        // A killed session's rendered output must not stay resident: drop the
+        // cached/restored strings, the serializer pinning the xterm instance,
+        // and the status/activity entries. The exited record itself stays so
+        // open panes render their tail and reloads cold-boot from disk.
+        const serializers = { ...state.serializers };
         const cachedScrollbacks = { ...state.cachedScrollbacks };
+        const restoredScrollbacks = { ...state.restoredScrollbacks };
+        const workingBySessionId = { ...state.workingBySessionId };
+        const statusBySessionId = { ...state.statusBySessionId };
+        const unreadBySessionId = { ...state.unreadBySessionId };
+        delete serializers[id];
         delete cachedScrollbacks[id];
+        delete restoredScrollbacks[id];
+        delete workingBySessionId[id];
+        delete statusBySessionId[id];
+        delete unreadBySessionId[id];
         return {
           sessions: {
             ...state.sessions,
             [id]: { ...session, status: "exited" },
           },
+          serializers,
           cachedScrollbacks,
+          restoredScrollbacks,
+          workingBySessionId,
+          statusBySessionId,
+          unreadBySessionId,
+        };
+      });
+    },
+
+    forgetSession: (id) => {
+      clearDirtyScrollback(id);
+      set((state) => {
+        if (
+          !state.sessions[id] &&
+          !state.serializers[id] &&
+          !state.cachedScrollbacks[id] &&
+          !state.restoredScrollbacks[id]
+        ) {
+          return state;
+        }
+        const sessions = { ...state.sessions };
+        const serializers = { ...state.serializers };
+        const cachedScrollbacks = { ...state.cachedScrollbacks };
+        const restoredScrollbacks = { ...state.restoredScrollbacks };
+        const workingBySessionId = { ...state.workingBySessionId };
+        const statusBySessionId = { ...state.statusBySessionId };
+        const unreadBySessionId = { ...state.unreadBySessionId };
+        delete sessions[id];
+        delete serializers[id];
+        delete cachedScrollbacks[id];
+        delete restoredScrollbacks[id];
+        delete workingBySessionId[id];
+        delete statusBySessionId[id];
+        delete unreadBySessionId[id];
+        return {
+          sessions,
+          serializers,
+          cachedScrollbacks,
+          restoredScrollbacks,
+          workingBySessionId,
+          statusBySessionId,
+          unreadBySessionId,
+          // A maximized dead pane must not persist into layout.json and
+          // resurrect maximizing a nonexistent id after reload.
+          ...(state.maximizedSessionId === id ? { maximizedSessionId: null } : {}),
         };
       });
     },

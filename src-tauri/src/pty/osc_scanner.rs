@@ -5,6 +5,9 @@ pub enum OscEvent {
     Cwd(String),
     CommandStart(String),
     CommandEnd,
+    // First interactive prompt rendered: the shell's ReadLine is imminent,
+    // so bytes written from here on are queued, never eaten by init.
+    PromptReady,
 }
 
 pub struct OscScanner {
@@ -92,7 +95,8 @@ fn parse_osc_payload(payload: &[u8]) -> Option<OscEvent> {
     }
 }
 
-// Final-term markers: C starts a command (cmdline optional), D ends it; A/B are prompt markers we don't track.
+// Final-term markers: C starts a command (cmdline optional), D ends it,
+// B ends the prompt (input imminent); A opens the prompt, untracked.
 fn parse_shell_integration_payload(rest: &str) -> Option<OscEvent> {
     if rest == "C" {
         return Some(OscEvent::CommandStart(String::new()));
@@ -102,6 +106,9 @@ fn parse_shell_integration_payload(rest: &str) -> Option<OscEvent> {
     }
     if rest == "D" || rest.starts_with("D;") {
         return Some(OscEvent::CommandEnd);
+    }
+    if rest == "B" {
+        return Some(OscEvent::PromptReady);
     }
     None
 }
@@ -290,10 +297,13 @@ mod tests {
     }
 
     #[test]
-    fn test_osc_scanner_prompt_markers_a_and_b_produce_no_events() {
+    fn test_osc_scanner_prompt_marker_b_signals_ready() {
         let mut scanner = OscScanner::new();
         assert_eq!(scanner.scan(b"\x1b]133;A\x07"), Vec::<OscEvent>::new());
-        assert_eq!(scanner.scan(b"\x1b]133;B\x07"), Vec::<OscEvent>::new());
+        assert_eq!(
+            scanner.scan(b"\x1b]133;B\x07"),
+            vec![OscEvent::PromptReady]
+        );
     }
 
     #[test]
