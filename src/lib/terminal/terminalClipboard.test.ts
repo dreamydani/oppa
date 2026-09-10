@@ -15,6 +15,13 @@ vi.mock("../pty/transport", () => ({
   ptyWrite: vi.fn().mockResolvedValue(undefined),
 }));
 
+const backendState = vi.hoisted(() => ({
+  readText: vi.fn(),
+  writeText: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => backendState);
+
 const ptyWriteMock = vi.mocked(transport.ptyWrite);
 
 const key = (
@@ -91,10 +98,41 @@ describe("terminalClipboard chords", () => {
 describe("terminalClipboard io", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // WHY: default = vite-dev browser (no backend) so fallback paths stay covered.
+    backendState.readText.mockRejectedValue(new Error("not in tauri"));
+    backendState.writeText.mockRejectedValue(new Error("not in tauri"));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("prefers the backend clipboard so the stable app never prompts", async () => {
+    backendState.readText.mockResolvedValue("from-backend");
+    const browserRead = vi.fn();
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { readText: browserRead },
+    });
+    const term = { modes: {}, focus: vi.fn() };
+    expect(await pasteTerminalClipboard("s1", term)).toBe(true);
+    expect(ptyWriteMock).toHaveBeenCalledWith("s1", "from-backend");
+    expect(browserRead).not.toHaveBeenCalled();
+  });
+
+  it("writes through the backend without touching the browser clipboard", async () => {
+    backendState.writeText.mockResolvedValue(undefined);
+    const browserWrite = vi.fn();
+    vi.stubGlobal("navigator", {
+      platform: "",
+      userAgent: "test",
+      clipboard: { writeText: browserWrite },
+    });
+    const term = { getSelection: vi.fn().mockReturnValue("hello"), focus: vi.fn() };
+    expect(await copyTerminalSelection(term)).toBe(true);
+    expect(backendState.writeText).toHaveBeenCalledWith("hello");
+    expect(browserWrite).not.toHaveBeenCalled();
   });
 
   it("copies the selection and refocuses the terminal", async () => {

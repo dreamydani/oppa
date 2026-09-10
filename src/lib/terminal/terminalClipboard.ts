@@ -1,4 +1,8 @@
 import { ptyWrite } from "../pty/transport";
+import {
+  readText as readBackendClipboard,
+  writeText as writeBackendClipboard,
+} from "@tauri-apps/plugin-clipboard-manager";
 
 // WHY: xterm sends Ctrl+C/V to the PTY by default; Orca parity needs clipboard to own these chords.
 export interface ClipboardKey {
@@ -71,24 +75,42 @@ export function wrapBracketedPaste(term: PasteTarget, text: string): string {
     : text;
 }
 
+// WHY: backend clipboard never triggers the browser Allow/Block prompt; navigator is vite-dev fallback only.
+async function readClipboard(): Promise<string | null> {
+  try {
+    return await readBackendClipboard();
+  } catch {
+    try {
+      return await navigator.clipboard.readText();
+    } catch {
+      return null;
+    }
+  }
+}
+
 async function writeText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeBackendClipboard(text);
     return true;
   } catch {
-    // WHY: clipboard API can reject without focus/permission; execCommand covers Tauri denials.
     try {
-      const area = document.createElement("textarea");
-      area.value = text;
-      area.style.position = "fixed";
-      area.style.opacity = "0";
-      document.body.appendChild(area);
-      area.select();
-      const ok = document.execCommand("copy");
-      area.remove();
-      return ok;
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch {
-      return false;
+      // WHY: clipboard API can reject without focus/permission; execCommand covers the last mile.
+      try {
+        const area = document.createElement("textarea");
+        area.value = text;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        const ok = document.execCommand("copy");
+        area.remove();
+        return ok;
+      } catch {
+        return false;
+      }
     }
   }
 }
@@ -115,12 +137,7 @@ export async function pasteTerminalClipboard(
   sessionId: string,
   term: PasteTarget,
 ): Promise<boolean> {
-  let text: string;
-  try {
-    text = await navigator.clipboard.readText();
-  } catch {
-    return false;
-  }
+  const text = await readClipboard();
   if (!text) return false;
   // WHY: bracketed mode lets shells paste multiline safely instead of executing line by line.
   await ptyWrite(sessionId, wrapBracketedPaste(term, text));

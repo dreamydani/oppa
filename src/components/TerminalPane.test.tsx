@@ -188,6 +188,12 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
+// WHY: tests run in a plain browser (no Tauri backend) so the clipboard falls back to navigator stubs.
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  readText: vi.fn().mockRejectedValue(new Error("not in tauri")),
+  writeText: vi.fn().mockRejectedValue(new Error("not in tauri")),
+}));
+
 vi.mock("../lib/pty/transport", () => ({
   ptySpawn: vi.fn(),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
