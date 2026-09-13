@@ -3339,6 +3339,30 @@ describe("terminalStore", () => {
       expect(useTerminalStore.getState().detectedPorts).toEqual([]);
     });
 
+    it("caps browser history, dropping oldest entries", () => {
+      const { navigateBrowser } = useTerminalStore.getState();
+      navigateBrowser("");
+      for (let i = 0; i < 60; i++) navigateBrowser(`https://example.com/${i}`);
+      const s = useTerminalStore.getState();
+      expect(s.browserHistory.length).toBe(50);
+      expect(s.browserHistory[0]).toBe("https://example.com/10");
+      expect(s.browserUrl).toBe("https://example.com/59");
+      expect(s.historyIndex).toBe(49);
+      navigateBrowser("");
+    });
+
+    it("caps detected ports, evicting oldest entries", () => {
+      const { addDetectedPort, clearDetectedPorts } = useTerminalStore.getState();
+      clearDetectedPorts();
+      for (let p = 1000; p < 1040; p++) {
+        addDetectedPort({ port: p, url: `http://localhost:${p}` });
+      }
+      const ports = useTerminalStore.getState().detectedPorts;
+      expect(ports.length).toBe(32);
+      expect(ports[0].port).toBe(1008);
+      clearDetectedPorts();
+    });
+
     it("scans output text and auto-registers localhost ports", () => {
       const { scanOutputForPorts } = useTerminalStore.getState();
       scanOutputForPorts("  VITE v5.4.1  ready in 240 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: http://192.168.1.5:5173/\n");
