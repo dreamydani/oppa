@@ -9,6 +9,7 @@ use crate::pty::ipc_protocol::{
     DaemonEvent, DaemonResponse,
 };
 use crate::pty::snapshot::SessionSnapshot;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -215,9 +216,16 @@ impl DaemonServer {
         }
     }
 
-    // Raw commands become an ephemeral generic profile; leaking keeps &'static
-    // fields without growing the static catalog.
+    // Raw commands become an ephemeral generic profile; one cached entry per
+    // distinct command line, so fleet fan-out stops leaking a profile per slot.
     pub(crate) fn generic_profile(command_line: &str) -> &'static AgentProfile {
+        static CACHE: std::sync::OnceLock<
+            parking_lot::Mutex<HashMap<String, &'static AgentProfile>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| parking_lot::Mutex::new(HashMap::new()));
+        if let Some(hit) = cache.lock().get(command_line).copied() {
+            return hit;
+        }
         let mut parts = command_line.split_whitespace();
         let program = parts.next().unwrap_or_default();
         let args: &'static [&'static str] = Box::leak(
@@ -226,7 +234,7 @@ impl DaemonServer {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         );
-        Box::leak(Box::new(AgentProfile {
+        let profile: &'static AgentProfile = Box::leak(Box::new(AgentProfile {
             id: "generic",
             display_name: "Custom command",
             command: Box::leak(program.to_string().into_boxed_str()),
@@ -236,7 +244,9 @@ impl DaemonServer {
             prompt_arg: None,
             prompt_argv_separator: None,
             trust_preapproval_args: &[],
-        }))
+        }));
+        cache.lock().insert(command_line.to_string(), profile);
+        profile
     }
 
     pub(crate) fn ensure_executable(profile: &AgentProfile) -> Result<(), String> {
@@ -264,6 +274,23 @@ impl DaemonServer {
             // launch line, so this prompt always lands behind it.
             let _ = session.write(format!("{prompt}\r").as_bytes());
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_profile_dedupes_by_command_line() {
+        // Fleet automation fans out N slots per distinct command: without a
+        // cache every call leaks another AgentProfile + args, forever.
+        let a = DaemonServer::generic_profile("mytool --fast");
+        let b = DaemonServer::generic_profile("mytool --fast");
+        assert!(std::ptr::eq(a, b), "same command must share one profile");
+        let c = DaemonServer::generic_profile("other --fast");
+        assert!(!std::ptr::eq(a, c), "distinct commands stay distinct");
+        assert_eq!(a.command, "mytool");
     }
 }
 

@@ -158,6 +158,87 @@
   height: 100%;
 }
 
+/* VSCode-style explorer header: workspace name + New File/Folder actions */
+.explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  flex-shrink: 0;
+}
+
+.explorer-header-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.explorer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-out);
+}
+
+.file-explorer:hover .explorer-header-actions,
+.explorer-header:focus-within .explorer-header-actions {
+  opacity: 1;
+}
+
+.explorer-header-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.explorer-header-btn:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* Git gutter: letter badge + folder dirty dot + filename tints */
+.explorer-git-badge {
+  margin-left: 6px;
+}
+
+.explorer-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3fb950;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.explorer-git-m {
+  color: #e3b341;
+}
+
+.explorer-git-u,
+.explorer-git-a {
+  color: #4ade80;
+}
+
+.explorer-git-d,
+.explorer-git-c {
+  color: #f87171;
+}
+
 .file-tree {
   display: flex;
   flex-direction: column;

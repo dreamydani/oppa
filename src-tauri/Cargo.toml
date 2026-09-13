@@ -50,6 +50,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # linking is the default — the build script fetches the matching prebuilt
 # native lib automatically, so no system dependency or sidecar is needed.
 sherpa-onnx = "1.13.7"
+# Non-recursive per-directory watcher for the file explorer (root + expanded
+# dirs only; avoids node_modules-scale recursive walks).
+notify = "8"
+# Cross-platform host + process memory for the footer Resource Manager
+# (Orca parity: sysinfo covers total/available + per-PID RSS/CPU on all OSes).
+sysinfo = "0.32"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -63,6 +69,7 @@ hound = "1"
 minisign-verify = "0.2"
 
 [profile.release]
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = true

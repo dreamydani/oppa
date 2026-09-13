@@ -1376,13 +1376,12 @@ describe("terminalStore", () => {
           rightSidebarTab: "git",
           activeAppMode: "editor",
           maximizedSessionId: "sess-1",
+          // WHY paths-only: full file text stays out of layout.json so large
+          // files don't bloat it; reopen re-reads from disk.
           editorTabs: [
             {
               path: "/path/file.ts",
               name: "file.ts",
-              content: "console.log('hi')",
-              originalContent: "console.log('hi')",
-              isDirty: false,
               language: "typescript",
               isMarkdown: false,
             },
@@ -2428,6 +2427,30 @@ describe("terminalStore", () => {
         expect(useTerminalStore.getState().revealingTabId).toBeNull();
         expect(useTerminalStore.getState().parkedTabIds).not.toContain("t2");
       });
+
+      it("reveal stages the disk scrollback so the viewport snapshot cannot clobber history", async () => {
+        resetTabParkingForTests();
+        seedTabs(["t1", "t2"], "t1");
+        useTerminalStore.setState({ parkedTabIds: ["t2"] });
+        loadScrollbackMock.mockResolvedValue("disk-history-buffer");
+        ptySpawnMock.mockResolvedValue({
+          id: "s-t2",
+          is_new: false,
+          snapshot: "fresh-snap",
+          pid: 1,
+          cols: 80,
+          rows: 24,
+        });
+        useTerminalStore.getState().selectTab("t2");
+        await vi.waitFor(() =>
+          expect(useTerminalStore.getState().activeTabId).toBe("t2"),
+        );
+        expect(ptySetHiddenMock).toHaveBeenCalledWith("s-t2", false);
+        expect(loadScrollbackMock).toHaveBeenCalledWith("s-t2");
+        expect(useTerminalStore.getState().restoredScrollbacks["s-t2"]).toBe(
+          "disk-history-buffer",
+        );
+      });
     });
 
     describe("split isolation across tabs", () => {
@@ -3314,6 +3337,30 @@ describe("terminalStore", () => {
 
       clearDetectedPorts();
       expect(useTerminalStore.getState().detectedPorts).toEqual([]);
+    });
+
+    it("caps browser history, dropping oldest entries", () => {
+      const { navigateBrowser } = useTerminalStore.getState();
+      navigateBrowser("");
+      for (let i = 0; i < 60; i++) navigateBrowser(`https://example.com/${i}`);
+      const s = useTerminalStore.getState();
+      expect(s.browserHistory.length).toBe(50);
+      expect(s.browserHistory[0]).toBe("https://example.com/10");
+      expect(s.browserUrl).toBe("https://example.com/59");
+      expect(s.historyIndex).toBe(49);
+      navigateBrowser("");
+    });
+
+    it("caps detected ports, evicting oldest entries", () => {
+      const { addDetectedPort, clearDetectedPorts } = useTerminalStore.getState();
+      clearDetectedPorts();
+      for (let p = 1000; p < 1040; p++) {
+        addDetectedPort({ port: p, url: `http://localhost:${p}` });
+      }
+      const ports = useTerminalStore.getState().detectedPorts;
+      expect(ports.length).toBe(32);
+      expect(ports[0].port).toBe(1008);
+      clearDetectedPorts();
     });
 
     it("scans output text and auto-registers localhost ports", () => {

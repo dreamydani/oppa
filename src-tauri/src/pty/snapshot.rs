@@ -274,8 +274,16 @@ impl SnapshotStorage {
             if let Ok(entry) = entry {
                 let path = entry.path();
                 if path.is_file() {
+                    // WHY crash orphans: a kill -9 between create(tmp) and
+                    // rename leaves {id}.tmp.{pid}.{seq} forever (no bin/json
+                    // ext); sweep them on every cleanup pass.
+                    let is_tmp_orphan = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|n| n.contains(".tmp."));
                     let ext = path.extension().and_then(|s| s.to_str());
-                    if (ext == Some("bin") && !active_bin.contains(&path))
+                    if is_tmp_orphan
+                        || (ext == Some("bin") && !active_bin.contains(&path))
                         || (ext == Some("json") && !active_json.contains(&path))
                     {
                         let _ = fs::remove_file(&path);
@@ -411,6 +419,34 @@ mod tests {
 
         assert_eq!(storage.load("sess-active").unwrap(), Some("active".to_string()));
         assert_eq!(storage.load("sess-stale").unwrap(), None);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_cleanup_stale_removes_crash_tmp_orphans() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("oppa_snap_tmp_{}", std::process::id()));
+        let storage = SnapshotStorage::new(temp_dir.clone());
+
+        storage.save("sess-active", "active").expect("save succeeds");
+        // Simulate a crash between File::create(tmp) and rename: orphan stays.
+        fs::create_dir_all(temp_dir.join(SNAPSHOT_DIR)).expect("dir");
+        fs::write(
+            temp_dir.join(SNAPSHOT_DIR).join("sess-dead.tmp.99999.0"),
+            "partial",
+        )
+        .expect("orphan");
+
+        storage
+            .cleanup_stale(&["sess-active".to_string()])
+            .expect("cleanup succeeds");
+
+        assert_eq!(storage.load("sess-active").unwrap(), Some("active".to_string()));
+        assert!(
+            !temp_dir.join(SNAPSHOT_DIR).join("sess-dead.tmp.99999.0").exists(),
+            "crash orphan must go"
+        );
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

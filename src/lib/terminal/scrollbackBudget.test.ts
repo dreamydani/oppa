@@ -4,9 +4,12 @@ import {
   maybeWriteTruncationMarker,
   serializeScrollbackBounded,
   resolveSessionScrollbackRows,
+  resolveBackgroundScrollbackRows,
   serializeRowsForScrollback,
   AGENT_SCROLLBACK_ROWS,
   XTERM_SCROLLBACK_LINES,
+  BACKGROUND_SCROLLBACK_LINES,
+  BACKGROUND_AGENT_SCROLLBACK_LINES,
 } from "./scrollbackBudget";
 
 describe("truncateScrollbackWithMarker", () => {
@@ -60,15 +63,23 @@ describe("maybeWriteTruncationMarker", () => {
 });
 
 describe("scrollback row policy", () => {
-  it("agent panes keep half the history of plain shells", () => {
-    expect(AGENT_SCROLLBACK_ROWS).toBe(5000);
-    expect(resolveSessionScrollbackRows(true)).toBe(5000);
+  it("focused panes keep 5000 lines, agent panes half", () => {
+    expect(XTERM_SCROLLBACK_LINES).toBe(5000);
+    expect(AGENT_SCROLLBACK_ROWS).toBe(2500);
+    expect(resolveSessionScrollbackRows(true)).toBe(AGENT_SCROLLBACK_ROWS);
     expect(resolveSessionScrollbackRows(false)).toBe(XTERM_SCROLLBACK_LINES);
   });
 
+  it("background panes keep 2000 lines, agent background 1000", () => {
+    expect(BACKGROUND_SCROLLBACK_LINES).toBe(2000);
+    expect(BACKGROUND_AGENT_SCROLLBACK_LINES).toBe(1000);
+    expect(resolveBackgroundScrollbackRows(false)).toBe(2000);
+    expect(resolveBackgroundScrollbackRows(true)).toBe(1000);
+  });
+
   it("serializes half the rows for agent panes", () => {
-    expect(serializeRowsForScrollback(XTERM_SCROLLBACK_LINES)).toBe(5000);
-    expect(serializeRowsForScrollback(AGENT_SCROLLBACK_ROWS)).toBe(2500);
+    expect(serializeRowsForScrollback(XTERM_SCROLLBACK_LINES)).toBe(2500);
+    expect(serializeRowsForScrollback(AGENT_SCROLLBACK_ROWS)).toBe(1250);
   });
 
   it("passes the row bound through to the serializer", () => {

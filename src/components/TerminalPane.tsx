@@ -2,17 +2,26 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { SearchAddon } from "@xterm/addon-search";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { CanvasAddon } from "@xterm/addon-canvas";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  loadSearchAddonCtor,
+  loadSerializeAddonCtor,
+  loadWebLinksAddonCtor,
+  loadWebglAddonCtor,
+  loadCanvasAddonCtor,
+} from "../lib/terminal/lazyAddons";
+import type {
+  SearchAddon,
+  SerializeAddon,
+  WebLinksAddon,
+  WebglAddon,
+  CanvasAddon,
+} from "../lib/terminal/lazyAddons";
 import "@xterm/xterm/css/xterm.css";
 import {
   ptyWrite,
-  onPtyExit,
 } from "../lib/pty/transport";
+import { subscribePtyExit } from "../lib/pty/exitMultiplexer";
 import { saveScrollback } from "../lib/layout/transport";
 import { subscribePtyData } from "../lib/pty/dataMultiplexer";
 import { AckCoalescer } from "../lib/pty/ackCoalescer";
@@ -23,6 +32,7 @@ import {
   touchGlSlot,
 } from "../lib/terminal/webglRegistry";
 import { useTerminalStore, markScrollbackDirty } from "../store/terminalStore";
+import { leafIds } from "../store/slices/layoutQueries";
 import {
   clearTerminalSelection,
   copyTerminalSelection,
@@ -55,7 +65,7 @@ import {
   getFocusedPane,
 } from "../lib/terminal/panePriority";
 import { createThrottledWriteQueue } from "../lib/terminal/writeQueue";
-import { serializeScrollbackBounded, serializeRowsForScrollback, resolveSessionScrollbackRows, maybeWriteTruncationMarker, AGENT_SCROLLBACK_ROWS, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
+import { serializeScrollbackBounded, serializeRowsForScrollback, resolveSessionScrollbackRows, resolveBackgroundScrollbackRows, maybeWriteTruncationMarker, AGENT_SCROLLBACK_ROWS, XTERM_SCROLLBACK_LINES } from "../lib/terminal/scrollbackBudget";
 import { detectGpuTier, GpuTier } from "../lib/terminal/gpuTier";
 import { prefersReducedMotion } from "../lib/motion/reducedMotion";
 import {
@@ -81,6 +91,9 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const isSearchOpenRef = useRef(false);
   isSearchOpenRef.current = isSearchOpen;
+  // Search overlay renders only once the async addon has landed; this state
+  // turns the promise resolution into the re-render that reveals it.
+  const [isSearchAddonReady, setSearchAddonReady] = useState(false);
 
   const idRef = useRef(id);
   const parsedRef = useRef(0);
@@ -184,14 +197,18 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     const currentTheme = getTerminalTheme(currentAppearance.themeName);
     // Agent-launched panes run fullscreen TUIs that redraw from their own
     // state: half the retained history at zero visual difference focused.
+    // Background panes start lean (2000/1000); focus upgrades to full.
     const isAgentPane = Boolean(useTerminalStore.getState().sessions[id]?.isAgent);
+    const startFocused = getPanePriority(id) !== "background";
     const term = new Terminal({
       cursorBlink: currentAppearance.cursorBlink,
       cursorStyle: currentAppearance.cursorStyle,
       fontSize: currentAppearance.fontSize,
       fontFamily: currentAppearance.fontFamily,
       lineHeight: currentAppearance.lineHeight,
-      scrollback: resolveSessionScrollbackRows(isAgentPane),
+      scrollback: startFocused
+        ? resolveSessionScrollbackRows(isAgentPane)
+        : resolveBackgroundScrollbackRows(isAgentPane),
       smoothScrollDuration: 0,
       altClickMovesCursor: true,
       // WHY: xterm v6 bell is event-only with no audible default, so \x07 stays silent unwired.
@@ -208,25 +225,57 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     const fit = new FitAddon();
     fitAddonRef.current = fit;
     const unicode11 = new Unicode11Addon();
-    const search = new SearchAddon();
-    const webLinks = new WebLinksAddon(handleLinkClick);
-    const serialize = new SerializeAddon();
-    serializeAddonRef.current = serialize;
+    // Feature addons load async (chunk on demand); refs fill when they land.
+    // The serialize fallback below covers flushes that fire before it lands.
+    // Ready resets too: a remount must re-derive readiness from this mount's
+    // own load, or the resolve below is a no-op and the overlay never shows.
+    searchAddonRef.current = null;
+    serializeAddonRef.current = null;
+    setSearchAddonReady(false);
+
+    // Feature addons load async (chunk on demand); refs fill when they land.
+    // The serialize fallback below covers flushes that fire before it lands.
+    searchAddonRef.current = null;
+    serializeAddonRef.current = null;
+
+    void loadSearchAddonCtor().then((SearchAddon) => {
+      if (disposed) return;
+      const search = new SearchAddon();
+      term.loadAddon(search);
+      searchAddonRef.current = search;
+      setSearchAddonReady(true);
+    });
+    let asyncWebLinks: WebLinksAddon | null = null;
+    void loadWebLinksAddonCtor().then((WebLinksAddon) => {
+      if (disposed) return;
+      asyncWebLinks = new WebLinksAddon(handleLinkClick);
+      term.loadAddon(asyncWebLinks);
+    });
+    void loadSerializeAddonCtor().then((SerializeAddon) => {
+      if (disposed) return;
+      const serialize = new SerializeAddon();
+      term.loadAddon(serialize);
+      serializeAddonRef.current = serialize;
+    });
 
     term.loadAddon(fit);
     term.loadAddon(unicode11);
     term.unicode.activeVersion = "11";
-    term.loadAddon(search);
-    term.loadAddon(webLinks);
-    term.loadAddon(serialize);
-    searchAddonRef.current = search;
 
     // Serialize rows track the live cap at call time: agent/alt-screen panes
     // persist half. Options must reach the addon itself — an arg-less wrapper
     // would silently serialize the unbounded buffer. The serialize addon
     // covers the normal buffer only, so alt-screen pixels never pollute
-    // history either way.
-    registerSerializer(id, () => serializeScrollbackBounded((opts) => serialize.serialize(opts), serializeRowsForScrollback(term.options.scrollback ?? XTERM_SCROLLBACK_LINES)));
+    // history either way. Before the async addon lands, "" keeps the cache
+    // contract (empty = xterm owns it) instead of silently writing nothing.
+    registerSerializer(id, () =>
+      serializeAddonRef.current
+        ? serializeScrollbackBounded(
+            (opts) => serializeAddonRef.current!.serialize(opts),
+            serializeRowsForScrollback(term.options.scrollback ?? XTERM_SCROLLBACK_LINES),
+          )
+        : "",
+    );
 
     term.open(containerRef.current!);
 
@@ -374,44 +423,58 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
     // fit-rounding leftover below the last row is seamless (no two-tone gap).
     paintSessionSurface(currentTheme.background);
 
-    // GPU renderer lifecycle under a process-wide context budget: every pane
-    // loads WebGL at mount (registry downgrades LRU panes to Canvas — never
-    // DOM — when a new pane needs a slot, and focus upgrades back). Renderer
-    // swaps re-measure cell metrics, so each swap schedules a refit: the
-    // stretch plan must match the renderer that will draw it.
+    // GPU renderer lifecycle under a process-wide context budget: focused panes
+    // mount WebGL directly; background panes mount Canvas (same glyphs, no
+    // context storm) and upgrade on focus via the effect below. Registry
+    // downgrades LRU panes to Canvas — never DOM — when a slot is needed.
+    // Renderer swaps re-measure cell metrics, so each swap schedules a refit.
+    // Renderers load async now: registry callbacks are sync but the work
+    // (module load + ctor) is async, so every swap queues onto a per-pane
+    // promise chain — upgrade-before-downgrade still applies in issue order,
+    // and a late downgrade wins over an in-flight upgrade (last intent wins).
     let activeRenderer: "webgl" | "canvas" | null = null;
     let webglAddon: WebglAddon | null = null;
     let canvasAddon: CanvasAddon | null = null;
+    const getRenderer = () => activeRenderer;
     const refitAfterRendererSwap = () => {
       onNextFrame(() => {
         if (disposed) return;
         runWhenLayoutIdle(commitFit);
       });
     };
-    const downgradeToCanvas = () => {
+    // Read the live swap state through closures: TS narrowing does not see
+    // assignments from concurrent chain steps across an await boundary.
+    const downgradeToCanvas = async (): Promise<void> => {
+      const disposeWebgl = () => {
+        try {
+          webglAddon?.dispose();
+        } catch {}
+        webglAddon = null;
+      };
       if (disposed || activeRenderer !== "webgl") return;
+      disposeWebgl();
       try {
-        webglAddon?.dispose();
-      } catch {}
-      webglAddon = null;
-      try {
+        const CanvasAddon = await loadCanvasAddonCtor();
+        if (disposed || (getRenderer() as string) === "canvas") return;
         canvasAddon = new CanvasAddon();
         term.loadAddon(canvasAddon);
         activeRenderer = "canvas";
         refitAfterRendererSwap();
       } catch {}
     };
-    const ensureWebgl = (): void => {
-      if (disposed || activeRenderer === "webgl") return;
+    const ensureWebgl = async (): Promise<void> => {
+      if (disposed || (getRenderer() as string) === "webgl") return;
       const upgradedFromCanvas = activeRenderer === "canvas";
-      acquireGlSlot(id, downgradeToCanvas);
+      acquireGlSlot(id, downgradeToCanvasQueued);
       try {
+        const WebglAddon = await loadWebglAddonCtor();
+        if (disposed || (getRenderer() as string) === "webgl") return;
         const gl = new WebglAddon();
         gl.onContextLoss(() => {
           try {
             gl.dispose();
           } catch {}
-          downgradeToCanvas();
+          downgradeToCanvasQueued();
         });
         if (upgradedFromCanvas) {
           try {
@@ -426,21 +489,54 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
           refitAfterRendererSwap();
         }
       } catch {
-        // Already on Canvas (mount + focus both miss WebGL): creating another
-        // would leak the loaded one — and its later dispose would rebuild the
-        // DOM renderer off a dead linkifier (the same unmount crash).
-        if (activeRenderer === "canvas") return;
+        // GL ctor failed (no context / no-Gl test tier). Already on Canvas
+        // (mount + focus both miss WebGL): creating another would leak the
+        // loaded one — and its later dispose would rebuild the DOM renderer
+        // off a dead linkifier (the same unmount crash).
+        if (activeRenderer === "canvas" || disposed) return;
         try {
+          const CanvasAddon = await loadCanvasAddonCtor();
+          if (disposed || activeRenderer !== null) return;
           canvasAddon = new CanvasAddon();
           term.loadAddon(canvasAddon);
           activeRenderer = "canvas";
         } catch {}
       }
     };
-    ensureWebglRef.current = ensureWebgl;
-    // Mount-time load is mandatory: skipping it leaves unfocused panes on
-    // the DOM renderer (different cell metrics, worse glyphs) until focus.
-    ensureWebgl();
+    // Canvas-first for background: same glyphs as WebGL (never DOM), zero
+    // context churn; the focus effect upgrades when the pane comes forward.
+    const ensureInitialRenderer = async (): Promise<void> => {
+      if (getPanePriority(id) === "background") {
+        try {
+          const CanvasAddon = await loadCanvasAddonCtor();
+          if (disposed || activeRenderer !== null) return;
+          canvasAddon = new CanvasAddon();
+          term.loadAddon(canvasAddon);
+          activeRenderer = "canvas";
+        } catch {
+          await ensureWebgl();
+        }
+      } else {
+        await ensureWebgl();
+      }
+    };
+    // The registry callbacks (downgrade on acquire, upgrade on focus) fire
+    // synchronously, but module loads are async: queue every intent onto a
+    // per-pane chain so swaps serialize in issue order instead of racing.
+    // Failed module load = both renderer ctors failed (same chunk graph):
+    // leave the DOM fallback in place rather than thrash-retrying forever.
+    let rendererChain: Promise<void> = Promise.resolve();
+    const downgradeToCanvasQueued = () => {
+      rendererChain = rendererChain.then(() => downgradeToCanvas(), () => downgradeToCanvas());
+    };
+    const ensureWebglQueued = () => {
+      rendererChain = rendererChain.then(() => ensureWebgl(), () => ensureWebgl());
+    };
+    const ensureInitialRendererQueued = () => {
+      rendererChain = rendererChain.then(() => ensureInitialRenderer(), () => ensureInitialRenderer());
+    };
+    ensureWebglRef.current = ensureWebglQueued;
+    ensureInitialRendererQueued();
 
     if (restoredScrollback) {
       term.reset();
@@ -448,6 +544,12 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       clearRestoredScrollback(id);
     } else if (cachedScrollback) {
       term.write(cachedScrollback);
+    }
+    // WHY single owner: xterm now owns the history — drop the store duplicate
+    // so parked/background tabs don't hold 2× strings per session.
+    if (restoredScrollback || cachedScrollback) {
+      useTerminalStore.getState().cacheScrollback(id, "");
+      clearRestoredScrollback(id);
     }
 
     // Re-assert appearance + refit after replay: large writes land while
@@ -587,8 +689,20 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         serializeAddonRef.current?.serialize(opts) ?? "",
       rows);
       if (buffer) {
-        useTerminalStore.getState().cacheScrollback(idRef.current, buffer);
-        void saveScrollback(idRef.current, buffer).catch(() => {});
+        const state = useTerminalStore.getState();
+        const id = idRef.current;
+        // Parked tab flush: the pane unmounts for the whole park, so a store
+        // cache copy would sit resident (~1MB) with no xterm to re-read it —
+        // disk owns the flush and reveal loads it back on attach.
+        const parked = state.parkedTabIds.some((tabId) =>
+          state.tabs.some((t) => t.id === tabId && leafIds(t.layout).includes(id)),
+        );
+        if (parked) {
+          void saveScrollback(id, buffer).catch(() => {});
+          return;
+        }
+        state.cacheScrollback(id, buffer);
+        void saveScrollback(id, buffer).catch(() => {});
       }
     };
 
@@ -635,13 +749,19 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
         markScrollbackDirty(id);
         // Alt-screen lean mode: fullscreen TUIs (agents, editors) redraw from
         // their own state, so halve retained history while one is active and
-        // restore the full cap on return. Agent-launched panes stay lean
+        // restore the focus-tier cap on return. Agent-launched panes stay lean
         // always; the option only bounds retention, never pixels or input.
-        const fullRows = resolveSessionScrollbackRows(isAgentPane);
+        // Background panes stay at their lean tier unless focused.
+        const focusedNow = getPanePriority(id) !== "background";
+        const fullRows = focusedNow
+          ? resolveSessionScrollbackRows(isAgentPane)
+          : resolveBackgroundScrollbackRows(isAgentPane);
         if (!isAgentPane) {
           const altActive = term.buffer.active.type === "alternate";
           const wantRows = altActive ? AGENT_SCROLLBACK_ROWS : fullRows;
           if (term.options.scrollback !== wantRows) term.options.scrollback = wantRows;
+        } else if (term.options.scrollback !== fullRows) {
+          term.options.scrollback = fullRows;
         }
         // Once the buffer reaches the scrollback plateau (rows + cap), xterm
         // has started evicting the oldest lines — write a one-time marker so
@@ -660,15 +780,14 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       }),
     );
 
-    onPtyExit((p) => {
-      if (disposed) return;
-      if (p.id === idRef.current) {
+    // Routed through the shared exit multiplexer: one global listener
+    // dispatches per session id (O(1)) instead of every pane filtering exits.
+    unsubs.push(
+      subscribePtyExit(id, (p) => {
+        if (disposed) return;
         term.writeln(`\r\n[process exited: ${p.code ?? "error"}]`);
-      }
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unsubs.push(unlisten);
-    });
+      }),
+    );
 
     term.onData((data) => {
       if (useTerminalStore.getState().sessions[idRef.current]?.isRestored) {
@@ -867,13 +986,23 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
   // revalidate stretch+grid — a cheap no-op chain when healthy, a self-heal
   // when any input (renderer, geometry, font) went stale since the last fit.
   // It also drives the render-priority registry: the focused pane owns the
-  // full frame budget, background panes render at the capped rate.
+  // full frame budget, background panes render at the capped rate. Focus also
+  // upgrades the scrollback cap to full; blur leans back to background rows.
   useEffect(() => {
     // A pane losing focus clears its own registry entry only; another pane's
     // focus change owns the rest.
     const wasFocused = !isFocused && getFocusedPane() === id;
     setFocusedPane(isFocused ? id : wasFocused ? null : getFocusedPane());
     writeQueueRef.current?.setPriority(getPanePriority(id));
+    const term = termRef.current;
+    if (term) {
+      const isAgent = Boolean(useTerminalStore.getState().sessions[id]?.isAgent);
+      const wantRows = isFocused
+        ? resolveSessionScrollbackRows(isAgent)
+        : resolveBackgroundScrollbackRows(isAgent);
+      // Raising the cap is free; lowering only bounds future retention.
+      if (term.options.scrollback !== wantRows) term.options.scrollback = wantRows;
+    }
     if (!isFocused) return;
     // Split stores focus but leaves DOM focus behind, so the first keystroke
     // hits the old pane; focus the new terminal here where all splits route.
@@ -964,7 +1093,7 @@ export function TerminalPane({ id, path }: { id: string; path?: Path }) {
       style={{ position: "relative", width: "100%", height: "100%" }}
     >
       <TerminalPaneHeader id={id} path={path} onClear={handleClear} />
-      {isSearchOpen && searchAddonRef.current && (
+      {isSearchOpen && isSearchAddonReady && searchAddonRef.current && (
         <TerminalSearch
           searchAddon={searchAddonRef.current}
           onClose={closeSearch}

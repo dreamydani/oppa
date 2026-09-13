@@ -13,6 +13,12 @@ type Set = (
 export type AppMode = "terminal" | "browser" | "editor";
 export type DevicePreset = "responsive" | "iphone" | "ipad" | "desktop";
 
+// WHY caps: both arrays grew one entry per navigation/scan forever (ports up
+// to ~13MB worst-case + one StatusBar badge each); memory-only state that
+// never even hits disk, so dropping oldest is invisible.
+export const BROWSER_HISTORY_LIMIT = 50;
+export const DETECTED_PORTS_LIMIT = 32;
+
 export interface DetectedPort {
   port: number;
   url: string;
@@ -63,7 +69,7 @@ export function createBrowserPaneSlice(
       }
       set((state) => {
         const currentHistory = state.browserHistory.slice(0, state.historyIndex + 1);
-        const newHistory = [...currentHistory, trimmed];
+        const newHistory = [...currentHistory, trimmed].slice(-BROWSER_HISTORY_LIMIT);
         return {
           browserUrl: trimmed,
           browserHistory: newHistory,
@@ -119,7 +125,7 @@ export function createBrowserPaneSlice(
           updated[existingIndex] = entry;
           return { detectedPorts: updated };
         }
-        return { detectedPorts: [...state.detectedPorts, entry] };
+        return { detectedPorts: [...state.detectedPorts, entry].slice(-DETECTED_PORTS_LIMIT) };
       });
     },
 

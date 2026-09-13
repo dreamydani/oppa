@@ -17,6 +17,9 @@ vi.mock("../../lib/fs/transport", () => ({
       { name: "Notepad", command: "notepad" },
     ]),
   openWith: vi.fn().mockResolvedValue(true),
+  watchDir: vi.fn().mockResolvedValue(undefined),
+  unwatchDir: vi.fn().mockResolvedValue(undefined),
+  onFsChange: vi.fn().mockResolvedValue(() => {}),
 }));
 
 const readDirMock = vi.mocked(fsTransport.readDir);
@@ -357,5 +360,121 @@ describe("FileExplorer large-directory cap", () => {
     expect(screen.queryByText(/show \d+ more/i)).toBeNull();
     // 2 root rows + 1 child under src
     expect(container.querySelectorAll(".file-tree-item").length).toBe(3);
+  });
+});
+
+describe("FileExplorer header, auto-sync and git gutter", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+    setupStore();
+    useTerminalStore.setState({ gitStatus: null });
+    mockStaticTree();
+  });
+
+  it("renders VSCode-style header actions", async () => {
+    await renderExplorer();
+    expect(screen.getByLabelText("New File")).toBeDefined();
+    expect(screen.getByLabelText("New Folder")).toBeDefined();
+    expect(screen.getByLabelText("Refresh Explorer")).toBeDefined();
+    expect(screen.getByLabelText("Collapse All")).toBeDefined();
+  });
+
+  it("opens a root-level file input from the header New File button", async () => {
+    await renderExplorer();
+    fireEvent.click(screen.getByLabelText("New File"));
+    expect(screen.getByLabelText("New file name")).toBeDefined();
+  });
+
+  it("collapses expanded dirs on Collapse All", async () => {
+    await renderExplorer();
+    fireEvent.click(screen.getByText("src"));
+    await waitFor(() => {
+      expect(screen.getByText("main.rs")).toBeDefined();
+    });
+    fireEvent.click(screen.getByLabelText("Collapse All"));
+    await waitFor(() => {
+      expect(screen.queryByText("main.rs")).toBeNull();
+    });
+  });
+
+  it("re-reads expanded dirs on reopen so cache never goes stale", async () => {
+    let calls = 0;
+    readDirMock.mockImplementation(async (path: string) => {
+      calls += 1;
+      if (path === "/mock/workspace") {
+        return [{ name: "src", path: "/mock/workspace/src", is_dir: true, size: 0 }];
+      }
+      return [{ name: `v${calls}.txt`, path: `/mock/workspace/src/v${calls}.txt`, is_dir: false, size: 1 }];
+    });
+    await renderExplorer();
+    fireEvent.click(screen.getByText("src"));
+    await waitFor(() => {
+      expect(screen.getByText(/v\d+\.txt/)).toBeDefined();
+    });
+    const first = screen.getByText(/v\d+\.txt/).textContent;
+    fireEvent.click(screen.getByText("src"));
+    fireEvent.click(screen.getByText("src"));
+    await waitFor(() => {
+      const now = screen.getByText(/v\d+\.txt/).textContent;
+      expect(now).not.toBe(first);
+    });
+  });
+
+  it("auto-refreshes the root when an fs://change event lands", async () => {
+    const onFsChangeMock = vi.mocked(fsTransport.onFsChange);
+    let captured: ((p: { dir: string }) => void) | null = null;
+    onFsChangeMock.mockImplementation(async (cb: (p: { dir: string }) => void) => {
+      captured = cb;
+      return () => {};
+    });
+    let external = false;
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === "/mock/workspace") {
+        const base = [{ name: "src", path: "/mock/workspace/src", is_dir: true, size: 0 }];
+        return external
+          ? [...base, { name: "fresh.txt", path: "/mock/workspace/fresh.txt", is_dir: false, size: 5 }]
+          : base;
+      }
+      return [];
+    });
+    await renderExplorer();
+    expect(screen.queryByText("fresh.txt")).toBeNull();
+    external = true;
+    captured!({ dir: "/mock/workspace" });
+    await waitFor(
+      () => {
+        expect(screen.getByText("fresh.txt")).toBeDefined();
+      },
+      { timeout: 2000 }
+    );
+  });
+
+  it("shows the git M badge for modified files", async () => {
+    useTerminalStore.setState({
+      gitStatus: {
+        entries: [
+          {
+            path: "package.json",
+            index_status: "",
+            worktree_status: "M",
+            area: "unstaged",
+            old_path: null,
+          },
+        ],
+        conflict_state: "none",
+        branch: "main",
+        upstream: { has_upstream: false, ahead: 0, behind: 0, remote_branch: null },
+        did_hit_limit: false,
+        status_length: 1,
+      },
+    });
+    await renderExplorer();
+    await waitFor(() => {
+      expect(screen.getByText("M")).toBeDefined();
+    });
   });
 });

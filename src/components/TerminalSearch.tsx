@@ -22,6 +22,13 @@ export function TerminalSearch({
     inputRef.current?.select();
   }, []);
 
+  // WHY cleanup: highlights pin buffer rows; closing must clear them.
+  useEffect(() => {
+    return () => {
+      searchAddon.clearDecorations?.();
+    };
+  }, [searchAddon]);
+
   const executeSearch = useCallback(
     (direction: "next" | "prev", text: string, isCase: boolean, isRegex: boolean) => {
       if (!text) {

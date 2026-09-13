@@ -289,6 +289,15 @@ function SplitDivider({
   setRatio: (path: Path, ratio: number) => void;
   saveLayout: () => Promise<void>;
 }) {
+  // WHY ref handoff: the pointerdown closure owns endDrag; unmount mid-drag
+  // (tab close) runs this effect cleanup and removes window listeners.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -314,6 +323,7 @@ function SplitDivider({
       };
 
       const endDrag = () => {
+        dragCleanupRef.current = null;
         try {
           divider.releasePointerCapture(pointerId);
         } catch {
@@ -329,6 +339,13 @@ function SplitDivider({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("blur", endDrag);
+      // WHY ref handoff: unmount mid-drag (tab close) must remove window
+      // listeners; the effect cleanup below runs exactly then.
+      dragCleanupRef.current = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", endDrag);
+        window.removeEventListener("blur", endDrag);
+      };
     },
     [dir, path, setRatio, saveLayout],
   );

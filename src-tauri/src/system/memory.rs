@@ -1,0 +1,323 @@
+use crate::pty::manager::PtyManager;
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use tauri::State;
+
+// Orca parity: shared pages can appear in more than one subtree, so summed
+// totals may exceed host total. The UI labels the chip Σ RSS for honesty.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HostMemory {
+    pub total: u64,
+    pub available: u64,
+    pub used: u64,
+    pub percent: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppMemory {
+    pub cpu: Option<f32>,
+    pub memory: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionMemory {
+    pub session_id: String,
+    pub pid: u32,
+    pub cpu: Option<f32>,
+    pub memory: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SystemMemorySnapshot {
+    pub app: AppMemory,
+    // Detached daemon (`oppa --daemon`) owns all PTY state but is not a child
+    // of the GUI, so it was invisible until now. Null when unresolved.
+    pub daemon: AppMemory,
+    pub sessions: Vec<SessionMemory>,
+    pub host: HostMemory,
+    pub total_memory: u64,
+    pub total_cpu: f32,
+    pub collected_at_ms: i64,
+}
+
+/// Parent index for subtree walks: pid -> parent pid (None at the root).
+pub fn build_child_map(parents: &[(u32, Option<u32>)]) -> HashMap<u32, Vec<u32>> {
+    let mut map: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, parent) in parents {
+        if let Some(ppid) = parent {
+            map.entry(*ppid).or_default().push(*pid);
+        }
+        map.entry(*pid).or_default();
+    }
+    map
+}
+
+/// Sum (cpu, rss) over a PID plus all descendants. Unknown PIDs yield None.
+pub fn sum_subtree(
+    root: u32,
+    child_map: &HashMap<u32, Vec<u32>>,
+    metrics: &HashMap<u32, (f32, u64)>,
+) -> Option<(f32, u64)> {
+    if !metrics.contains_key(&root) && !child_map.contains_key(&root) {
+        return None;
+    }
+    let mut visited = HashSet::new();
+    let mut stack = vec![root];
+    let mut cpu = 0.0f32;
+    let mut mem = 0u64;
+    let mut found = false;
+    while let Some(pid) = stack.pop() {
+        if !visited.insert(pid) {
+            continue;
+        }
+        if let Some((c, m)) = metrics.get(&pid) {
+            found = true;
+            cpu += *c;
+            mem += *m;
+        }
+        if let Some(children) = child_map.get(&pid) {
+            stack.extend(children.iter().copied());
+        }
+    }
+    if found { Some((cpu, mem)) } else { None }
+}
+
+fn resolve_daemon_pid() -> Option<u32> {
+    // Discovery file written by `run_daemon`; missing/corrupt/stale degrades
+    // to None so the daemon row renders "—" instead of failing the snapshot.
+    let dir = crate::pty::snapshot::resolve_app_data_dir()?;
+    let meta = crate::pty::runtime_metadata::read_runtime_metadata(&dir)?;
+    // Never attribute our own RSS twice when the command runs inside daemon tests.
+    if meta.pid == std::process::id() {
+        return None;
+    }
+    Some(meta.pid)
+}
+
+fn collect_snapshot(
+    session_pids: Vec<(String, u32)>,
+    live_ids: Vec<String>,
+    daemon_pid: Option<u32>,
+) -> SystemMemorySnapshot {
+    // WHY minimal refresh: new_all + refresh_all scanned everything twice per
+    // 2s poll; we only need RSS/cpu/parent links, never exe/cmd/environ.
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_memory().with_cpu(),
+    );
+
+    let total = sys.total_memory();
+    let available = sys.available_memory();
+    let mut metrics: HashMap<u32, (f32, u64)> = HashMap::new();
+    let mut parents: Vec<(u32, Option<u32>)> = Vec::new();
+    for (pid, proc_) in sys.processes() {
+        let id = pid.as_u32();
+        metrics.insert(id, (proc_.cpu_usage(), proc_.memory()));
+        parents.push((id, proc_.parent().map(Pid::as_u32)));
+    }
+    let child_map = build_child_map(&parents);
+    assemble_snapshot(
+        total,
+        available,
+        &child_map,
+        &metrics,
+        session_pids,
+        live_ids,
+        daemon_pid,
+        std::process::id(),
+    )
+}
+
+// WHY pure: unit-testable total math without touching the real process table.
+fn assemble_snapshot(
+    host_total: u64,
+    host_available: u64,
+    child_map: &HashMap<u32, Vec<u32>>,
+    metrics: &HashMap<u32, (f32, u64)>,
+    session_pids: Vec<(String, u32)>,
+    live_ids: Vec<String>,
+    daemon_pid: Option<u32>,
+    self_pid: u32,
+) -> SystemMemorySnapshot {
+    let used = host_total.saturating_sub(host_available);
+    let percent = if host_total > 0 {
+        used as f32 / host_total as f32 * 100.0
+    } else {
+        0.0
+    };
+
+    let pid_by_id: HashMap<&str, u32> =
+        session_pids.iter().map(|(id, pid)| (id.as_str(), *pid)).collect();
+
+    let app_sum = sum_subtree(self_pid, child_map, metrics);
+    let app = AppMemory {
+        cpu: app_sum.map(|(c, _)| c),
+        memory: app_sum.map(|(_, m)| m),
+    };
+
+    // Detached daemon is not a child of the GUI: attribute its subtree
+    // separately so its vt100 mirrors/queues are visible. A stale PID (daemon
+    // restarted) yields None → "—", never a wrong row. Never double-count our
+    // own RSS when the command runs inside the daemon under test.
+    let daemon_sum = match daemon_pid {
+        Some(pid) if pid != self_pid => sum_subtree(pid, child_map, metrics),
+        _ => None,
+    };
+    let daemon = AppMemory {
+        cpu: daemon_sum.map(|(c, _)| c),
+        memory: daemon_sum.map(|(_, m)| m),
+    };
+
+    // Union of daemon live ids + cached pids so warm-restored sessions still
+    // render a row (with null metrics → "—") instead of vanishing.
+    let mut ids: Vec<String> = live_ids;
+    for (id, _) in &session_pids {
+        if !ids.iter().any(|live| live == id) {
+            ids.push(id.clone());
+        }
+    }
+    ids.sort();
+
+    let mut sessions = Vec::with_capacity(ids.len());
+    for id in ids {
+        let pid = pid_by_id.get(id.as_str()).copied().unwrap_or(0);
+        let sum = if pid > 0 {
+            sum_subtree(pid, child_map, metrics)
+        } else {
+            None
+        };
+        sessions.push(SessionMemory {
+            session_id: id,
+            pid,
+            cpu: sum.map(|(c, _)| c),
+            memory: sum.map(|(_, m)| m),
+        });
+    }
+
+    // WHY sessions excluded: they live inside the daemon subtree, adding them
+    // again counted every shell 2-3x in the footer Σ.
+    let total_memory = app.memory.unwrap_or(0) + daemon.memory.unwrap_or(0);
+    let total_cpu = app.cpu.unwrap_or(0.0) + daemon.cpu.unwrap_or(0.0);
+
+    SystemMemorySnapshot {
+        app,
+        daemon,
+        sessions,
+        host: HostMemory {
+            total: host_total,
+            available: host_available,
+            used,
+            percent,
+        },
+        total_memory,
+        total_cpu,
+        collected_at_ms: chrono::Utc::now().timestamp_millis(),
+    }
+}
+
+/// Footer Resource Manager snapshot: host + GUI app + daemon + per-session subtrees.
+#[tauri::command]
+pub fn system_memory_snapshot(manager: State<'_, PtyManager>) -> Result<SystemMemorySnapshot, String> {
+    let pids = manager.session_pids_snapshot();
+    let live = manager.list();
+    Ok(collect_snapshot(pids, live, resolve_daemon_pid()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subtree_sums_descendants_once() {
+        let parents = vec![(1, None), (2, Some(1)), (3, Some(1)), (4, Some(2))];
+        let map = build_child_map(&parents);
+        let metrics: HashMap<u32, (f32, u64)> =
+            [(1, (1.0, 10)), (2, (2.0, 20)), (3, (3.0, 30)), (4, (4.0, 40))]
+                .into_iter()
+                .collect();
+        assert_eq!(sum_subtree(1, &map, &metrics), Some((10.0, 100)));
+        assert_eq!(sum_subtree(2, &map, &metrics), Some((6.0, 60)));
+    }
+
+    #[test]
+    fn unknown_pid_yields_none() {
+        let map = build_child_map(&[(1, None)]);
+        let metrics: HashMap<u32, (f32, u64)> = [(1, (1.0, 10))].into_iter().collect();
+        assert_eq!(sum_subtree(999, &map, &metrics), None);
+    }
+
+    #[test]
+    fn snapshot_serializes_snake_case() {
+        let snap = SystemMemorySnapshot {
+            app: AppMemory {
+                cpu: Some(1.5),
+                memory: Some(1024),
+            },
+            daemon: AppMemory {
+                cpu: Some(0.5),
+                memory: Some(512),
+            },
+            sessions: vec![SessionMemory {
+                session_id: "s1".into(),
+                pid: 7,
+                cpu: None,
+                memory: None,
+            }],
+            host: HostMemory {
+                total: 100,
+                available: 40,
+                used: 60,
+                percent: 60.0,
+            },
+            total_memory: 1024,
+            total_cpu: 1.5,
+            collected_at_ms: 1,
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(json.contains("\"session_id\":\"s1\""));
+        assert!(json.contains("\"total_memory\":1024"));
+        assert!(json.contains("\"collected_at_ms\":1"));
+        // Daemon row must ride the same snapshot shape (missing → null, never absent).
+        assert!(json.contains("\"daemon\":"));
+    }
+
+    #[test]
+    fn stale_daemon_pid_yields_null_metrics_not_a_row() {
+        // Unknown daemon PID contributes nothing: no double-count, no crash.
+        let parents = vec![(1, None)];
+        let map = build_child_map(&parents);
+        let metrics: HashMap<u32, (f32, u64)> = [(1, (1.0, 10))].into_iter().collect();
+        assert_eq!(sum_subtree(9999, &map, &metrics), None);
+    }
+
+    #[test]
+    fn total_excludes_session_subtrees() {
+        // Sessions live inside the daemon subtree: total must be app + daemon,
+        // session rows are drill-down only (sums 2-3x high before the fix).
+        let parents = vec![(100, None), (200, None), (300, Some(200))];
+        let map = build_child_map(&parents);
+        let metrics: HashMap<u32, (f32, u64)> =
+            [(100, (1.0, 10)), (200, (2.0, 60)), (300, (3.0, 40))]
+                .into_iter()
+                .collect();
+        let snap = assemble_snapshot(
+            1000,
+            400,
+            &map,
+            &metrics,
+            vec![("s1".into(), 300)],
+            vec!["s1".into()],
+            Some(200),
+            100,
+        );
+        assert_eq!(snap.app.memory, Some(10));
+        assert_eq!(snap.daemon.memory, Some(100));
+        assert_eq!(snap.total_memory, 110);
+        assert_eq!(snap.total_cpu, 6.0);
+    }
+}

@@ -535,6 +535,8 @@ describe("TerminalPane", () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
+    // Renderer addons arrive via dynamic import now; wait for the instance.
+    await vi.waitFor(() => expect(addonState.webglInstances.length).toBe(1));
     const webgl = addonState.webglInstances[0]!;
     unmount();
 
@@ -553,8 +555,8 @@ describe("TerminalPane", () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
+    await vi.waitFor(() => expect(addonState.canvasInstances.length).toBe(1));
     const canvas = addonState.canvasInstances[0]!;
-    expect(addonState.canvasInstances.length).toBe(1);
     unmount();
 
     expect(canvas.dispose).toHaveBeenCalledTimes(1);
@@ -568,6 +570,7 @@ describe("TerminalPane", () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
+    await vi.waitFor(() => expect(addonState.webglInstances.length).toBe(1));
     const webgl = addonState.webglInstances[0]!;
     const loadsBefore = term().loadAddon.mock.calls.length;
     unmount();
@@ -749,10 +752,14 @@ describe("TerminalPane", () => {
 
     expect(addonState.unicode11Instances.length).toBe(1);
     expect(term().unicode.activeVersion).toBe("11");
-    expect(addonState.searchInstances.length).toBe(1);
-    expect(addonState.webLinksInstances.length).toBe(1);
-    expect(addonState.serializeInstances.length).toBe(1);
-    expect(addonState.webglInstances.length).toBe(1);
+    // Search/WebLinks/Serialize/Webgl resolve through dynamic import now;
+    // waitFor rides out the microtask gap before the loadAddon calls land.
+    await vi.waitFor(() => {
+      expect(addonState.searchInstances.length).toBe(1);
+      expect(addonState.webLinksInstances.length).toBe(1);
+      expect(addonState.serializeInstances.length).toBe(1);
+      expect(addonState.webglInstances.length).toBe(1);
+    });
     expect(term().loadAddon).toHaveBeenCalledTimes(6); // fit, unicode11, search, webLinks, serialize, webgl
   });
 
@@ -762,16 +769,19 @@ describe("TerminalPane", () => {
 
     const serializer = useTerminalStore.getState().serializers["abc"];
     expect(serializer).toBeDefined();
-    expect(serializer?.()).toBe("mocked-serialized-buffer");
+    // SerializeAddon arrives via dynamic import; until it lands the
+    // serializer returns "" (empty = xterm owns the history) instead of
+    // silently writing nothing.
+    await vi.waitFor(() => expect(serializer?.()).toBe("mocked-serialized-buffer"));
 
     unmount();
     expect(useTerminalStore.getState().serializers["abc"]).toBeUndefined();
   });
 
-  it("mounts plain shells with 10k scrollback", async () => {
+  it("mounts focused plain shells with 5k scrollback", async () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
-    expect(term().options.scrollback).toBe(10000);
+    expect(term().options.scrollback).toBe(5000);
   });
 
   it("mounts agent panes with half the retained history", async () => {
@@ -782,14 +792,14 @@ describe("TerminalPane", () => {
     });
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
-    expect(term().options.scrollback).toBe(5000);
+    expect(term().options.scrollback).toBe(2500);
   });
 
   it("halves retained history while alt-screen is active and restores after", async () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
     const t = term();
-    expect(t.options.scrollback).toBe(10000);
+    expect(t.options.scrollback).toBe(5000);
 
     const dataHandler = onPtyDataMock.mock.calls[0][0] as (p: {
       id: string;
@@ -798,11 +808,11 @@ describe("TerminalPane", () => {
     }) => void;
     t.buffer.active.type = "alternate";
     dataHandler({ id: "abc", data: "x", seq: 1 });
-    expect(t.options.scrollback).toBe(5000);
+    expect(t.options.scrollback).toBe(2500);
 
     t.buffer.active.type = "normal";
     dataHandler({ id: "abc", data: "x", seq: 2 });
-    expect(t.options.scrollback).toBe(10000);
+    expect(t.options.scrollback).toBe(5000);
   });
 
   it("serializes half the rows for agent panes", async () => {
@@ -816,7 +826,7 @@ describe("TerminalPane", () => {
     const serializer = useTerminalStore.getState().serializers["abc"];
     serializer?.();
     expect(addonState.serializeInstances[0]!.serialize).toHaveBeenCalledWith({
-      scrollback: 2500,
+      scrollback: 1250,
     });
   });
 
@@ -847,6 +857,8 @@ describe("TerminalPane", () => {
   it("flushes scrollback to cache and disk on unmount", async () => {
     const { unmount } = render(<TerminalPane id="abc" />);
     await waitForSpawned();
+    // SerializeAddon loads async; unmount must flush AFTER it lands.
+    await vi.waitFor(() => expect(addonState.serializeInstances.length).toBe(1));
 
     expect(saveScrollbackMock).not.toHaveBeenCalled();
 
@@ -854,6 +866,21 @@ describe("TerminalPane", () => {
     expect(saveScrollbackMock).toHaveBeenCalledTimes(1);
     expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
     expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("mocked-serialized-buffer");
+  });
+
+  it("writes parked-tab scrollback to disk only, leaving no store cache behind", async () => {
+    useTerminalStore.setState({
+      tabs: [{ id: "t1", title: "t1", layout: { type: "leaf", id: "abc" }, focusedPath: [] }],
+      parkedTabIds: ["t1"],
+    });
+    const { unmount } = render(<TerminalPane id="abc" />);
+    await waitForSpawned();
+    // SerializeAddon loads async; unmount must flush AFTER it lands.
+    await vi.waitFor(() => expect(addonState.serializeInstances.length).toBe(1));
+
+    unmount();
+    expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "mocked-serialized-buffer");
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBeUndefined();
   });
 
   it("replays restored scrollback with clean reset, omits in-buffer restore divider, and clears restored state on mount", async () => {
@@ -1057,6 +1084,7 @@ describe("TerminalPane", () => {
     render(<TerminalPane id="abc" />);
     await waitForSpawned();
 
+    await vi.waitFor(() => expect(addonState.webglInstances.length).toBe(1));
     const webglInstance = addonState.webglInstances[0]!;
     expect(webglInstance.onContextLoss).toHaveBeenCalled();
 
@@ -1066,7 +1094,7 @@ describe("TerminalPane", () => {
     });
 
     expect(webglInstance.dispose).toHaveBeenCalled();
-    expect(addonState.canvasInstances.length).toBe(1);
+    await vi.waitFor(() => expect(addonState.canvasInstances.length).toBe(1));
   });
 
   it("refits after a focus-driven Canvas→WebGL renderer swap (stale-stretch gap fix)", async () => {
@@ -1076,7 +1104,7 @@ describe("TerminalPane", () => {
     addonState.webglShouldThrow = true;
     render(<TerminalPane id="abc" path={[1]} />);
     await waitForSpawned();
-    expect(addonState.canvasInstances.length).toBe(1);
+    await vi.waitFor(() => expect(addonState.canvasInstances.length).toBe(1));
     expect(addonState.webglInstances.length).toBe(0);
 
     // Flush every startup fit pass (settle timer etc.) to get a baseline.
@@ -1090,7 +1118,9 @@ describe("TerminalPane", () => {
       useTerminalStore.setState({ focusedPath: [1] });
     });
 
-    expect(addonState.webglInstances.length).toBe(1); // mount attempt threw; swap created exactly one
+    await vi.waitFor(() => {
+      expect(addonState.webglInstances.length).toBe(1); // mount attempt threw; swap created exactly one
+    });
     pumpRaf(); // the post-swap refit is scheduled on the next frame
     expect(fitCalls()).toBeGreaterThan(baseline);
   });
@@ -1214,7 +1244,9 @@ describe("TerminalPane", () => {
     fireEvent.click(clearBtn);
 
     expect(term().clear).toHaveBeenCalled();
-    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBe("");
+    // WHY single owner: cleared scrollback drops the store entry entirely
+    // (undefined, not "") so no empty string stays resident per session.
+    expect(useTerminalStore.getState().cachedScrollbacks["abc"]).toBeUndefined();
     expect(saveScrollbackMock).toHaveBeenCalledWith("abc", "");
   });
 

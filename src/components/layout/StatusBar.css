@@ -165,3 +165,141 @@
 .fleet-agg-done {
   color: var(--text-muted, #71717a);
 }
+
+/* Memory segment: minimalist Orca-parity chip + top popover. */
+.memory-segment-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.status-bar button.status-bar-item.memory-segment:hover {
+  background-color: color-mix(in srgb, var(--text-primary, #ededec) 12%, transparent);
+}
+
+.memory-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 26rem;
+  max-width: calc(100vw - 20px);
+  background-color: var(--bg-overlay, #2c2c2c);
+  border: 1px solid var(--border-divider, rgba(255, 255, 255, 0.07));
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 10px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  color: var(--text-primary, #ededec);
+  font-size: 11px;
+}
+
+.memory-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.memory-popover-title {
+  font-weight: 600;
+}
+
+.memory-popover-summary {
+  color: var(--text-muted, #71717a);
+}
+
+.memory-popover-host {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted, #71717a);
+}
+
+.memory-host-bar {
+  height: 3px;
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, var(--text-primary, #ededec) 12%, transparent);
+  overflow: hidden;
+}
+
+.memory-host-bar-fill {
+  height: 100%;
+  background-color: var(--status-running, #22c55e);
+}
+
+.memory-sort-row {
+  display: flex;
+  gap: 4px;
+}
+
+.memory-sort-btn {
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: var(--text-muted, #71717a);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.memory-sort-btn.active {
+  color: var(--text-primary, #ededec);
+  font-weight: 600;
+}
+
+.memory-popover-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.memory-app-row,
+.memory-session-row {
+  display: grid;
+  grid-template-columns: 1fr 64px 90px 20px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm, 4px);
+}
+
+button.memory-session-row {
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+button.memory-session-row:hover {
+  background-color: color-mix(in srgb, var(--text-primary, #ededec) 8%, transparent);
+}
+
+.memory-session-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-kill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+}
+
+.memory-session-row:hover .memory-kill {
+  opacity: 1;
+}
+
+.memory-empty {
+  padding: 12px 6px;
+  color: var(--text-muted, #71717a);
+}

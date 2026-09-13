@@ -5,6 +5,7 @@ import { focus } from "../../lib/pane-manager/layout";
 import { findLeafPath } from "../../lib/pane-manager/layout";
 import type { AgentStatusEntry } from "../../lib/pty/transport";
 import { getGitStatus, GitStatusResult } from "../../lib/git/transport";
+import { MemorySegment } from "./MemorySegment";
 import {
   requestExpandUpdateCard,
   requestManualCheck,
@@ -259,6 +260,7 @@ export function StatusBar(): React.ReactElement {
 
       <div className="status-bar-section status-bar-section-right">
         <UpdateSegment />
+        <MemorySegment />
         <div className="status-bar-item" title="Terminal Dimensions">
           <Terminal size={13} />
           <span>{`${cols}x${rows}`}</span>

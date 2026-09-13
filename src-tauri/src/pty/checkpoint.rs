@@ -242,13 +242,29 @@ impl DaemonServer {
     pub(crate) fn session_reaper(&self) -> SessionReaper {
         let sessions = Arc::clone(&self.sessions);
         let snapshot_dir = self.snapshot_dir.clone();
+        let claimed = Arc::clone(&self.resumed_agent_ids);
         Arc::new(move |session: &DaemonSession| {
+            Self::release_resume_claim(&claimed, session);
             if let Some(dir) = snapshot_dir.as_ref() {
                 let snapshot = Self::build_checkpoint(session);
                 let _ = SnapshotStorage::new(dir.clone()).save_snapshot(&snapshot);
             }
             let _ = sessions.lock().remove(session.id.as_str());
         })
+    }
+
+    /// Death-path release for the one-pane-per-conversation claim: a killed
+    /// or reaped session no longer holds its conversation, so a later pane
+    /// may resume it. Without this the set grew ~100B per conversation for
+    /// the daemon's whole lifetime.
+    pub(crate) fn release_resume_claim(
+        claimed: &Mutex<std::collections::HashSet<String>>,
+        session: &DaemonSession,
+    ) {
+        let id = session.agent_session_ref.lock().clone().map(|r| r.id);
+        if let Some(id) = id {
+            claimed.lock().remove(&id);
+        }
     }
 
     pub(crate) fn start_checkpoint_task(session: Arc<DaemonSession>, app_data_dir: PathBuf) {

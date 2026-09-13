@@ -41,6 +41,7 @@ import {
   DEFAULT_ROWS,
   clearDirtyScrollback,
   isScrollbackDirty,
+  revealRestoreIds,
 } from "./terminalSessionsSlice";
 import {
   findAdjacentPath,
@@ -69,6 +70,14 @@ export interface TabState {
   focusedPath: Path;
   isWizard?: boolean;
   isSleeping?: boolean;
+}
+
+// MRU history is bounded: only the last 20 tabs matter for Ctrl+Tab, older
+// entries are never reached. Unbounded growth = one string per tab-open, forever.
+const TAB_FOCUS_HISTORY_LIMIT = 20;
+
+function pushTabFocusHistory(history: string[], tabId: string): string[] {
+  return [tabId, ...history.filter((id) => id !== tabId)].slice(0, TAB_FOCUS_HISTORY_LIMIT);
 }
 
 // One in-flight wake per tab so rapid re-selection cannot double-spawn.
@@ -175,7 +184,7 @@ export function createPaneLayoutSlice(
           activeTabId: tabId,
           layout: newTab.layout,
           focusedPath: newTab.focusedPath,
-          tabFocusHistory: [tabId, ...state.tabFocusHistory.filter((id) => id !== tabId)],
+          tabFocusHistory: pushTabFocusHistory(state.tabFocusHistory, tabId),
         };
       });
       triggerDebouncedSaveLayout(get);
@@ -227,10 +236,7 @@ export function createPaneLayoutSlice(
             activeTabId: nextActiveTab.id,
             layout: nextActiveTab.layout,
             focusedPath: nextActiveTab.focusedPath,
-            tabFocusHistory: [
-              nextActiveTab.id,
-              ...nextTabFocusHistory.filter((id) => id !== nextActiveTab.id),
-            ],
+            tabFocusHistory: pushTabFocusHistory(nextTabFocusHistory, nextActiveTab.id),
           });
         } else {
           const activeTab = remainingTabs.find((t) => t.id === state.activeTabId) || remainingTabs[0];
@@ -269,7 +275,7 @@ export function createPaneLayoutSlice(
         activeTabId: tab.id,
         layout: tab.layout,
         focusedPath: tab.focusedPath,
-        tabFocusHistory: [tab.id, ...state.tabFocusHistory.filter((id) => id !== tab.id)],
+        tabFocusHistory: pushTabFocusHistory(state.tabFocusHistory, tab.id),
       });
 
       if (wasSleeping) {
@@ -354,7 +360,23 @@ export function createPaneLayoutSlice(
             } catch {
               // Daemon gone: the attach below decides.
             }
-            await get().spawnSession(undefined, undefined, id);
+            // Parked panes dropped the store cache at park (disk flush is the
+            // sole owner): reload the history before the attach so the
+            // remount replays it. The snapshot is viewport-only, so it must
+            // not clobber this disk truth; the park-period delta re-streams
+            // as batcher bytes behind the attach.
+            if (session.status === "running") {
+              const disk = await loadScrollback(id).catch(() => null);
+              if (disk) {
+                revealRestoreIds.add(id);
+                get().setRestoredScrollback(id, disk);
+              }
+            }
+            try {
+              await get().spawnSession(undefined, undefined, id);
+            } finally {
+              revealRestoreIds.delete(id);
+            }
           }),
         );
       } finally {
@@ -374,10 +396,7 @@ export function createPaneLayoutSlice(
                 activeTabId: live.id,
                 layout: live.layout,
                 focusedPath: live.focusedPath,
-                tabFocusHistory: [
-                  live.id,
-                  ...state.tabFocusHistory.filter((id) => id !== live.id),
-                ],
+                tabFocusHistory: pushTabFocusHistory(state.tabFocusHistory, live.id),
               }
             : {}),
         });
@@ -1054,7 +1073,15 @@ export function createPaneLayoutSlice(
           rightSidebarTab,
           activeAppMode,
           maximizedSessionId,
-          editorTabs,
+          // WHY paths not contents: full file text (content/originalContent ×
+          // N tabs + diffs) would bloat layout.json 10-100×; reopen re-reads
+          // from disk, dirty tabs restore via their scroll-*.dat like terminals.
+          editorTabs: editorTabs.map((t) => ({
+            path: t.path,
+            name: t.name,
+            language: t.language,
+            isMarkdown: t.isMarkdown,
+          })),
           activeEditorPath,
           editorViewMode,
           browserUrl,
@@ -1086,11 +1113,12 @@ export function createPaneLayoutSlice(
       // Serialize only buffers with new output since the last write — a tab
       // switch or rename must not stringify every live terminal. Each
       // serialize is bounded (~1MB via scrollbackBudget) and the whole pass
-      // is deferred off the frame: every serialize() walks up to 5000 rows
+      // is deferred off the frame: every serialize() walks up to 2500 rows
       // synchronously, so running it while an agent burst streams is the
-      // jank users feel as stutter. Dirty flags are left set; the deferred
-      // pass clears per-id before serializing so output landing mid-save
-      // re-marks for the next pass instead of being lost.
+      // jank users feel as stutter. Saves run sequentially (not Promise.all)
+      // so N dirty panes never hold N×1MB strings concurrently. Dirty flags
+      // clear per-id before serializing so output landing mid-save re-marks
+      // for the next pass instead of being lost.
       const dirtyIds = Object.values(sessions)
         .map((s) => s.id)
         .filter((id) => isScrollbackDirty(id));
@@ -1098,23 +1126,19 @@ export function createPaneLayoutSlice(
         await cleanupStaleScrollbacks(Object.keys(sessions)).catch(() => {});
         return;
       }
-      // Scrollback serializes walk up to 5000 rows synchronously: a microtask
+      // Scrollback serializes walk up to 2500 rows synchronously: a microtask
       // keeps the layout-JSON write (above) on the current task while each
       // serialize lands after it. The per-session yields use a resolved promise
       // (microtask, not setTimeout) so the pass never stalls under fake timers
       // or on the close path, yet N dirty panes still can't block one frame.
-      const scrollbackPromises: Promise<void>[] = [];
       await Promise.resolve();
       for (const id of dirtyIds) {
         clearDirtyScrollback(id);
         const buffer = serializers[id]?.() || cachedScrollbacks[id];
         if (buffer) {
-          scrollbackPromises.push(saveScrollback(id, buffer).catch(() => {}));
+          await saveScrollback(id, buffer).catch(() => {});
         }
         await Promise.resolve();
-      }
-      if (scrollbackPromises.length > 0) {
-        await Promise.all(scrollbackPromises);
       }
       await cleanupStaleScrollbacks(Object.keys(sessions)).catch(() => {});
     },
@@ -1144,7 +1168,11 @@ export function createPaneLayoutSlice(
             rightSidebarTab?: "explorer" | "git" | "extensions";
             activeAppMode?: AppMode;
             maximizedSessionId?: string | null;
-            editorTabs?: EditorTab[];
+            // Slim form (v3+): paths only. Legacy form carried full contents.
+            editorTabs?: Array<
+              Pick<EditorTab, "path" | "name" | "language" | "isMarkdown"> &
+                Partial<Pick<EditorTab, "content" | "originalContent" | "isDirty">>
+            >;
             activeEditorPath?: string | null;
             editorViewMode?: EditorViewMode;
             browserUrl?: string;
@@ -1172,7 +1200,17 @@ export function createPaneLayoutSlice(
               parsed.ui!.maximizedSessionId !== undefined
                 ? parsed.ui!.maximizedSessionId
                 : state.maximizedSessionId,
-            editorTabs: parsed.ui!.editorTabs ?? state.editorTabs,
+            editorTabs: (parsed.ui!.editorTabs ?? []).map((t) => ({
+              path: t.path,
+              name: t.name,
+              // Slim form stores no contents: reopen lazily from disk via
+              // openFileInEditor so layout.json stays paths-only.
+              content: "",
+              originalContent: "",
+              isDirty: false,
+              language: t.language,
+              isMarkdown: t.isMarkdown,
+            })),
             activeEditorPath:
               parsed.ui!.activeEditorPath !== undefined
                 ? parsed.ui!.activeEditorPath

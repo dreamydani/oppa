@@ -1,10 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export interface FileEntry {
   name: string;
   path: string;
   is_dir: boolean;
   size: number;
+}
+
+export interface FsChangedPayload {
+  dir: string;
+  path?: string | null;
 }
 
 export async function readDir(path: string): Promise<FileEntry[]> {
@@ -65,4 +71,22 @@ export async function openWith(path: string, app?: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Non-recursive watcher: caller watches root + each expanded dir, unwatching
+// on collapse/cwd-switch so node_modules-scale trees stay cheap.
+export async function watchDir(path: string): Promise<void> {
+  try {
+    await invoke("fs_watch", { path });
+  } catch {}
+}
+
+export async function unwatchDir(path: string): Promise<void> {
+  try {
+    await invoke("fs_unwatch", { path });
+  } catch {}
+}
+
+export async function onFsChange(cb: (p: FsChangedPayload) => void) {
+  return listen<FsChangedPayload>("fs://change", (e) => cb(e.payload));
 }

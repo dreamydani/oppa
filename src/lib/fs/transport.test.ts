@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   readDir,
   readFile,
@@ -8,10 +9,14 @@ import {
   createDir,
   detectEditors,
   openWith,
+  watchDir,
+  unwatchDir,
+  onFsChange,
   FileEntry,
 } from "./transport";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 const invokeMock = vi.mocked(invoke);
 
@@ -147,6 +152,30 @@ describe("fs transport", () => {
       invokeMock.mockRejectedValue(new Error("App not found"));
       const result = await openWith("/test/file.ts", "missing-app");
       expect(result).toBe(false);
+    });
+  });
+
+  describe("watch", () => {
+    it("invokes fs_watch / fs_unwatch with path", async () => {
+      invokeMock.mockResolvedValue(undefined);
+      await watchDir("/test");
+      expect(invokeMock).toHaveBeenCalledWith("fs_watch", { path: "/test" });
+      await unwatchDir("/test");
+      expect(invokeMock).toHaveBeenCalledWith("fs_unwatch", { path: "/test" });
+    });
+
+    it("swallows watcher errors", async () => {
+      invokeMock.mockRejectedValue(new Error("nope"));
+      await expect(watchDir("/test")).resolves.toBeUndefined();
+      await expect(unwatchDir("/test")).resolves.toBeUndefined();
+    });
+
+    it("subscribes to fs://change events", async () => {
+      const listenMock = vi.mocked(listen);
+      listenMock.mockResolvedValue((() => {}) as unknown as Awaited<ReturnType<typeof listen>>);
+      const cb = vi.fn();
+      await onFsChange(cb);
+      expect(listenMock).toHaveBeenCalledWith("fs://change", expect.any(Function));
     });
   });
 });

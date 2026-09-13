@@ -127,6 +127,13 @@ async fn read_http_request(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> 
         .unwrap_or(0);
 
     let mut body = buf[header_end..].to_vec();
+    // WHY cap: Content-Length is attacker-controlled even on loopback; hook
+    // payloads are a few KB, so 256KB is generous. Oversized → None (dropped
+    // connection), never a multi-GB Vec.
+    const MAX_HOOK_BODY_BYTES: usize = 256 * 1024;
+    if content_length > MAX_HOOK_BODY_BYTES {
+        return None;
+    }
     while body.len() < content_length {
         let n = stream.read(&mut chunk).await.ok()?;
         if n == 0 {
@@ -852,5 +859,44 @@ mod tests {
             Some("build the export flow please")
         );
         let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn read_http_request_parses_normal_post_body() {
+        let (mut client, mut server_side) = tokio::io::duplex(4096);
+        let body = r#"{"pane_key":"p","token":"t"}"#;
+        let req = format!(
+            "POST /hook/claude HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let writer = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let _ = client.write_all(req.as_bytes()).await;
+            client
+        });
+
+        let (method, path, body_bytes) =
+            read_http_request(&mut server_side).await.expect("parse ok");
+        assert_eq!(method, "POST");
+        assert_eq!(path, "/hook/claude");
+        assert_eq!(body_bytes, body.as_bytes());
+        writer.await.expect("writer task");
+    }
+
+    #[tokio::test]
+    async fn read_http_request_refuses_oversized_content_length() {
+        let (mut client, mut server_side) = tokio::io::duplex(64 * 1024);
+        // Claim a 512MB body: must be refused before any body allocation.
+        let head = "POST /hook/claude HTTP/1.1\r\nContent-Length: 536870912\r\n\r\n";
+        let writer = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let _ = client.write_all(head.as_bytes()).await;
+            client
+        });
+
+        let parsed = read_http_request(&mut server_side).await;
+        assert!(parsed.is_none(), "oversized Content-Length must be refused");
+        writer.await.expect("writer task");
     }
 }

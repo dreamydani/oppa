@@ -33,31 +33,40 @@ export interface ScrollbackSerializer {
 
 export function serializeScrollbackBounded(
   serialize: ScrollbackSerializer,
-  rows = 5000,
+  rows = 2500,
 ): string {
-  // ~1MB / ~200 chars per row ≈ 5000 rows; serialize only that many rows
-  // from the bottom of the scrollback.
+  // ~1MB / ~200 chars per row ≈ 5000 rows max; focused panes serialize 2500,
+  // agent/background panes half. Only that many rows from the bottom.
   const bounded = serialize({ scrollback: rows });
   return applyCachedScrollbackBudget(bounded);
 }
 
-// Scrollback row policy: agent TUIs redraw from their own state, so they
-// keep half the history of plain shells at zero visual difference focused.
-export const AGENT_SCROLLBACK_ROWS = 5000;
+// Scrollback row policy (tiered): focused panes keep full history; agent TUIs
+// redraw from their own state, so they keep half at zero visual difference.
+// Background panes keep less — the user only scrolls the focused one.
+export const AGENT_SCROLLBACK_ROWS = 2500;
 
 export function resolveSessionScrollbackRows(isAgent: boolean): number {
   return isAgent ? AGENT_SCROLLBACK_ROWS : XTERM_SCROLLBACK_LINES;
 }
 
+// Background mounted panes: enough for a quick glance-back, not deep archaeology.
+export const BACKGROUND_SCROLLBACK_LINES = 2000;
+export const BACKGROUND_AGENT_SCROLLBACK_LINES = 1000;
+
+export function resolveBackgroundScrollbackRows(isAgent: boolean): number {
+  return isAgent ? BACKGROUND_AGENT_SCROLLBACK_LINES : BACKGROUND_SCROLLBACK_LINES;
+}
+
 // Serialize rows track the live cap: agent panes serialize half.
 export function serializeRowsForScrollback(rows: number): number {
-  return rows >= XTERM_SCROLLBACK_LINES ? 5000 : 2500;
+  return rows >= XTERM_SCROLLBACK_LINES ? 2500 : 1250;
 }
 
 // xterm's scrollback cap (Terminal option `scrollback`) evicts oldest lines
 // silently. This makes truncation visible: once the buffer reaches the cap, a
 // one-time marker line is written so the user knows history was dropped.
-export const XTERM_SCROLLBACK_LINES = 10000;
+export const XTERM_SCROLLBACK_LINES = 5000;
 
 export interface ScrollbackSink {
   bufferLength: number;

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileEntry {
@@ -219,6 +221,102 @@ pub fn fs_create_file(path: String) -> Result<(), String> {
     }
 
     fs::write(file_path, "").map_err(|e| e.to_string())
+}
+
+// Non-recursive watcher: one native watcher per visible dir (root +
+// expanded). Recursive walks would crawl node_modules on every open.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FsChangedPayload {
+    pub dir: String,
+    pub path: Option<String>,
+}
+
+pub struct FsWatcherState {
+    inner: Mutex<HashMap<String, notify::RecommendedWatcher>>,
+}
+
+impl FsWatcherState {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for FsWatcherState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn validate_watch_path(path: &str) -> Result<(), String> {
+    let dir_path = Path::new(path);
+    if !dir_path.exists() {
+        return Err(format!("Path does not exist: {path}"));
+    }
+    if !dir_path.is_dir() {
+        return Err(format!("Path is not a directory: {path}"));
+    }
+    Ok(())
+}
+
+fn should_emit_for_event_kind(kind: &notify::EventKind) -> bool {
+    use notify::EventKind::*;
+    matches!(kind, Create(_) | Remove(_) | Modify(_))
+}
+
+#[tauri::command(async)]
+pub fn fs_watch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, FsWatcherState>,
+    path: String,
+) -> Result<(), String> {
+    use notify::{RecursiveMode, Watcher};
+    use tauri::Emitter;
+
+    validate_watch_path(&path)?;
+    if state.inner.lock().map_err(|e| e.to_string())?.contains_key(&path) {
+        return Ok(());
+    }
+
+    let watched_dir = path.clone();
+    let emit_app = app.clone();
+    let mut watcher = notify::RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            let Ok(event) = res else { return };
+            if !should_emit_for_event_kind(&event.kind) {
+                return;
+            }
+            let _ = emit_app.emit(
+                "fs://change",
+                FsChangedPayload {
+                    dir: watched_dir.clone(),
+                    path: event.paths.first().map(|p| p.to_string_lossy().to_string()),
+                },
+            );
+        },
+        notify::Config::default(),
+    )
+    .map_err(|e| e.to_string())?;
+    watcher
+        .watch(Path::new(&path), RecursiveMode::NonRecursive)
+        .map_err(|e| e.to_string())?;
+    state
+        .inner
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(path, watcher);
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn fs_unwatch(state: tauri::State<'_, FsWatcherState>, path: String) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&path);
+    Ok(())
 }
 
 
@@ -457,6 +555,48 @@ fn test_build_open_with_command_executes_app_directly() {
         assert!(res.is_err());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_validate_watch_path_accepts_real_dir() {
+        let dir = temp_dir("watch_ok");
+        assert!(validate_watch_path(&dir.to_string_lossy().to_string()).is_ok());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_validate_watch_path_rejects_missing_and_file() {
+        assert!(validate_watch_path("/nonexistent/path/for/oppa/watch").is_err());
+        let dir = temp_dir("watch_file");
+        let file_path = dir.join("f.txt");
+        File::create(&file_path).unwrap();
+        assert!(validate_watch_path(&file_path.to_string_lossy().to_string()).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_should_emit_for_create_remove_modify_only() {
+        use notify::EventKind;
+        assert!(should_emit_for_event_kind(&EventKind::Create(notify::event::CreateKind::File)));
+        assert!(should_emit_for_event_kind(&EventKind::Remove(notify::event::RemoveKind::File)));
+        assert!(should_emit_for_event_kind(&EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::To
+        ))));
+        assert!(!should_emit_for_event_kind(&EventKind::Access(
+            notify::event::AccessKind::Open(notify::event::AccessMode::Read)
+        )));
+        assert!(!should_emit_for_event_kind(&EventKind::Other));
+    }
+
+    #[test]
+    fn test_fs_changed_payload_roundtrips() {
+        let payload = FsChangedPayload {
+            dir: "/mock/workspace".to_string(),
+            path: Some("/mock/workspace/a.txt".to_string()),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let back: FsChangedPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload, back);
     }
 }
 
