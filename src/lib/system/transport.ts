@@ -22,6 +22,8 @@ export interface SessionMemory {
 
 export interface SystemMemorySnapshot {
   app: AppMemory;
+  // Detached daemon row; absent on old backends, null metrics when unresolved.
+  daemon?: AppMemory | null;
   sessions: SessionMemory[];
   host: HostMemory;
   total_memory: number;

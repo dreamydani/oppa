@@ -171,6 +171,15 @@ export function MemorySegment(): React.ReactElement {
                     {snapshot.app.memory != null ? formatMemory(snapshot.app.memory) : "—"}
                   </span>
                 </div>
+                {snapshot.daemon && (snapshot.daemon.cpu != null || snapshot.daemon.memory != null) && (
+                  <div className="memory-app-row tabular-nums">
+                    <span>Oppa daemon</span>
+                    <span>{snapshot.daemon.cpu != null ? formatCpu(snapshot.daemon.cpu) : "—"}</span>
+                    <span>
+                      {snapshot.daemon.memory != null ? formatMemory(snapshot.daemon.memory) : "—"}
+                    </span>
+                  </div>
+                )}
                 {rows.map((row) => (
                   <button
                     key={row.session_id}

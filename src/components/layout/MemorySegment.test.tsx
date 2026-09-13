@@ -20,6 +20,7 @@ const mockKill = vi.mocked(ptyTransport.ptyKill);
 function snapshot() {
   return {
     app: { cpu: 2.5, memory: 200 * 1024 * 1024 },
+    daemon: { cpu: 0.5, memory: 79 * 1024 * 1024 },
     sessions: [
       { session_id: "s1", pid: 111, cpu: 1.5, memory: 300 * 1024 * 1024 },
       { session_id: "s2", pid: 222, cpu: null, memory: null },
@@ -110,5 +111,25 @@ describe("MemorySegment", () => {
     const kill = await screen.findByTestId("memory-kill-s1");
     fireEvent.click(kill);
     expect(mockKill).toHaveBeenCalledWith("s1");
+  });
+
+  it("shows the detached daemon row when the backend reports one", async () => {
+    render(<MemorySegment />);
+    fireEvent.click(await screen.findByTestId("memory-segment"));
+    expect(await screen.findByText("Oppa daemon")).toBeInTheDocument();
+    // 79MB formatted at Orca's 1-decimal MB precision.
+    expect(screen.getByText("79.0 MB")).toBeInTheDocument();
+    // Daemon row is display-only: no kill affordance for it.
+    expect(screen.queryByTestId("memory-kill-daemon")).toBeNull();
+  });
+
+  it("omits the daemon row on old backends that never report one", async () => {
+    // Destructure the field away to simulate a pre-daemon backend payload.
+    const { daemon: _legacy, ...legacySnap } = snapshot();
+    mockSnapshot.mockResolvedValue(legacySnap);
+    render(<MemorySegment />);
+    fireEvent.click(await screen.findByTestId("memory-segment"));
+    expect(await screen.findByTestId("memory-popover")).toBeInTheDocument();
+    expect(screen.queryByText("Oppa daemon")).toBeNull();
   });
 });

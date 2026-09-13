@@ -32,6 +32,9 @@ pub struct SessionMemory {
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemMemorySnapshot {
     pub app: AppMemory,
+    // Detached daemon (`oppa --daemon`) owns all PTY state but is not a child
+    // of the GUI, so it was invisible until now. Null when unresolved.
+    pub daemon: AppMemory,
     pub sessions: Vec<SessionMemory>,
     pub host: HostMemory,
     pub total_memory: u64,
@@ -81,7 +84,23 @@ pub fn sum_subtree(
     if found { Some((cpu, mem)) } else { None }
 }
 
-fn collect_snapshot(session_pids: Vec<(String, u32)>, live_ids: Vec<String>) -> SystemMemorySnapshot {
+fn resolve_daemon_pid() -> Option<u32> {
+    // Discovery file written by `run_daemon`; missing/corrupt/stale degrades
+    // to None so the daemon row renders "—" instead of failing the snapshot.
+    let dir = crate::pty::snapshot::resolve_app_data_dir()?;
+    let meta = crate::pty::runtime_metadata::read_runtime_metadata(&dir)?;
+    // Never attribute our own RSS twice when the command runs inside daemon tests.
+    if meta.pid == std::process::id() {
+        return None;
+    }
+    Some(meta.pid)
+}
+
+fn collect_snapshot(
+    session_pids: Vec<(String, u32)>,
+    live_ids: Vec<String>,
+    daemon_pid: Option<u32>,
+) -> SystemMemorySnapshot {
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -112,6 +131,19 @@ fn collect_snapshot(session_pids: Vec<(String, u32)>, live_ids: Vec<String>) -> 
         memory: app_sum.map(|(_, m)| m),
     };
 
+    // Detached daemon is not a child of the GUI: attribute its subtree
+    // separately so its vt100 mirrors/queues are visible. A stale PID (daemon
+    // restarted) yields None → "—", never a wrong row. Never double-count our
+    // own RSS when the command runs inside the daemon under test.
+    let daemon_sum = match daemon_pid {
+        Some(pid) if pid != std::process::id() => sum_subtree(pid, &child_map, &metrics),
+        _ => None,
+    };
+    let daemon = AppMemory {
+        cpu: daemon_sum.map(|(c, _)| c),
+        memory: daemon_sum.map(|(_, m)| m),
+    };
+
     // Union of daemon live ids + cached pids so warm-restored sessions still
     // render a row (with null metrics → "—") instead of vanishing.
     let mut ids: Vec<String> = live_ids;
@@ -123,8 +155,8 @@ fn collect_snapshot(session_pids: Vec<(String, u32)>, live_ids: Vec<String>) -> 
     ids.sort();
 
     let mut sessions = Vec::with_capacity(ids.len());
-    let mut total_memory = app.memory.unwrap_or(0);
-    let mut total_cpu = app.cpu.unwrap_or(0.0);
+    let mut total_memory = app.memory.unwrap_or(0) + daemon.memory.unwrap_or(0);
+    let mut total_cpu = app.cpu.unwrap_or(0.0) + daemon.cpu.unwrap_or(0.0);
     for id in ids {
         let pid = pid_by_id.get(id.as_str()).copied().unwrap_or(0);
         let sum = if pid > 0 {
@@ -146,6 +178,7 @@ fn collect_snapshot(session_pids: Vec<(String, u32)>, live_ids: Vec<String>) -> 
 
     SystemMemorySnapshot {
         app,
+        daemon,
         sessions,
         host: HostMemory {
             total,
@@ -159,12 +192,12 @@ fn collect_snapshot(session_pids: Vec<(String, u32)>, live_ids: Vec<String>) -> 
     }
 }
 
-/// Footer Resource Manager snapshot: host + GUI app + per-session subtrees.
+/// Footer Resource Manager snapshot: host + GUI app + daemon + per-session subtrees.
 #[tauri::command]
 pub fn system_memory_snapshot(manager: State<'_, PtyManager>) -> Result<SystemMemorySnapshot, String> {
     let pids = manager.session_pids_snapshot();
     let live = manager.list();
-    Ok(collect_snapshot(pids, live))
+    Ok(collect_snapshot(pids, live, resolve_daemon_pid()))
 }
 
 #[cfg(test)]
@@ -197,6 +230,10 @@ mod tests {
                 cpu: Some(1.5),
                 memory: Some(1024),
             },
+            daemon: AppMemory {
+                cpu: Some(0.5),
+                memory: Some(512),
+            },
             sessions: vec![SessionMemory {
                 session_id: "s1".into(),
                 pid: 7,
@@ -217,5 +254,16 @@ mod tests {
         assert!(json.contains("\"session_id\":\"s1\""));
         assert!(json.contains("\"total_memory\":1024"));
         assert!(json.contains("\"collected_at_ms\":1"));
+        // Daemon row must ride the same snapshot shape (missing → null, never absent).
+        assert!(json.contains("\"daemon\":"));
+    }
+
+    #[test]
+    fn stale_daemon_pid_yields_null_metrics_not_a_row() {
+        // Unknown daemon PID contributes nothing: no double-count, no crash.
+        let parents = vec![(1, None)];
+        let map = build_child_map(&parents);
+        let metrics: HashMap<u32, (f32, u64)> = [(1, (1.0, 10))].into_iter().collect();
+        assert_eq!(sum_subtree(9999, &map, &metrics), None);
     }
 }

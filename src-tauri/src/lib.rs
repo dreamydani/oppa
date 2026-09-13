@@ -111,7 +111,8 @@ pub fn run() {
         // Process plugin (relaunch after install) is channel-independent.
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
-        .manage(browser::manager::BrowserManager::new());
+        .manage(browser::manager::BrowserManager::new())
+        .manage(fs::FsWatcherState::new());
     // The updater is stable+rc-only: a dev build NEVER checks for updates,
     // so the plugin (which would add its own update-check commands) is not
     // registered on dev. `Channel::current()` is compile-time, so the
@@ -200,6 +201,8 @@ pub fn run() {
             voice::commands::voice_save_key,
             voice::commands::voice_clear_key,
             fs::fs_read_dir,
+            fs::fs_watch,
+            fs::fs_unwatch,
             fs::fs_read_file,
             fs::fs_write_file,
             fs::fs_create_file,

@@ -178,6 +178,12 @@ export function createCodeEditorSlice(
     },
 
     closeEditorTab: (path) => {
+      // WHY timer clear: the pending autosave targets whatever is active when
+      // it fires — a closed tab must not trigger a save of its successor.
+      if (get().activeEditorPath === path && editorAutoSaveTimer) {
+        clearTimeout(editorAutoSaveTimer);
+        editorAutoSaveTimer = null;
+      }
       set((state) => {
         const idx = state.editorTabs.findIndex((t) => t.path === path);
         if (idx === -1) return state;
@@ -234,6 +240,11 @@ export function createCodeEditorSlice(
       if (!activeTab) return;
 
       await writeFile(activeTab.path, activeTab.content);
+      // WHY timer clear: the save this timer scheduled just ran.
+      if (editorAutoSaveTimer) {
+        clearTimeout(editorAutoSaveTimer);
+        editorAutoSaveTimer = null;
+      }
       set((state) => ({
         editorTabs: state.editorTabs.map((t) =>
           t.path === activeEditorPath

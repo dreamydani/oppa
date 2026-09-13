@@ -48,6 +48,11 @@ export function clearDirtyScrollback(id: string): void {
   dirtyScrollbackIds.delete(id);
 }
 
+// Parked-tab reveals: the disk scrollback is already staged in
+// restoredScrollbacks, so the attach snapshot (viewport-only) must not
+// clobber the full history the remount replays.
+export const revealRestoreIds = new Set<string>();
+
 export type SessionStatus =
   | "sleeping"
   | "spawning"
@@ -140,6 +145,18 @@ export function createSessionsSlice(
       }),
 
     cacheScrollback: (id, buffer) => {
+      // Empty buffer means "xterm owns it now" (mount replay): drop the store
+      // duplicate without re-marking dirty — no disk write needed.
+      if (!buffer) {
+        set((state) => {
+          if (!(id in state.cachedScrollbacks)) return state;
+          const cachedScrollbacks = { ...state.cachedScrollbacks };
+          delete cachedScrollbacks[id];
+          return { cachedScrollbacks };
+        });
+        clearDirtyScrollback(id);
+        return;
+      }
       markScrollbackDirty(id);
       set((state) => ({
         cachedScrollbacks: {
@@ -195,7 +212,7 @@ export function createSessionsSlice(
 
         const isColdRestored = (!isWarm || isNew) && Boolean(coldScrollback);
 
-        if (!isNew && snapshot) {
+        if (!isNew && snapshot && !revealRestoreIds.has(id)) {
           set((state) => ({
             restoredScrollbacks: {
               ...state.restoredScrollbacks,

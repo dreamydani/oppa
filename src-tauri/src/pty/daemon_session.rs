@@ -577,13 +577,47 @@ impl DaemonSession {
     /// the shell's input queue is live are buffered and flushed in order
     /// behind the launch command once the input gate opens.
     pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
+        // Bounded pre-gate buffer (256KB): typing during shell init is small;
+        // a larger flood means the gate is wedged, so flush early (launch
+        // line + buffered keystrokes, then this write) instead of growing
+        // unbounded. No bytes are ever dropped — only the hold is bounded.
+        const EARLY_INPUT_CAP_BYTES: usize = 256 * 1024;
         let mut buffered = self.early_input.lock();
         if self.input_flushed.load(Ordering::SeqCst) {
             drop(buffered);
             return self.writer.lock().write_all(data);
         }
+        if buffered.len().saturating_add(data.len()) > EARLY_INPUT_CAP_BYTES {
+            self.flush_early_input_locked(&mut buffered);
+            drop(buffered);
+            return self.writer.lock().write_all(data);
+        }
         buffered.extend_from_slice(data);
         Ok(())
+    }
+
+    /// Flush the pre-gate buffer while holding its lock: mark the gate open
+    /// and write the launch line + buffered keystrokes in order. Same lock
+    /// ordering as the gatekeeper drain, so post-flush writes always land
+    /// after and nothing stranded in the buffer is ever skipped.
+    fn flush_early_input_locked(&self, buffered: &mut Vec<u8>) {
+        if self.input_flushed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let mut payload = Vec::new();
+        if let Some(cmd) = self.initial_command.as_deref() {
+            payload.extend_from_slice(format!("{cmd}\r").as_bytes());
+        }
+        payload.append(buffered);
+        if !payload.is_empty() {
+            let _ = self.writer.lock().write_all(&payload);
+        }
+        self.initial_command_written.store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub fn early_input_len_for_tests(&self) -> usize {
+        self.early_input.lock().len()
     }
 
     /// Resize the PTY and underlying virtual terminal mirror.
@@ -2054,6 +2088,67 @@ mod tests {
             "expected probe in screen text: {text:?}"
         );
         assert!(!text.contains('\x1b'), "screen text must be plain: {text:?}");
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_early_input_buffers_typing_below_cap() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "early-input-cap".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell for early input test");
+
+        // Small pre-gate writes must stay buffered, not pass through. If the
+        // gatekeeper already opened (fast boot won the race) the write went
+        // straight through — also fine; the flood test covers the cap.
+        session.write(b"echo a").expect("write below cap");
+        if !session.input_flushed.load(Ordering::SeqCst) {
+            assert!(
+                session.early_input_len_for_tests() > 0,
+                "pre-gate keystrokes stay buffered"
+            );
+        }
+        let _ = session.kill();
+    }
+
+    #[tokio::test]
+    async fn test_early_input_flood_flushes_instead_of_growing() {
+        let sh = test_sh_path();
+        let session = DaemonSession::spawn_with_args(
+            "early-input-flood".into(),
+            &sh,
+            &[],
+            None,
+            80,
+            24,
+            None,
+            &[],
+        )
+        .expect("spawn shell for flood test");
+
+        // A flood larger than the 256KB cap must flush the gate instead of
+        // buffering forever: buffer ends empty and the gate is marked open
+        // so later writes pass straight through.
+        let chunk = [b'x'; 64 * 1024];
+        for _ in 0..8 {
+            session.write(&chunk).expect("flood write");
+        }
+        assert!(
+            session.early_input_len_for_tests() == 0,
+            "flood must not sit in the pre-gate buffer"
+        );
+        assert!(
+            session.input_flushed.load(Ordering::SeqCst),
+            "flood must open the gate"
+        );
         let _ = session.kill();
     }
 }

@@ -193,6 +193,15 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
   }, [detectedPorts, navigateBrowser, setAppMode]);
 
   // Pointer drag on empty header middle area
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  // WHY effect cleanup: unmount mid-drag (tab close) removes the window
+  // pointermove/up/cancel listeners owned by the drag closure.
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
   const handleDragPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
@@ -234,6 +243,7 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       };
 
       const cleanup = () => {
+        dragCleanupRef.current = null;
         try {
           dragZoneEl.releasePointerCapture(pointerId);
         } catch {}
@@ -267,6 +277,12 @@ export function TerminalPaneHeader({ id, path, onClear }: TerminalPaneHeaderProp
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onCancel);
+      // WHY ref handoff: unmount mid-drag runs the effect cleanup above.
+      dragCleanupRef.current = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+      };
     },
     [focusPane, id, movePane, path]
   );

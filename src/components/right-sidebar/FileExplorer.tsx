@@ -1,5 +1,14 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { Folder, FolderOpen, File, ChevronRight, ChevronDown } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  Folder,
+  FolderOpen,
+  ChevronRight,
+  ChevronDown,
+  FilePlus,
+  FolderPlus,
+  RefreshCw,
+  FoldVertical,
+} from "lucide-react";
 import { useTerminalStore } from "../../store/terminalStore";
 import {
   readDir,
@@ -7,9 +16,14 @@ import {
   createDir,
   detectEditors,
   openWith,
+  watchDir,
+  unwatchDir,
+  onFsChange,
   FileEntry,
+  FsChangedPayload,
 } from "../../lib/fs/transport";
 import { FileContextMenu, FileContextMenuState } from "./FileContextMenu";
+import { getFileVisual, getFolderColor, gitLetterClass, type GitLetter } from "./fileIcons";
 
 interface FileExplorerProps {
   refreshKey?: number;
@@ -23,6 +37,8 @@ interface TreeNodeProps {
   activeEditorPath: string | null;
   selectedRowPath: string | null;
   creation: CreationState | null;
+  gitLetterByPath: Map<string, GitLetter>;
+  dirtyDirs: Set<string>;
   renderNewNodeInput: (depth: number) => React.ReactNode;
   onToggleDir: (dirPath: string) => void;
   onOpenFile: (filePath: string) => void;
@@ -34,10 +50,28 @@ interface TreeNodeProps {
 // behind a "show more" toggle instead of virtualizing the whole tree.
 const MAX_VISIBLE_CHILDREN = 200;
 
+// Watcher events burst on bulk ops (git checkout, npm install); one refresh
+// per burst keeps the tree live without thrashing readDir.
+const FS_DEBOUNCE_MS = 200;
+
 // Windows cwds use backslashes; keep new-child paths consistent with the parent
 function joinChildPath(parentDir: string, name: string): string {
   const sep = parentDir.includes("\\") ? "\\" : "/";
   return /[\\/]$/.test(parentDir) ? `${parentDir}${name}` : `${parentDir}${sep}${name}`;
+}
+
+function parentDirOf(p: string): string {
+  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return idx === -1 ? p : p.slice(0, idx) || p.slice(0, 1);
+}
+
+function baseNameOf(p: string): string {
+  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return idx === -1 ? p : p.slice(idx + 1) || p;
+}
+
+function normalizeSlash(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
 type CreationKind = "file" | "dir";
@@ -55,6 +89,8 @@ function FileTreeNode({
   activeEditorPath,
   selectedRowPath,
   creation,
+  gitLetterByPath,
+  dirtyDirs,
   renderNewNodeInput,
   onToggleDir,
   onOpenFile,
@@ -70,6 +106,9 @@ function FileTreeNode({
   const visibleChildren = capped
     ? children.slice(0, MAX_VISIBLE_CHILDREN)
     : children;
+
+  const gitLetter = !entry.is_dir ? gitLetterByPath.get(normalizeSlash(entry.path)) : undefined;
+  const folderDirty = entry.is_dir && dirtyDirs.has(normalizeSlash(entry.path));
 
   return (
     <div className="file-tree-node">
@@ -94,14 +133,30 @@ function FileTreeNode({
         </span>
         <span className="file-tree-icon">
           {entry.is_dir ? (
-            isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />
+            isExpanded ? (
+              <FolderOpen size={14} style={{ color: getFolderColor(entry.name) }} />
+            ) : (
+              <Folder size={14} style={{ color: getFolderColor(entry.name) }} />
+            )
           ) : (
-            <File size={14} />
+            (() => {
+              const { Icon, color } = getFileVisual(entry.name);
+              return <Icon size={14} style={{ color }} />;
+            })()
           )}
         </span>
-        <span className="file-tree-name" title={entry.name}>
+        <span
+          className={`file-tree-name${gitLetter ? ` explorer-git-${gitLetter.toLowerCase()}` : ""}`}
+          title={entry.name}
+        >
           {entry.name}
         </span>
+        {gitLetter && (
+          <span className={`git-badge ${gitLetterClass(gitLetter)} explorer-git-badge`}>
+            {gitLetter}
+          </span>
+        )}
+        {folderDirty && <span className="explorer-dirty-dot" aria-hidden="true" />}
       </div>
 
       {entry.is_dir && isExpanded && (
@@ -116,6 +171,8 @@ function FileTreeNode({
               activeEditorPath={activeEditorPath}
               selectedRowPath={selectedRowPath}
               creation={creation}
+              gitLetterByPath={gitLetterByPath}
+              dirtyDirs={dirtyDirs}
               renderNewNodeInput={renderNewNodeInput}
               onToggleDir={onToggleDir}
               onOpenFile={onOpenFile}
@@ -162,7 +219,11 @@ function NewNodeInput({
   return (
     <div className="file-tree-item file-tree-new-row" style={{ paddingLeft: `${depth * 14 + 8}px` }}>
       <span className="file-tree-icon">
-        {kind === "file" ? <File size={14} /> : <Folder size={14} />}
+        {(() => {
+          const { Icon, color } =
+            kind === "file" ? getFileVisual(value || "new") : { Icon: Folder, color: getFolderColor(value || "new") };
+          return <Icon size={14} style={{ color }} />;
+        })()}
       </span>
       <input
         autoFocus
@@ -186,6 +247,8 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
   const activeEditorPath = useTerminalStore((s) => s.activeEditorPath);
   const openFileInEditor = useTerminalStore((s) => s.openFileInEditor);
   const setAppMode = useTerminalStore((s) => s.setAppMode);
+  const gitStatus = useTerminalStore((s) => s.gitStatus);
+  const refreshGitStatus = useTerminalStore((s) => s.refreshGitStatus);
 
   // Use active session cwd or fallback to any session cwd
   const cwd = activeCwd || Object.values(sessions).find((s) => Boolean(s?.cwd))?.cwd;
@@ -203,8 +266,15 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
   const [creationName, setCreationName] = useState("");
   const [creationError, setCreationError] = useState<string | null>(null);
 
+  // Tracks native watchers so collapse/cwd-switch releases handles.
+  const watchedRef = useRef<Set<string>>(new Set());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDirsRef = useRef<Set<string>>(new Set());
+  const stateRef = useRef({ cwd, expandedPaths, refreshGitStatus });
+  stateRef.current = { cwd, expandedPaths, refreshGitStatus };
+
   useEffect(() => {
-    void detectEditors().then(setEditors);
+    void detectEditors().then(setEditors).catch(() => {});
   }, []);
 
   const handleOpenFile = useCallback(
@@ -257,8 +327,158 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
     [cwd]
   );
 
+  const safeWatch = useCallback(async (dir: string) => {
+    if (watchedRef.current.has(dir)) return;
+    try {
+      await watchDir(dir);
+      watchedRef.current.add(dir);
+    } catch {}
+  }, []);
+
+  const safeUnwatch = useCallback(async (dir: string) => {
+    if (!watchedRef.current.has(dir)) return;
+    try {
+      await unwatchDir(dir);
+    } catch {}
+    watchedRef.current.delete(dir);
+  }, []);
+
+  // Watch root; releases the old root on cwd switch/unmount.
+  useEffect(() => {
+    if (!cwd) return;
+    void safeWatch(cwd);
+    const root = cwd;
+    return () => {
+      void safeUnwatch(root);
+    };
+  }, [cwd, safeWatch, safeUnwatch]);
+
+  // Watch every expanded dir; unwatch on collapse.
+  useEffect(() => {
+    for (const dir of expandedPaths) void safeWatch(dir);
+    for (const watched of [...watchedRef.current]) {
+      if (watched !== cwd && !expandedPaths.has(watched)) void safeUnwatch(watched);
+    }
+  }, [expandedPaths, cwd, safeWatch, safeUnwatch]);
+
+  const flushPendingDirs = useCallback(async () => {
+    const dirs = [...pendingDirsRef.current];
+    pendingDirsRef.current.clear();
+    if (dirs.length === 0) return;
+    const { cwd: liveCwd, expandedPaths: liveExpanded, refreshGitStatus: liveGit } =
+      stateRef.current;
+    await Promise.all(
+      dirs.map(async (dir) => {
+        if (dir !== liveCwd && !liveExpanded.has(dir)) return;
+        try {
+          const entries = await readDir(dir);
+          if (dir === liveCwd) setRootEntries(entries);
+          else setDirChildren((prev) => ({ ...prev, [dir]: entries }));
+        } catch {}
+      })
+    );
+    // New untracked files never fire git-changed; piggyback the fs burst.
+    if (liveCwd) void liveGit(liveCwd).catch(() => {});
+  }, []);
+
+  const queueFsRefresh = useCallback(
+    (payload: FsChangedPayload) => {
+      const { cwd: liveCwd } = stateRef.current;
+      if (!liveCwd) return;
+      const dir = payload.dir || liveCwd;
+      pendingDirsRef.current.add(dir);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => void flushPendingDirs(), FS_DEBOUNCE_MS);
+    },
+    [flushPendingDirs]
+  );
+
+  // Live watcher subscription; tolerates the vitest mock lacking it.
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const maybeListen = onFsChange as unknown as
+          | ((cb: (p: FsChangedPayload) => void) => Promise<unknown>)
+          | undefined;
+        if (typeof maybeListen !== "function") return;
+        const unlisten = (await maybeListen(queueFsRefresh)) as unknown;
+        if (cancelled) {
+          if (typeof unlisten === "function") (unlisten as () => void)();
+          return;
+        }
+        if (typeof unlisten === "function") dispose = unlisten as () => void;
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      try {
+        dispose?.();
+      } catch {}
+    };
+  }, [queueFsRefresh]);
+
+  // Focus return catches external editors that wrote while we were hidden.
+  useEffect(() => {
+    const onFocus = () => void flushPendingDirs();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        const { cwd: liveCwd, expandedPaths: liveExpanded } = stateRef.current;
+        if (liveCwd) pendingDirsRef.current.add(liveCwd);
+        for (const dir of liveExpanded) pendingDirsRef.current.add(dir);
+        void flushPendingDirs();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [flushPendingDirs]);
+
+  // Repo-relative sc_status paths joined onto cwd for O(1) row lookup.
+  const { gitLetterByPath, dirtyDirs } = useMemo(() => {
+    const letters = new Map<string, GitLetter>();
+    const dirty = new Set<string>();
+    if (!cwd || !gitStatus) return { gitLetterByPath: letters, dirtyDirs: dirty };
+    const root = normalizeSlash(cwd);
+    for (const entry of gitStatus.entries) {
+      const rel = entry.path.replace(/\\/g, "/").replace(/^\/+/, "");
+      const abs = `${root}/${rel}`;
+      let letter: GitLetter;
+      switch (entry.area) {
+        case "untracked":
+          letter = "U";
+          break;
+        case "conflict":
+          letter = "C";
+          break;
+        case "staged":
+          letter = "A";
+          break;
+        default:
+          letter = "M";
+      }
+      letters.set(abs, letter);
+      // Propagate dirtiness to every ancestor folder for the gutter dot.
+      const parts = rel.split("/").filter(Boolean);
+      parts.pop();
+      let acc = root;
+      dirty.add(acc);
+      for (const part of parts) {
+        acc = `${acc}/${part}`;
+        dirty.add(acc);
+      }
+    }
+    return { gitLetterByPath: letters, dirtyDirs: dirty };
+  }, [cwd, gitStatus]);
+
   const handleToggleDir = useCallback(
     async (dirPath: string) => {
+      const collapsing = expandedPaths.has(dirPath);
       setExpandedPaths((prev) => {
         const next = new Set(prev);
         if (next.has(dirPath)) {
@@ -269,17 +489,44 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
         return next;
       });
 
-      if (!dirChildren[dirPath]) {
-        try {
-          const subEntries = await readDir(dirPath);
-          setDirChildren((prev) => ({ ...prev, [dirPath]: subEntries }));
-        } catch {
-          setDirChildren((prev) => ({ ...prev, [dirPath]: [] }));
-        }
+      if (collapsing) {
+        void safeUnwatch(dirPath);
+        return;
       }
+      // Always re-read on expand so reopened folders never serve stale cache.
+      try {
+        const subEntries = await readDir(dirPath);
+        setDirChildren((prev) => ({ ...prev, [dirPath]: subEntries }));
+      } catch {
+        setDirChildren((prev) => ({ ...prev, [dirPath]: [] }));
+      }
+      void safeWatch(dirPath);
     },
-    [dirChildren]
+    [expandedPaths, safeUnwatch, safeWatch]
   );
+
+  const handleCollapseAll = useCallback(() => {
+    for (const watched of [...watchedRef.current]) {
+      if (watched !== cwd) void safeUnwatch(watched);
+    }
+    setExpandedPaths(new Set());
+  }, [cwd, safeUnwatch]);
+
+  const handleRefreshAll = useCallback(async () => {
+    if (!cwd) return;
+    try {
+      setRootEntries(await readDir(cwd));
+    } catch {}
+    await Promise.all(
+      [...expandedPaths].map(async (dir) => {
+        try {
+          const entries = await readDir(dir);
+          setDirChildren((prev) => ({ ...prev, [dir]: entries }));
+        } catch {}
+      })
+    );
+    void refreshGitStatus(cwd).catch(() => {});
+  }, [cwd, expandedPaths, refreshGitStatus]);
 
   const closeMenu = useCallback(() => {
     setMenu(null);
@@ -305,17 +552,43 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
   const ensureDirOpen = useCallback(
     async (dirPath: string) => {
       setExpandedPaths((prev) => new Set(prev).add(dirPath));
-      if (!dirChildren[dirPath]) {
-        try {
-          const subEntries = await readDir(dirPath);
-          setDirChildren((prev) => ({ ...prev, [dirPath]: subEntries }));
-        } catch {
-          setDirChildren((prev) => ({ ...prev, [dirPath]: [] }));
-        }
+      try {
+        const subEntries = await readDir(dirPath);
+        setDirChildren((prev) => ({ ...prev, [dirPath]: subEntries }));
+      } catch {
+        setDirChildren((prev) => ({ ...prev, [dirPath]: [] }));
       }
+      void safeWatch(dirPath);
     },
-    [dirChildren]
+    [safeWatch]
   );
+
+  const findEntry = useCallback(
+    (path: string | null): FileEntry | null => {
+      if (!path) return null;
+      const rootHit = rootEntries.find((e) => e.path === path) ?? null;
+      if (rootHit) return rootHit;
+      for (const list of Object.values(dirChildren)) {
+        const hit = list.find((e) => e.path === path);
+        if (hit) return hit;
+      }
+      return null;
+    },
+    [rootEntries, dirChildren]
+  );
+
+  // VSCode target rule: selected folder itself, selected file's parent,
+  // else the open editor's parent, else the workspace root.
+  const resolveTargetDir = useCallback((): string | null => {
+    if (!cwd) return null;
+    const selected = findEntry(selectedRowPath);
+    if (selected) {
+      if (selected.is_dir) return selected.path;
+      return parentDirOf(selected.path);
+    }
+    if (activeEditorPath) return parentDirOf(activeEditorPath);
+    return cwd;
+  }, [cwd, selectedRowPath, activeEditorPath, findEntry]);
 
   const beginCreation = useCallback(
     (kind: CreationKind, parentDir: string) => {
@@ -358,7 +631,9 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
     setCreation(null);
     setSelectedRowPath(targetPath);
     await refreshDir(creation.parentDir);
-  }, [creation, creationName, dirChildren, cwd, rootEntries, refreshDir]);
+    if (creation.kind === "file") handleOpenFile(targetPath);
+    else void safeWatch(targetPath);
+  }, [creation, creationName, dirChildren, cwd, rootEntries, refreshDir, handleOpenFile, safeWatch]);
 
   const handleCreationKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -398,12 +673,61 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
     return <div className="empty-state">{error}</div>;
   }
 
-  if (rootEntries.length === 0) {
+  if (rootEntries.length === 0 && !creation) {
     return <div className="empty-state">Empty directory</div>;
   }
 
   return (
     <div className="file-explorer" onContextMenu={handleContextMenuBlank}>
+      <div className="explorer-header" role="toolbar" aria-label="Explorer actions">
+        <span className="explorer-header-title" title={cwd}>
+          {baseNameOf(cwd)}
+        </span>
+        <span className="explorer-header-actions">
+          <button
+            type="button"
+            className="explorer-header-btn"
+            title="New File"
+            aria-label="New File"
+            onClick={() => {
+              const target = resolveTargetDir();
+              if (target) beginCreation("file", target);
+            }}
+          >
+            <FilePlus size={14} />
+          </button>
+          <button
+            type="button"
+            className="explorer-header-btn"
+            title="New Folder"
+            aria-label="New Folder"
+            onClick={() => {
+              const target = resolveTargetDir();
+              if (target) beginCreation("dir", target);
+            }}
+          >
+            <FolderPlus size={14} />
+          </button>
+          <button
+            type="button"
+            className="explorer-header-btn"
+            title="Refresh Explorer"
+            aria-label="Refresh Explorer"
+            onClick={() => void handleRefreshAll()}
+          >
+            <RefreshCw size={13} />
+          </button>
+          <button
+            type="button"
+            className="explorer-header-btn"
+            title="Collapse All"
+            aria-label="Collapse All"
+            onClick={handleCollapseAll}
+          >
+            <FoldVertical size={14} />
+          </button>
+        </span>
+      </div>
       <div className="file-tree" role="tree">
         {rootEntries.map((entry) => (
           <FileTreeNode
@@ -415,6 +739,8 @@ export function FileExplorer({ refreshKey = 0 }: FileExplorerProps): React.React
             activeEditorPath={activeEditorPath}
             selectedRowPath={selectedRowPath}
             creation={creation}
+            gitLetterByPath={gitLetterByPath}
+            dirtyDirs={dirtyDirs}
             renderNewNodeInput={renderCreationRow}
             onToggleDir={handleToggleDir}
             onOpenFile={handleOpenFile}
