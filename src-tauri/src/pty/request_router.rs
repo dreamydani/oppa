@@ -286,6 +286,13 @@ impl DaemonServer {
                     // Kill is fire-and-forget for Exit delivery: the watchdog owns
                     // the real-code Exit, so callers must not wait on Exit after Kill.
                     let _ = session.kill();
+                    // WHY daemon-side delete: killed panes never reattach, so
+                    // their .json must go here (GUI delete covers clean closes,
+                    // this covers crashes; idempotent either way).
+                    if let Some(dir) = self.snapshot_dir.clone() {
+                        let _ = SnapshotStorage::new(dir).delete(&session_id);
+                    }
+                    Self::release_resume_claim(&self.resumed_agent_ids, &session);
                     DaemonResponse::Ok
                 } else {
                     DaemonResponse::Error(format!("session {session_id} not found"))
@@ -991,6 +998,96 @@ mod tests {
             }
             other => panic!("expected too-old error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn kill_deletes_session_snapshot_file() {
+        // Killed panes never reattach: their .json must not pile up on disk
+        // (fresh-id churn was ~500KB per id, forever).
+        let temp = std::env::temp_dir().join(format!("oppa_kill_snap_{}", std::process::id()));
+        let server = DaemonServer::with_snapshot_storage(temp.clone());
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "kill-snap-1".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+            initial_command: None,
+        });
+        assert!(matches!(resp, DaemonResponse::SessionAttached(_)));
+        let storage = SnapshotStorage::new(temp.clone());
+        storage
+            .save_snapshot(&crate::pty::snapshot::SessionSnapshot {
+                session_id: "kill-snap-1".into(),
+                cwd: String::new(),
+                title: None,
+                cols: 80,
+                rows: 24,
+                persona_id: None,
+                scrollback: "hi".into(),
+                timestamp: 0,
+                foreground_command: None,
+                agent_session: None,
+                worktree_id: None,
+                agent_status: None,
+                title_pinned: false,
+                topic_set: false,
+                idle_title: None,
+            })
+            .expect("seed snapshot");
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "kill-snap-1".into()
+            }),
+            DaemonResponse::Ok
+        );
+        assert_eq!(storage.load_snapshot("kill-snap-1").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn kill_releases_resumed_conversation_claim() {
+        // The one-pane-per-conversation claim must die with its pane, or the
+        // set grows ~100B per conversation for the daemon's whole lifetime.
+        let server = DaemonServer::new();
+        server.resumed_agent_ids.lock().insert("conv-1".into());
+        server.resumed_agent_ids.lock().insert("conv-2".into());
+        let resp = server.handle_request(DaemonRequest::CreateOrAttach {
+            session_id: "k-claim".into(),
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            shell: None,
+            resume_agents: false,
+            worktree_id: None,
+            extra_env: Vec::new(),
+            initial_command: None,
+        });
+        assert!(matches!(resp, DaemonResponse::SessionAttached(_)));
+        server
+            .sessions
+            .lock()
+            .get("k-claim")
+            .unwrap()
+            .agent_session_ref
+            .lock()
+            .replace(crate::pty::snapshot::AgentSessionRef {
+                agent: "claude".into(),
+                id: "conv-1".into(),
+                transcript_path: None,
+            });
+        assert_eq!(
+            server.handle_request(DaemonRequest::Kill {
+                session_id: "k-claim".into()
+            }),
+            DaemonResponse::Ok
+        );
+        let claimed = server.resumed_agent_ids.lock();
+        assert!(!claimed.contains("conv-1"), "dead pane must release its claim");
+        assert!(claimed.contains("conv-2"), "live claims must survive");
     }
 
     #[test]

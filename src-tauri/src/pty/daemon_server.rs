@@ -272,6 +272,16 @@ pub(crate) fn check_request_line_len(len: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Rewire check for the per-connection subscriber map: a finished task means
+/// its session died (Kill drops all senders), so re-Creating that id must
+/// subscribe fresh instead of reusing the dead receiver.
+fn subscriber_needs_wire(
+    subs: &HashMap<String, tokio::task::JoinHandle<()>>,
+    session_id: &str,
+) -> bool {
+    subs.get(session_id).is_none_or(|h| h.is_finished())
+}
+
 /// Handle bidirectional JSON communication with a single connected client stream.
 pub async fn handle_client_stream<S>(
     stream: S,
@@ -378,7 +388,9 @@ where
 
                         // If CreateOrAttach succeeded, wire up subscriber task if not already streaming to this client
                         if let Some(session_id) = session_to_sub {
-                            if matches!(resp, DaemonResponse::SessionAttached(_)) && !subscribed_sessions.contains_key(&session_id) {
+                            if matches!(resp, DaemonResponse::SessionAttached(_))
+                                && subscriber_needs_wire(&subscribed_sessions, &session_id)
+                            {
                                 let session = server.sessions.lock().get(&session_id).cloned();
                                 if let Some(session) = session {
                                     let mut rx = session.subscribe();
@@ -534,6 +546,24 @@ mod tests {
         assert!(check_request_line_len(0).is_ok());
         assert!(check_request_line_len(8 * 1024 * 1024).is_ok());
         assert!(check_request_line_len(8 * 1024 * 1024 + 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn dead_subscriber_rewires_on_recreate() {
+        // Kill drops the session's senders so the per-conn task exits; a
+        // re-Created id must subscribe fresh or the pane stays dark.
+        let mut subs: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+        assert!(subscriber_needs_wire(&subs, "s1"));
+        let live = tokio::spawn(async { tokio::time::sleep(Duration::from_secs(60)).await });
+        subs.insert("s1".into(), live);
+        assert!(!subscriber_needs_wire(&subs, "s1"));
+        subs.remove("s1").unwrap().abort();
+        let done = tokio::spawn(async {});
+        tokio::task::yield_now().await;
+        assert!(done.is_finished());
+        subs.insert("s1".into(), done);
+        assert!(subscriber_needs_wire(&subs, "s1"));
+        subs.remove("s1").unwrap().abort();
     }
 
     // Raw-stream twin of RuntimeConnection::request: skip streamed event /
