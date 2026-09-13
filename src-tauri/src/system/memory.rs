@@ -1,7 +1,7 @@
 use crate::pty::manager::PtyManager;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use sysinfo::{Pid, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::State;
 
 // Orca parity: shared pages can appear in more than one subtree, so summed
@@ -101,18 +101,18 @@ fn collect_snapshot(
     live_ids: Vec<String>,
     daemon_pid: Option<u32>,
 ) -> SystemMemorySnapshot {
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    // WHY minimal refresh: new_all + refresh_all scanned everything twice per
+    // 2s poll; we only need RSS/cpu/parent links, never exe/cmd/environ.
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_memory().with_cpu(),
+    );
 
     let total = sys.total_memory();
     let available = sys.available_memory();
-    let used = total.saturating_sub(available);
-    let percent = if total > 0 {
-        used as f32 / total as f32 * 100.0
-    } else {
-        0.0
-    };
-
     let mut metrics: HashMap<u32, (f32, u64)> = HashMap::new();
     let mut parents: Vec<(u32, Option<u32>)> = Vec::new();
     for (pid, proc_) in sys.processes() {
@@ -121,11 +121,40 @@ fn collect_snapshot(
         parents.push((id, proc_.parent().map(Pid::as_u32)));
     }
     let child_map = build_child_map(&parents);
+    assemble_snapshot(
+        total,
+        available,
+        &child_map,
+        &metrics,
+        session_pids,
+        live_ids,
+        daemon_pid,
+        std::process::id(),
+    )
+}
+
+// WHY pure: unit-testable total math without touching the real process table.
+fn assemble_snapshot(
+    host_total: u64,
+    host_available: u64,
+    child_map: &HashMap<u32, Vec<u32>>,
+    metrics: &HashMap<u32, (f32, u64)>,
+    session_pids: Vec<(String, u32)>,
+    live_ids: Vec<String>,
+    daemon_pid: Option<u32>,
+    self_pid: u32,
+) -> SystemMemorySnapshot {
+    let used = host_total.saturating_sub(host_available);
+    let percent = if host_total > 0 {
+        used as f32 / host_total as f32 * 100.0
+    } else {
+        0.0
+    };
 
     let pid_by_id: HashMap<&str, u32> =
         session_pids.iter().map(|(id, pid)| (id.as_str(), *pid)).collect();
 
-    let app_sum = sum_subtree(std::process::id(), &child_map, &metrics);
+    let app_sum = sum_subtree(self_pid, child_map, metrics);
     let app = AppMemory {
         cpu: app_sum.map(|(c, _)| c),
         memory: app_sum.map(|(_, m)| m),
@@ -136,7 +165,7 @@ fn collect_snapshot(
     // restarted) yields None → "—", never a wrong row. Never double-count our
     // own RSS when the command runs inside the daemon under test.
     let daemon_sum = match daemon_pid {
-        Some(pid) if pid != std::process::id() => sum_subtree(pid, &child_map, &metrics),
+        Some(pid) if pid != self_pid => sum_subtree(pid, child_map, metrics),
         _ => None,
     };
     let daemon = AppMemory {
@@ -155,19 +184,13 @@ fn collect_snapshot(
     ids.sort();
 
     let mut sessions = Vec::with_capacity(ids.len());
-    let mut total_memory = app.memory.unwrap_or(0) + daemon.memory.unwrap_or(0);
-    let mut total_cpu = app.cpu.unwrap_or(0.0) + daemon.cpu.unwrap_or(0.0);
     for id in ids {
         let pid = pid_by_id.get(id.as_str()).copied().unwrap_or(0);
         let sum = if pid > 0 {
-            sum_subtree(pid, &child_map, &metrics)
+            sum_subtree(pid, child_map, metrics)
         } else {
             None
         };
-        if let Some((c, m)) = sum {
-            total_memory += m;
-            total_cpu += c;
-        }
         sessions.push(SessionMemory {
             session_id: id,
             pid,
@@ -176,13 +199,18 @@ fn collect_snapshot(
         });
     }
 
+    // WHY sessions excluded: they live inside the daemon subtree, adding them
+    // again counted every shell 2-3x in the footer Σ.
+    let total_memory = app.memory.unwrap_or(0) + daemon.memory.unwrap_or(0);
+    let total_cpu = app.cpu.unwrap_or(0.0) + daemon.cpu.unwrap_or(0.0);
+
     SystemMemorySnapshot {
         app,
         daemon,
         sessions,
         host: HostMemory {
-            total,
-            available,
+            total: host_total,
+            available: host_available,
             used,
             percent,
         },
@@ -265,5 +293,31 @@ mod tests {
         let map = build_child_map(&parents);
         let metrics: HashMap<u32, (f32, u64)> = [(1, (1.0, 10))].into_iter().collect();
         assert_eq!(sum_subtree(9999, &map, &metrics), None);
+    }
+
+    #[test]
+    fn total_excludes_session_subtrees() {
+        // Sessions live inside the daemon subtree: total must be app + daemon,
+        // session rows are drill-down only (sums 2-3x high before the fix).
+        let parents = vec![(100, None), (200, None), (300, Some(200))];
+        let map = build_child_map(&parents);
+        let metrics: HashMap<u32, (f32, u64)> =
+            [(100, (1.0, 10)), (200, (2.0, 60)), (300, (3.0, 40))]
+                .into_iter()
+                .collect();
+        let snap = assemble_snapshot(
+            1000,
+            400,
+            &map,
+            &metrics,
+            vec![("s1".into(), 300)],
+            vec!["s1".into()],
+            Some(200),
+            100,
+        );
+        assert_eq!(snap.app.memory, Some(10));
+        assert_eq!(snap.daemon.memory, Some(100));
+        assert_eq!(snap.total_memory, 110);
+        assert_eq!(snap.total_cpu, 6.0);
     }
 }
