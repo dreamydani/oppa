@@ -24,6 +24,9 @@ pub struct PtyManager {
     agent_status_cb: Mutex<Option<OnAgentStatus>>,
     custom_socket_path: Option<String>,
     next_id: AtomicU64,
+    // GUI-side cache of daemon session PIDs for the memory snapshot. The
+    // daemon owns the truth; a stale entry just yields null metrics (—).
+    session_pids: Mutex<std::collections::HashMap<String, u32>>,
 }
 
 impl Default for PtyManager {
@@ -45,6 +48,7 @@ impl PtyManager {
             agent_status_cb: Mutex::new(None),
             custom_socket_path: None,
             next_id: AtomicU64::new(0),
+            session_pids: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -61,7 +65,17 @@ impl PtyManager {
             agent_status_cb: Mutex::new(None),
             custom_socket_path: Some(socket_path.to_string()),
             next_id: AtomicU64::new(0),
+            session_pids: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// Snapshot of known (session_id, pid) pairs for memory attribution.
+    pub fn session_pids_snapshot(&self) -> Vec<(String, u32)> {
+        self.session_pids
+            .lock()
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
     }
 
     pub fn next_id(&self) -> String {
@@ -207,7 +221,7 @@ impl PtyManager {
         let client = self.get_client()?;
         client.register_callbacks(session_id, on_data, on_exit, on_cwd);
         let _ = client.create_session_channels(session_id);
-        client.create_or_attach(
+        let result = client.create_or_attach(
             session_id,
             cols,
             rows,
@@ -216,7 +230,15 @@ impl PtyManager {
             resume_agents,
             worktree_id,
             initial_command,
-        )
+        )?;
+        // WHY cache here: the daemon ListSessions reply carries ids only, so
+        // the memory snapshot would have nothing to attribute without this.
+        if result.pid > 0 {
+            self.session_pids
+                .lock()
+                .insert(session_id.to_string(), result.pid);
+        }
+        Ok(result)
     }
 
     /// Write input bytes to the session PTY.
@@ -263,9 +285,13 @@ impl PtyManager {
         let client = self
             .get_client()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        client
+        let result = client
             .kill(id)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        if result.is_ok() {
+            self.session_pids.lock().remove(id);
+        }
+        result
     }
 
     /// Acknowledge processed bytes to release backpressure.

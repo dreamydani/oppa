@@ -11,6 +11,7 @@ pub mod launch_mode;
 pub mod layout;
 pub mod pty;
 pub mod settings;
+pub mod system;
 pub mod updater;
 pub mod voice;
 mod workspace_presets;
@@ -127,6 +128,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             channel_commands::app_channel,
             updater::check_for_update,
+            system::memory::system_memory_snapshot,
             pty::commands::pty_spawn,
             pty::commands::pty_write,
             pty::commands::pty_resize,
