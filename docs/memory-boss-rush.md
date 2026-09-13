@@ -1,5 +1,13 @@
 # Memory Boss Rush — 975MB idle → <250MB total
 
+> LANDED (3 commits): footer Σ double-count fix + sysinfo trim
+> (`1d6cd74`); tmp orphans + Kill snapshot delete + dead-sub rewire +
+> resume-claim release (`18708d7`); history/port caps + `opt-level="z"`
+> (`e35f3d3`). Gates: `cargo test -p oppa --lib` 800 passed,
+> `pnpm vitest run` 1493 passed.
+> NEXT: lazy voice/JS load, thread merge, snapshot single-pass
+> (Boss 2 leftovers); xterm/iframe/editor caps need a product call.
+
 Target: 5 idle PowerShell panes, release build, 60s settle. `pnpm tauri dev` numbers don't count (debug + HMR inflate ~40-50%).
 Done already (`de44f26`): reaper, store prune, 5k/2.5k scrollback. Don't redo.
 
