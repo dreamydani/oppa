@@ -17,7 +17,9 @@ const HIGH_WATERMARK_BYTES: usize = 256 * 1024;
 const LOW_WATERMARK_BYTES: usize = 32 * 1024;
 const READ_CHUNK_SIZE: usize = 8 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-const SCREEN_SCROLLBACK_LINES: usize = 1000;
+// WHY 200 not 1000: the mirror only paints the viewport (vt100 visible_rows),
+// never its scrollback; frontend xterm owns real history. ~5x RAM per session.
+const SCREEN_SCROLLBACK_LINES: usize = 200;
 // TuiIdle: prompt-end (OSC133 D) followed by this much silence counts as idle…
 const TUI_IDLE_AFTER_PROMPT_MS: u64 = 800;
 // …otherwise plain output silence for this long is the fallback (cmd.exe etc.)
@@ -1075,6 +1077,14 @@ mod tests {
             "expected snapshot to contain 'snapshot_content_123', got: {snapshot}"
         );
         let _ = session.kill();
+    }
+
+    #[test]
+    fn daemon_mirror_scrollback_budget_stays_lean() {
+        // The mirror only ever paints the viewport (vt100 visible_rows); the
+        // real history lives in the frontend xterm. Tripwire against bumping
+        // this back up: ~2MB/session at 1000 lines, ~0.4MB at 200.
+        assert_eq!(super::SCREEN_SCROLLBACK_LINES, 200);
     }
 
     #[test]
